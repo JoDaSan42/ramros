@@ -16,8 +16,10 @@ const config: Config = {
   coverageDirectory: 'coverage/integration',
   coverageReporters: ['text', 'lcov'],
   moduleNameMapper: {
-    '^@/(.*)$': '<rootDir>/src/$1'
+    '^@/(.*)$': '<rootDir>/src/$1',
+    '^vscode$': '<rootDir>/src/__tests__/integration/__mocks__/vscode.js'
   },
+  setupFilesAfterEnv: ['<rootDir>/src/__tests__/integration/setup.ts'],
   testTimeout: 30000
 };
 

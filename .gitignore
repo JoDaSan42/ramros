@@ -27,8 +27,9 @@ npm-debug.log*
 
 # Test fixtures (generated)
 test-fixtures/*/build/
-test-fixtures/*/install/
 test-fixtures/*/log/
+test-fixtures/**/install/*
+!test-fixtures/**/install/setup.bash
 
 # Extension packages
 *.vsix
