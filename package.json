@@ -1,0 +1,97 @@
+{
+  "name": "ramros",
+  "displayName": "Really Awesome Management of ROS (RAMROS)",
+  "description": "VSCode Extension für ROS2 Workspace Management",
+  "version": "0.1.0",
+  "publisher": "ramros-team",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onView:ramrosExplorer"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "views": {
+      "ramrosExplorer": {
+        "id": "ramrosExplorer",
+        "name": "RAMROS Explorer",
+        "icon": "$(debug-start)"
+      }
+    },
+    "commands": [
+      {
+        "command": "ramros.refreshWorkspaces",
+        "title": "Refresh All Workspaces",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ramros.sourceWorkspace",
+        "title": "Source Workspace",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "ramros.buildWorkspace",
+        "title": "Build Workspace",
+        "icon": "$(tools)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "ramros.refreshWorkspaces",
+          "when": "view == ramrosExplorer",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "ramros.sourceWorkspace",
+          "when": "view == ramrosExplorer && viewItem == workspaceRoot",
+          "group": "inline"
+        },
+        {
+          "command": "ramros.buildWorkspace",
+          "when": "view == ramrosExplorer && viewItem == workspaceRoot"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "jest --config=jest.unit.config.ts",
+    "test:integration": "jest --config=jest.integration.config.ts",
+    "test:e2e": "node ./dist/test/e2e/runTest.js",
+    "test:coverage": "jest --coverage",
+    "test:watch": "jest --watch",
+    "prepare": "husky install"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/jest": "^29.5.0",
+    "@types/mocha": "^10.0.0",
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vscode/test-electron": "^2.3.0",
+    "eslint": "^8.55.0",
+    "glob": "^10.3.0",
+    "husky": "^8.0.0",
+    "jest": "^29.7.0",
+    "lint-staged": "^15.2.0",
+    "mocha": "^10.2.0",
+    "ts-jest": "^29.1.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.3.0"
+  }
+}

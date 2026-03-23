@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+build/
+install/
+
+# Coverage
+coverage/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test fixtures (generated)
+test-fixtures/*/build/
+test-fixtures/*/install/
+test-fixtures/*/log/
+
+# Extension packages
+*.vsix
+
+# Cache
+.cache/
+.parcel-cache/
