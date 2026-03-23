@@ -9,7 +9,7 @@ export class TerminalManager implements vscode.Disposable {
   async sourceWorkspace(workspace: WorkspaceInfo): Promise<void> {
     if (!workspace.installPath) {
       vscode.window.showWarningMessage(
-        `Workspace "${workspace.name}" wurde noch nicht gebaut. Bitte führen Sie zuerst "colcon build" aus.`
+        `Workspace "${workspace.name}" has not been built yet. Please run "colcon build" first.`
       );
       return;
     }
@@ -18,7 +18,7 @@ export class TerminalManager implements vscode.Disposable {
     
     if (!fs.existsSync(setupBashPath)) {
       vscode.window.showWarningMessage(
-        `Workspace "${workspace.name}" konnte nicht gesourced werden. setup.bash nicht gefunden.`
+        `Workspace "${workspace.name}" could not be sourced. setup.bash not found.`
       );
       return;
     }

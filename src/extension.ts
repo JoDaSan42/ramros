@@ -48,7 +48,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const workspaces = treeProvider.getWorkspaces();
       
       if (workspaces.length === 0) {
-        vscode.window.showWarningMessage('Keine ROS2 Workspaces gefunden');
+        vscode.window.showWarningMessage('No ROS2 workspaces found');
         return;
       }
       
@@ -59,7 +59,7 @@ export async function activate(context: vscode.ExtensionContext) {
       } else {
         const workspaceNames = workspaces.map(w => w.name);
         const selected = await vscode.window.showQuickPick(workspaceNames, {
-          placeHolder: 'Wähle einen Workspace zum Sourcen'
+          placeHolder: 'Select a workspace to source'
         });
         
         if (!selected) return;
@@ -74,7 +74,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const workspaces = treeProvider.getWorkspaces();
       
       if (workspaces.length === 0) {
-        vscode.window.showWarningMessage('Keine ROS2 Workspaces gefunden');
+        vscode.window.showWarningMessage('No ROS2 workspaces found');
         return;
       }
       
@@ -85,7 +85,7 @@ export async function activate(context: vscode.ExtensionContext) {
       } else {
         const workspaceNames = workspaces.map(w => w.name);
         const selected = await vscode.window.showQuickPick(workspaceNames, {
-          placeHolder: 'Wähle einen Workspace zum Bauen'
+          placeHolder: 'Select a workspace to build'
         });
         
         if (!selected) return;

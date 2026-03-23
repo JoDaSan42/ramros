@@ -45,17 +45,17 @@ export class WorkspaceDetector {
     const buildExists = info.buildPath !== null && fs.existsSync(info.buildPath.fsPath);
     
     if (!srcExists && !installExists) {
-      info.errors.push('Weder src/ noch install/ Ordner gefunden. Dies ist kein gültiger ROS2 Workspace.');
+      info.errors.push('Neither src/ nor install/ folder found. This is not a valid ROS2 workspace.');
       info.isValid = false;
       return;
     }
     
     if (!installExists && !buildExists) {
-      info.warnings.push('Workspace wurde noch nicht gebaut. Führen Sie "colcon build" aus.');
+      info.warnings.push('Workspace has not been built yet. Run "colcon build".');
     }
     
     if (info.rosDistribution === null) {
-      info.warnings.push('Keine ROS2 Installation für diesen Workspace gefunden.');
+      info.warnings.push('No ROS2 installation found for this workspace.');
     }
     
     info.isValid = true;
