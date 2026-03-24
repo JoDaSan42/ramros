@@ -70,6 +70,10 @@
           "command": "ramros.buildWorkspace",
           "when": "view == ramrosExplorer && viewItem == workspaceRoot",
           "group": "inline"
+        },
+        {
+          "command": "ramros.buildWorkspace",
+          "when": "view == ramrosExplorer && viewItem == workspaceRoot"
         }
       ]
     }
