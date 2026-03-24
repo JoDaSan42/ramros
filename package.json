@@ -13,17 +13,27 @@
     "Programming Languages"
   ],
   "activationEvents": [
-    "onView:ramrosExplorer",
-    "workspaceContains:**/setup.bash"
+    "onView:ramrosExplorer"
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ramros-container",
+          "title": "RAMROS",
+          "icon": "$(debug-start)"
+        }
+      ]
+    },
     "views": {
-      "ramrosExplorer": {
-        "id": "ramrosExplorer",
-        "name": "RAMROS Explorer",
-        "icon": "$(debug-start)"
-      }
+      "ramros-container": [
+        {
+          "id": "ramrosExplorer",
+          "name": "RAMROS Explorer",
+          "icon": "$(debug-start)"
+        }
+      ]
     },
     "commands": [
       {
