@@ -1,7 +1,7 @@
 {
   "name": "ramros",
   "displayName": "Really Awesome Management of ROS (RAMROS)",
-  "description": "VSCode Extension für ROS2 Workspace Management",
+  "description": "VSCode Extension for ROS2 Workspace Management",
   "version": "0.1.0",
   "publisher": "ramros-team",
   "license": "MIT",
@@ -13,7 +13,8 @@
     "Programming Languages"
   ],
   "activationEvents": [
-    "onView:ramrosExplorer"
+    "onView:ramrosExplorer",
+    "workspaceContains:**/setup.bash"
   ],
   "main": "./dist/extension.js",
   "contributes": {
