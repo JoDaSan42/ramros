@@ -25,7 +25,7 @@
         }
       }
     ],
-    "@typescript-eslint/semi": "warn",
+    "@typescript-eslint/semi": "off",
     "curly": "off",
     "eqeqeq": "warn",
     "no-throw-literal": "warn",
