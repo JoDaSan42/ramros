@@ -17,7 +17,7 @@ interface CacheStats {
 }
 
 export class CacheManager implements vscode.Disposable {
-  private readonly memoryCache = new Map<CacheKey, CacheEntry<any>>();
+  private readonly memoryCache = new Map<CacheKey, CacheEntry<unknown>>();
   private readonly DEFAULT_TTL = 5 * 60 * 1000;
   private readonly MAX_CACHE_SIZE = 1000;
   

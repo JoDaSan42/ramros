@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { WorkspaceInfo } from '../core/workspace-detector';
+import { WorkspaceInfo, WorkspaceDetector } from '../core/workspace-detector';
 import { DuplicatePackageDetector, PackageConflict } from '../core/duplicate-package-detector';
 import { TreeItemBase, WorkspaceRootItem, ConflictsItem } from './tree-items';
 
@@ -11,7 +11,7 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
   private conflicts: PackageConflict[] = [];
   
   constructor(
-    private readonly workspaceDetector: any,
+    private readonly workspaceDetector: WorkspaceDetector,
     private readonly duplicateDetector: DuplicatePackageDetector
   ) {}
   

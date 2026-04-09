@@ -41,14 +41,14 @@ export async function activate(context: vscode.ExtensionContext) {
     
     vscode.commands.registerCommand('ramros.refreshWorkspaces', async () => {
       await treeProvider.refresh();
-      vscode.window.showInformationMessage('Workspaces refreshed');
+      void vscode.window.showInformationMessage('Workspaces refreshed');
     }),
     
     vscode.commands.registerCommand('ramros.sourceWorkspace', async () => {
       const workspaces = treeProvider.getWorkspaces();
       
       if (workspaces.length === 0) {
-        vscode.window.showWarningMessage('No ROS2 workspaces found');
+        void vscode.window.showWarningMessage('No ROS2 workspaces found');
         return;
       }
       
@@ -74,7 +74,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const workspaces = treeProvider.getWorkspaces();
       
       if (workspaces.length === 0) {
-        vscode.window.showWarningMessage('No ROS2 workspaces found');
+        void vscode.window.showWarningMessage('No ROS2 workspaces found');
         return;
       }
       

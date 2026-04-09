@@ -1,4 +1,3 @@
-import * as path from 'path';
 import { describe, before, after, it } from 'mocha';
 import * as assert from 'assert';
 import * as vscode from 'vscode';
@@ -23,8 +22,8 @@ describe('RAMROS E2E Tests', () => {
     await waitForExtensionActivation();
   });
   
-  after(() => {
-    vscode.commands.executeCommand('workbench.action.closeAllEditors');
+  after(async () => {
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   });
   
   describe('Extension Activation', () => {
