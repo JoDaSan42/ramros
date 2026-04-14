@@ -26,10 +26,8 @@ export class WorkspaceDetector {
     const workspaces: WorkspaceInfo[] = [];
     
     for (const folder of workspaceFolders) {
-      const isRosWorkspace = await this.isRosWorkspace(folder.uri);
-      if (!isRosWorkspace) continue;
-      
       const workspaceInfo = await this.createWorkspaceInfo(folder.uri);
+      await this.validateWorkspace(workspaceInfo);
       workspaces.push(workspaceInfo);
     }
     
@@ -45,8 +43,8 @@ export class WorkspaceDetector {
     const buildExists = info.buildPath !== null && fs.existsSync(info.buildPath.fsPath);
     
     if (!srcExists && !installExists) {
-      info.errors.push('Neither src/ nor install/ folder found. This is not a valid ROS2 workspace.');
-      info.isValid = false;
+      info.warnings.push('Empty workspace. Create packages using "Create New Package" command.');
+      info.isValid = true;
       return;
     }
     
@@ -59,35 +57,6 @@ export class WorkspaceDetector {
     }
     
     info.isValid = true;
-  }
-  
-  async isRosWorkspace(uri: vscode.Uri): Promise<boolean> {
-    const srcPath = vscode.Uri.joinPath(uri, 'src');
-    const installPath = vscode.Uri.joinPath(uri, 'install');
-    
-    try {
-      const srcStat = await vscode.workspace.fs.stat(srcPath);
-      if (srcStat.type === vscode.FileType.Directory) {
-        return true;
-      }
-    } catch {
-      // src exists not
-    }
-    
-    try {
-      const setupBashPath = vscode.Uri.joinPath(installPath, 'setup.bash');
-      await vscode.workspace.fs.stat(setupBashPath);
-      return true;
-    } catch {
-      // install/setup.bash exists not
-    }
-    
-    const packageXmlExists = await this.hasPackageXml(uri);
-    if (packageXmlExists) {
-      return true;
-    }
-    
-    return false;
   }
   
   private async createWorkspaceInfo(uri: vscode.Uri): Promise<WorkspaceInfo> {

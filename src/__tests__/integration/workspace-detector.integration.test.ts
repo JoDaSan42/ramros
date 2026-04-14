@@ -59,12 +59,12 @@ describe('WorkspaceDetector Integration Tests', () => {
       expect(workspaces[0].installPath).not.toBeNull();
     });
 
-    it('skips non-ROS folders', async () => {
-      const invalidWorkspacePath = path.join(FIXTURES_ROOT, 'workspace-invalid');
+    it('detects empty folders as valid workspaces', async () => {
+      const emptyWorkspacePath = path.join(FIXTURES_ROOT, 'workspace-empty');
       
       const mockWorkspaceFolders = [{
-        uri: { fsPath: invalidWorkspacePath },
-        name: 'workspace-invalid',
+        uri: { fsPath: emptyWorkspacePath },
+        name: 'workspace-empty',
         index: 0
       }];
 
@@ -75,7 +75,9 @@ describe('WorkspaceDetector Integration Tests', () => {
 
       const workspaces = await detector.detectWorkspaces();
 
-      expect(workspaces).toHaveLength(0);
+      expect(workspaces).toHaveLength(1);
+      expect(workspaces[0].isValid).toBe(true);
+      expect(workspaces[0].warnings.some(w => w.includes('Empty workspace'))).toBe(true);
     });
 
     it('validates src folder presence', async () => {
@@ -165,13 +167,13 @@ describe('WorkspaceDetector Integration Tests', () => {
       expect(workspace.errors).toHaveLength(0);
     });
 
-    it('generates errors for invalid workspace', async () => {
-      const invalidWorkspacePath = path.join(FIXTURES_ROOT, 'workspace-invalid');
+    it('generates warnings for empty workspace', async () => {
+      const emptyWorkspacePath = path.join(FIXTURES_ROOT, 'workspace-empty');
       
       const workspace: WorkspaceInfo = {
-        id: invalidWorkspacePath,
-        name: 'workspace-invalid',
-        rootPath: { fsPath: invalidWorkspacePath } as any,
+        id: emptyWorkspacePath,
+        name: 'workspace-empty',
+        rootPath: { fsPath: emptyWorkspacePath } as any,
         srcPath: null,
         installPath: null,
         buildPath: null,
@@ -183,8 +185,9 @@ describe('WorkspaceDetector Integration Tests', () => {
 
       await detector.validateWorkspace(workspace);
 
-      expect(workspace.isValid).toBe(false);
-      expect(workspace.errors.length).toBeGreaterThan(0);
+      expect(workspace.isValid).toBe(true);
+      expect(workspace.warnings.length).toBeGreaterThan(0);
+      expect(workspace.warnings[0]).toContain('Empty workspace');
     });
 
     it('creates workspace info with all paths', async () => {

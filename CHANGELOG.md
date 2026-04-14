@@ -8,11 +8,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- Package creation wizard with template support
 - Launch configuration management for ROS2 nodes
 - Topic and service graph visualization
 - Parameter editor GUI
 - Log viewer with filtering
+
+## [2.0.0] - 2026-04-14
+
+### Added
+- **Package Creation Wizard**: Interactive UI for creating ROS2 packages
+  - Command: `RAMROS: Create New Package`
+  - Supports empty workspaces (with warning)
+  - Form validation for package names, dependencies, and interface definitions
+- **Package Templates**:
+  - `empty`: Minimal package structure
+  - `minimal-cpp`: C++ node with publisher example
+  - `minimal-python`: Python node with publisher example
+  - `standard`: Hybrid C++/Python package with both node types
+  - `interface`: Interface package for custom messages, services, and actions
+- **Interface Package Support**:
+  - Create custom message definitions (.msg files)
+  - Create custom service definitions (.srv files)
+  - Create custom action definitions (.action files)
+  - Automatic CMakeLists.txt configuration with `rosidl_generate_interfaces()`
+  - Automatic package.xml configuration with `rosidl_interface_packages` member group
+- **C++ Class Naming Convention**: Node classes use PascalCase based on package name
+- **Python Resource Folder**: Automatic creation of `resource/<package_name>` file for Python packages
+- **E2E Tests**: Comprehensive end-to-end tests for all package templates including interface packages
+
+### Changed
+- Updated ESLint to v8
+- Updated GitHub Actions to v5
+- Improved workspace detection to support empty workspaces
+
+### Technical Details
+- Test Coverage: 73 integration tests passing
+- All templates tested with colcon build verification
+
+## Version History
 
 ## [0.1.0] - 2026-03-23
 

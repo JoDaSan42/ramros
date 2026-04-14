@@ -4,6 +4,7 @@ A VSCode extension for managing ROS2 workspaces efficiently.
 
 ## Features
 
+- **Package Creation Wizard**: Create new ROS2 packages from templates (empty, minimal-cpp, minimal-python, standard)
 - **Multi-Workspace Support**: Manage unlimited ROS2 workspaces simultaneously
 - **Duplicate Package Detection**: Detect conflicts within and across workspaces
 - **Smart Caching**: TTL + LRU caching with file system watcher invalidation
@@ -47,9 +48,106 @@ Access commands from the tree view context menu or command palette (`Ctrl+Shift+
 
 | Command | Description |
 |---------|-------------|
+| `RAMROS: Create New Package` | Launch package creation wizard |
 | `RAMROS: Refresh All Workspaces` | Reload workspace detection |
 | `RAMROS: Source Workspace` | Open terminal with sourced ROS environment |
 | `RAMROS: Build Workspace` | Run `colcon build` in workspace |
+
+### Package Creation Wizard
+
+The wizard guides you through creating a new ROS2 package:
+
+1. **Open the wizard**: Click "Create New Package" in the RAMROS Explorer or run `RAMROS: Create New Package`
+2. **Enter package details**:
+   - Package name (must be unique, start with lowercase letter)
+   - Select template: `empty`, `minimal-cpp`, `minimal-python`, `standard`, or `interface`
+   - Description
+   - Author name and email
+   - License (Apache-2.0, MIT, BSD, GPL)
+   - Build type (`ament_cmake`, `ament_python`, `cmake`)
+   - Node name (for non-empty templates)
+   - Dependencies (comma-separated)
+3. **For interface packages**: Add message/service/action definitions
+4. **Package is created** in the `src/` directory of your workspace
+
+#### Available Templates
+
+| Template | Description | Files Created |
+|----------|-------------|---------------|
+| `empty` | Minimal package structure | `CMakeLists.txt`, `package.xml` |
+| `minimal-cpp` | C++ node with publisher | C++ node file, header, launch file |
+| `minimal-python` | Python node with publisher | Python node file, setup.py, launch file |
+| `standard` | Hybrid C++/Python package | Both C++ and Python nodes, CMakeLists, setup.py |
+| `interface` | Interface package for custom messages, services, actions | `msg/`, `srv/`, `action/` directories with interface files |
+
+#### Interface Packages
+
+Interface packages define custom ROS2 interfaces (messages, services, actions):
+
+**Creating a Message Package:**
+1. Select `interface` template
+2. Add dependencies (e.g., `std_msgs`, `geometry_msgs`)
+3. Add message definition:
+   - Name: `SensorData`
+   - Fields:
+     ```
+     int32 id
+     float64 value
+     string name
+     ```
+4. Result: Creates `msg/SensorData.msg` with proper CMakeLists.txt configuration
+
+**Creating a Service Package:**
+1. Select `interface` template
+2. Add service definition:
+   - Name: `ComputeSum`
+   - Fields:
+     ```
+     int32 a
+     int32 b
+     ---
+     int32 sum
+     ```
+3. Result: Creates `srv/ComputeSum.srv` with request/response sections
+
+**Creating an Action Package:**
+1. Select `interface` template
+2. Add action definition:
+   - Name: `NavigateToPose`
+   - Fields:
+     ```
+     geometry_msgs/PoseStamped pose
+     ---
+     duration elapsed_time
+     float64 distance_traveled
+     ---
+     bool success
+     string error_message
+     ```
+3. Result: Creates `action/NavigateToPose.action` with goal/feedback/result sections
+
+**Interface Package Structure:**
+```
+my_interfaces/
+├── CMakeLists.txt          # Configured with rosidl_generate_interfaces()
+├── package.xml             # Includes rosidl_interface_packages member group
+├── msg/                    # Custom message definitions
+│   └── SensorData.msg
+├── srv/                    # Custom service definitions
+│   └── ComputeSum.srv
+└── action/                 # Custom action definitions
+    └── NavigateToPose.action
+```
+
+**Building Interface Packages:**
+```bash
+cd /path/to/workspace
+source /opt/ros/<distro>/setup.bash
+colcon build
+source install/setup.bash
+```
+
+Your custom interfaces will be available as `<package_name>/msg/<MessageName>` in other packages.
 
 ### Duplicate Package Detection
 
@@ -146,7 +244,7 @@ src/
 
 ## Release Plan
 
-### Release 1.0 (Current) ✅
+### Release 1.0 ✅
 - [x] ROS2 Installation Detection
 - [x] Multi-Workspace Support  
 - [x] Duplicate Package Detection
@@ -156,12 +254,17 @@ src/
 - [x] Build Workspace Command
 - [x] Unit & Integration Tests
 
-### Future Releases (Planned)
-- Package creation wizard
-- Launch configuration management
-- Topic/service graph visualization
-- Parameter editor
-- Log viewer
+### Release 2.0 (In Progress) 🚧
+- [x] Package Creation Wizard
+  - [x] Empty template
+  - [x] Minimal C++ template
+  - [x] Minimal Python template
+  - [x] Standard hybrid template
+  - [x] Interface package template (messages, services, actions)
+- [ ] Launch Configuration Management
+- [ ] Topic/Service Graph Visualization (Cytoscape.js)
+- [ ] Parameter Editor
+- [ ] Log Viewer
 
 ## Contributing
 

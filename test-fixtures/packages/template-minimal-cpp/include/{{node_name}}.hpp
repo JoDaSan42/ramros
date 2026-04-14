@@ -1,0 +1,4 @@
+#ifndef {{HEADER_GUARD}}_NODE_HPP
+#define {{HEADER_GUARD}}_NODE_HPP
+
+#endif // {{HEADER_GUARD}}_NODE_HPP
