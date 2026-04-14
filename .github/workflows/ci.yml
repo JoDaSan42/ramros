@@ -35,7 +35,7 @@ jobs:
       - run: npm ci
       - run: npm run test:unit -- --coverage
       - name: Upload Coverage
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: ./coverage/unit/lcov.info
           fail_ci_if_error: false
@@ -73,7 +73,7 @@ jobs:
       - run: npx vsce package
         if: github.ref == 'refs/heads/main'
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ramros-extension-${{ github.ref_name }}
           path: '*.vsix'
@@ -85,9 +85,9 @@ jobs:
     if: github.ref == 'refs/heads/develop'
     environment: beta
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Download Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: ramros-extension-develop
       - name: Publish Beta to OpenVSX
@@ -104,13 +104,13 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Download Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: ramros-extension-main
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v5
         with:
           generate_release_notes: true
           files: '*.vsix'
