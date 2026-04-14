@@ -99,6 +99,33 @@ npm run compile
 ### Debugging
 Press `F5` in VSCode to launch the Extension Development Host.
 
+### Building a Release Package
+
+#### Local Build
+
+```bash
+# Compile the extension
+npm run compile
+
+# Package as .vsix file
+npx vsce package          # Production release
+npx vsce package --pre-release  # Pre-release/beta version
+```
+
+The `.vsix` file will be created in the project root.
+
+#### GitHub Actions (CI/CD)
+
+Pushing to main branch automatically:
+1. Runs all tests and linting
+2. Builds the extension
+3. Uploads the `.vsix` artifact
+
+To trigger a full release:
+1. Push changes to `main`
+2. Create a tag: `git tag v1.0.0 && git push origin v1.0.0`
+3. CI/CD will create a GitHub Release with the `.vsix` attached
+
 ## Architecture
 
 ```
