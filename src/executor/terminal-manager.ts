@@ -33,12 +33,12 @@ export class TerminalManager implements vscode.Disposable {
     }
     
     terminal = vscode.window.createTerminal({
-      name: terminalName,
-      shellArgs: ['-c', `source "${setupBashPath}" && exec bash`]
+      name: terminalName
     });
     
     this.terminals.set(workspace.id, terminal);
     terminal.show();
+    terminal.sendText(`source "${setupBashPath}"`);
   }
   
   async executeInTerminal(command: string, workspace: WorkspaceInfo): Promise<vscode.Terminal> {

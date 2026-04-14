@@ -54,6 +54,11 @@
         "command": "ramros.buildWorkspace",
         "title": "Build Workspace",
         "icon": "$(wrench)"
+      },
+      {
+        "command": "ramros.createPackage",
+        "title": "Create New Package",
+        "icon": "$(new-file)"
       }
     ],
     "menus": {
@@ -66,14 +71,27 @@
       ],
       "view/item/context": [
         {
+          "command": "ramros.createPackage",
+          "when": "view == ramrosExplorer && viewItem == workspaceRoot",
+          "group": "inline@1"
+        },
+        {
           "command": "ramros.sourceWorkspace",
           "when": "view == ramrosExplorer && viewItem == workspaceRoot",
-          "group": "inline"
+          "group": "inline@2"
         },
         {
           "command": "ramros.buildWorkspace",
           "when": "view == ramrosExplorer && viewItem == workspaceRoot",
-          "group": "inline"
+          "group": "inline@3"
+        },
+        {
+          "command": "ramros.createPackage",
+          "when": "view == ramrosExplorer && viewItem == workspaceRoot"
+        },
+        {
+          "command": "ramros.sourceWorkspace",
+          "when": "view == ramrosExplorer && viewItem == workspaceRoot"
         },
         {
           "command": "ramros.buildWorkspace",
