@@ -19,6 +19,7 @@ interface PackageConfig {
   nodeName?: string;
   dependencies: string[];
   interfaces?: InterfaceDefinition[];
+  includeTemplateNode?: boolean;
 }
 
 export class PackageCreator {
@@ -66,43 +67,236 @@ export class PackageCreator {
     const maintainerName = config.authorName || 'Developer';
 
     const depsForCommand = config.dependencies.filter(d => d !== 'rosidl_default_generators');
-    const args = [
-      'pkg', 'create',
-      '--package-format', '3',
-      '--description', config.description,
-      '--license', config.license,
-      '--build-type', config.buildType,
-      '--maintainer-email', maintainerEmail,
-      '--maintainer-name', maintainerName,
-      '--destination-directory', srcPath,
-      config.packageName,
-    ];
-
+    
+    const args = ['pkg', 'create', config.packageName];
+    
+    if (config.description) {
+      args.push('--description', `"${config.description}"`);
+    }
+    if (config.license) {
+      args.push('--license', `"${config.license}"`);
+    }
+    args.push('--build-type', config.buildType);
+    args.push('--maintainer-email', `"${maintainerEmail}"`);
+    args.push('--maintainer-name', `"${maintainerName}"`);
+    args.push('--destination-directory', `"${srcPath}"`);
+    
     if (depsForCommand.length > 0) {
       args.push('--dependencies', ...depsForCommand);
     }
 
     if (config.nodeName && config.template !== 'empty') {
-      args.push('--node-name', config.nodeName);
+      args.push('--node-name', `"${config.nodeName}"`);
     }
 
     try {
-      execSync(`ros2 ${args.join(' ')}`, { stdio: 'pipe' });
+      execSync(`source /opt/ros/humble/setup.bash && ros2 ${args.join(' ')}`, { stdio: 'pipe', shell: '/bin/bash' });
+      
+      if (config.nodeName && (config.template === 'minimal-python' || config.template === 'minimal-cpp' || config.template === 'standard')) {
+        const includeNode = config.includeTemplateNode ?? true;
+        
+        if (includeNode) {
+          await this.replaceWithTemplateNode(packagePath, config);
+          await this.writeLaunchFile(packagePath, config.packageName, config.nodeName);
+        } else {
+          await this.removeGeneratedNodeFiles(packagePath, config);
+        }
+      }
+      
+      return;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      if (message.includes('ros2') || message.includes('command not found')) {
-        await this.createPackageFromTemplate(workspaceRoot, config);
-        return;
-      }
       throw new Error(`Failed to create package: ${message}`);
     }
+  }
 
-    if (config.template !== 'empty' && config.nodeName) {
-      await this.addNodeFiles(packagePath, config);
+  private async replaceWithTemplateNode(packagePath: string, config: PackageConfig): Promise<void> {
+    const isCpp = config.template === 'minimal-cpp' || config.template === 'standard';
+    const isPython = config.template === 'minimal-python' || config.template === 'standard';
+    
+    const nodeName = config.nodeName || config.packageName;
+    
+    if (isCpp) {
+      await this.replaceWithCppTemplateNode(packagePath, config, nodeName);
     }
+    
+    if (isPython) {
+      await this.replaceWithPythonTemplateNode(packagePath, config, nodeName);
+    }
+  }
+  
+  private async replaceWithCppTemplateNode(packagePath: string, config: PackageConfig, nodeName: string): Promise<void> {
+    const cppClassName = this.toPascalCase(config.packageName) + 'Node';
+    
+    const cppSrcDir = path.join(packagePath, 'src');
+    const includeDir = path.join(packagePath, 'include', config.packageName);
+    
+    if (!fs.existsSync(cppSrcDir)) fs.mkdirSync(cppSrcDir, { recursive: true });
+    if (!fs.existsSync(includeDir)) fs.mkdirSync(includeDir, { recursive: true });
+    
+    const cppContent = `#include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/string.hpp"
 
-    if (config.interfaces && config.interfaces.length > 0) {
-      await this.addInterfaceFiles(packagePath, config);
+using namespace std::chrono_literals;
+
+class ${cppClassName} : public rclcpp::Node
+{
+public:
+  ${cppClassName}()
+  : Node("${nodeName}")
+  {
+    publisher_ = this->create_publisher<std_msgs::msg::String>("topic", 10);
+    timer_ = this->create_wall_timer(
+      500ms,
+      [this]() { this->timer_callback(); });
+  }
+
+private:
+  void timer_callback()
+  {
+    static int64_t count = 0;
+    auto message = std_msgs::msg::String();
+    message.data = "Hello World: " + std::to_string(++count);
+    RCLCPP_INFO(this->get_logger(), "Publishing: '%s'", message.data.c_str());
+    publisher_->publish(message);
+  }
+
+  rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher_;
+};
+
+int main(int argc, char * argv[])
+{
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<${cppClassName}>());
+  rclcpp::shutdown();
+  return 0;
+}
+`;
+    fs.writeFileSync(path.join(cppSrcDir, `${nodeName}.cpp`), cppContent);
+    
+    const headerGuard = config.packageName.toUpperCase().replace(/-/g, '_');
+    const hppContent = `#ifndef ${headerGuard}_NODE_HPP
+#define ${headerGuard}_NODE_HPP
+
+#endif // ${headerGuard}_NODE_HPP
+`;
+    fs.writeFileSync(path.join(includeDir, `${nodeName}.hpp`), hppContent);
+  }
+  
+  private async replaceWithPythonTemplateNode(packagePath: string, config: PackageConfig, nodeName: string): Promise<void> {
+    const pythonClassName = this.toPascalCase(config.packageName) + 'Node';
+    const pythonPackageDir = path.join(packagePath, config.packageName);
+    
+    const pyContent = `import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+
+
+class ${pythonClassName}(Node):
+
+    def __init__(self):
+        super().__init__('${nodeName}')
+        self.publisher_ = self.create_publisher(String, 'topic', 10)
+        timer_period = 0.5
+        self.timer = self.create_timer(timer_period, self.timer_callback)
+        self.i = 0
+
+    def timer_callback(self):
+        msg = String()
+        msg.data = f'Hello from ${config.packageName}: {self.i}'
+        self.publisher_.publish(msg)
+        self.get_logger().info(f'Publishing: {msg.data}')
+        self.i += 1
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = ${pythonClassName}()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
+`;
+    
+    const nodeFilePath = path.join(pythonPackageDir, `${nodeName}.py`);
+    fs.writeFileSync(nodeFilePath, pyContent);
+  }
+  
+  private async writeLaunchFile(packagePath: string, packageName: string, nodeName: string): Promise<void> {
+    const launchDir = path.join(packagePath, 'launch');
+    if (!fs.existsSync(launchDir)) {
+      fs.mkdirSync(launchDir, { recursive: true });
+    }
+    
+    const launchContent = `from launch import LaunchDescription
+from launch_ros.actions import Node
+
+
+def generate_launch_description():
+    return LaunchDescription([
+        Node(
+            package='${packageName}',
+            executable='${nodeName}',
+            name='${nodeName}',
+            output='screen',
+        )
+    ])
+`;
+    fs.writeFileSync(path.join(launchDir, 'example_launch.py'), launchContent);
+  }
+
+  private async removeGeneratedNodeFiles(packagePath: string, config: PackageConfig): Promise<void> {
+    const nodeName = config.nodeName || config.packageName;
+    const isCpp = config.template === 'minimal-cpp' || config.template === 'standard';
+    const isPython = config.template === 'minimal-python' || config.template === 'standard';
+    
+    if (isCpp) {
+      const cppSrcDir = path.join(packagePath, 'src');
+      const includeDir = path.join(packagePath, 'include', config.packageName);
+      
+      const cppNodeFile = path.join(cppSrcDir, `${nodeName}.cpp`);
+      if (fs.existsSync(cppNodeFile)) {
+        fs.unlinkSync(cppNodeFile);
+      }
+      
+      const hppNodeFile = path.join(includeDir, `${nodeName}.hpp`);
+      if (fs.existsSync(hppNodeFile)) {
+        fs.unlinkSync(hppNodeFile);
+      }
+      
+      if (fs.existsSync(includeDir) && fs.readdirSync(includeDir).length === 0) {
+        fs.rmdirSync(includeDir);
+      }
+    }
+    
+    if (isPython) {
+      const pythonPackageDir = path.join(packagePath, config.packageName);
+      
+      const nodeFilePath = path.join(pythonPackageDir, `${nodeName}.py`);
+      if (fs.existsSync(nodeFilePath)) {
+        fs.unlinkSync(nodeFilePath);
+      }
+      
+      const initPath = path.join(pythonPackageDir, '__init__.py');
+      if (!fs.existsSync(initPath)) {
+        fs.writeFileSync(initPath, '');
+      }
+    }
+    
+    const launchDir = path.join(packagePath, 'launch');
+    if (fs.existsSync(launchDir)) {
+      const launchFilePath = path.join(launchDir, 'example_launch.py');
+      if (fs.existsSync(launchFilePath)) {
+        fs.unlinkSync(launchFilePath);
+      }
+      
+      if (fs.readdirSync(launchDir).length === 0) {
+        fs.rmdirSync(launchDir);
+      }
     }
   }
 
@@ -266,17 +460,56 @@ int main(int argc, char * argv[])
     }
 
     if (config.template === 'minimal-python' || config.template === 'standard') {
+      const includeNode = config.includeTemplateNode ?? true;
+      
+      if (!includeNode) {
+        const pythonPackageDir = path.join(packagePath, config.packageName);
+        if (!fs.existsSync(pythonPackageDir)) {
+          fs.mkdirSync(pythonPackageDir, { recursive: true });
+        }
+        const initPath = path.join(pythonPackageDir, '__init__.py');
+        if (!fs.existsSync(initPath)) {
+          fs.writeFileSync(initPath, '');
+        }
+        
+        if (config.nodeName) {
+          const launchDir = path.join(packagePath, 'launch');
+          if (!fs.existsSync(launchDir)) {
+            fs.mkdirSync(launchDir, { recursive: true });
+          }
+          
+          const launchContent = `from launch import LaunchDescription
+from launch_ros.actions import Node
+
+
+def generate_launch_description():
+    return LaunchDescription([
+        Node(
+            package='${config.packageName}',
+            executable='${config.nodeName}',
+            name='${config.nodeName}',
+            output='screen',
+        )
+    ])
+`;
+          fs.writeFileSync(path.join(launchDir, 'example_launch.py'), launchContent);
+        }
+        
+        return;
+      }
+
       const pythonPackageDir = path.join(packagePath, config.packageName);
       if (!fs.existsSync(pythonPackageDir)) {
         fs.mkdirSync(pythonPackageDir, { recursive: true });
       }
 
+      const pythonClassName = this.toPascalCase(config.packageName) + 'Node';
       const pyContent = `import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 
 
-class ${nodeName}(Node):
+class ${pythonClassName}(Node):
 
     def __init__(self):
         super().__init__('${nodeName}')
@@ -295,7 +528,7 @@ class ${nodeName}(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ${nodeName}()
+    node = ${pythonClassName}()
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()
@@ -336,28 +569,6 @@ def generate_launch_description():
     }
   }
 
-  private async createPackageFromTemplate(workspaceRoot: string, config: PackageConfig): Promise<void> {
-    const packagePath = path.join(workspaceRoot, 'src', config.packageName);
-
-    if (fs.existsSync(packagePath)) {
-      throw new Error(`Package '${config.packageName}' already exists in workspace`);
-    }
-
-    fs.mkdirSync(packagePath, { recursive: true });
-
-    const templatePath = path.join(this.templateDir, `template-${config.template}`);
-    if (!fs.existsSync(templatePath)) {
-      throw new Error(`Template '${config.template}' not found`);
-    }
-
-    await this.copyTemplate(templatePath, packagePath, config);
-
-    const pythonPackageDir = path.join(packagePath, config.packageName);
-    if (fs.existsSync(pythonPackageDir)) {
-      fs.writeFileSync(path.join(pythonPackageDir, '__init__.py'), '');
-    }
-  }
-
   private async copyTemplate(
     source: string,
     target: string,
@@ -387,7 +598,8 @@ def generate_launch_description():
         let content = fs.readFileSync(sourcePath, 'utf-8');
 
         if (item.endsWith('.py') || item.endsWith('.cpp') || item.endsWith('.hpp') ||
-            item.endsWith('.txt') || item.endsWith('.xml') || item.endsWith('.md')) {
+            item.endsWith('.txt') || item.endsWith('.xml') || item.endsWith('.md') ||
+            item.endsWith('.cfg')) {
           content = this.replaceTemplate(content, config);
         }
 

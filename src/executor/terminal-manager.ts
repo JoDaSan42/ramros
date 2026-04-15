@@ -3,6 +3,12 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { WorkspaceInfo } from '../core/workspace-detector';
 
+export interface BuildOptions {
+  useSymlinkInstall?: boolean;
+  cleanFirst?: boolean;
+  packageName?: string;
+}
+
 export class TerminalManager implements vscode.Disposable {
   private readonly terminals = new Map<string, vscode.Terminal>();
   
@@ -64,16 +70,35 @@ export class TerminalManager implements vscode.Disposable {
     return terminal;
   }
   
-  async buildWorkspace(workspace: WorkspaceInfo, packageName?: string): Promise<vscode.Terminal> {
-    let command: string;
+  async buildWorkspace(workspace: WorkspaceInfo, options?: BuildOptions | string): Promise<vscode.Terminal> {
+    const packageName = typeof options === 'string' ? options : options?.packageName;
+    const useSymlinkInstall = typeof options === 'object' ? options?.useSymlinkInstall : false;
+    const cleanFirst = typeof options === 'object' ? options?.cleanFirst : false;
     
-    if (packageName) {
-      command = `colcon build --packages-select ${packageName}`;
-    } else {
-      command = 'colcon build';
+    const commands: string[] = [];
+    
+    if (cleanFirst) {
+      const workspaceRoot = workspace.rootPath.fsPath;
+      commands.push(`rm -rf ${workspaceRoot}/build ${workspaceRoot}/log ${workspaceRoot}/install`);
     }
     
-    return this.executeInTerminal(command, workspace);
+    let buildCommand = 'colcon build';
+    
+    if (packageName) {
+      buildCommand += ` --packages-select ${packageName}`;
+    }
+    
+    if (useSymlinkInstall) {
+      buildCommand += ' --symlink-install';
+    }
+    
+    commands.push(buildCommand);
+    
+    for (const command of commands) {
+      await this.executeInTerminal(command, workspace);
+    }
+    
+    return this.terminals.get(workspace.id)!;
   }
   
   dispose(): void {

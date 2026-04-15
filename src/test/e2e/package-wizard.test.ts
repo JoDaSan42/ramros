@@ -89,7 +89,8 @@ describe('Package Creation Wizard E2E Tests', () => {
         buildType: 'ament_cmake',
         template: 'minimal-cpp',
         nodeName,
-        dependencies: ['rclcpp', 'std_msgs']
+        dependencies: ['rclcpp', 'std_msgs'],
+        includeTemplateNode: true
       });
 
       const packagePath = path.join(workspaceFolder.uri.fsPath, 'src', packageName);
@@ -119,7 +120,8 @@ describe('Package Creation Wizard E2E Tests', () => {
         buildType: 'ament_python',
         template: 'minimal-python',
         nodeName,
-        dependencies: ['rclpy', 'std_msgs']
+        dependencies: ['rclpy', 'std_msgs'],
+        includeTemplateNode: true
       });
 
       const packagePath = path.join(workspaceFolder.uri.fsPath, 'src', packageName);
@@ -149,7 +151,8 @@ describe('Package Creation Wizard E2E Tests', () => {
         buildType: 'ament_cmake',
         template: 'standard',
         nodeName,
-        dependencies: ['rclcpp', 'rclpy', 'std_msgs']
+        dependencies: ['rclcpp', 'rclpy', 'std_msgs'],
+        includeTemplateNode: true
       });
 
       const packagePath = path.join(workspaceFolder.uri.fsPath, 'src', packageName);
@@ -158,6 +161,31 @@ describe('Package Creation Wizard E2E Tests', () => {
       assert.ok(fs.existsSync(path.join(packagePath, packageName, `${nodeName}.py`)), 'Python node file not created');
       assert.ok(fs.existsSync(path.join(packagePath, 'CMakeLists.txt')), 'CMakeLists.txt not created');
       assert.ok(fs.existsSync(path.join(packagePath, 'setup.py')), 'setup.py not created');
+    });
+  });
+
+  describe('Create Python Package Without Template Node', () => {
+    it('should create an empty Python package without node files', async () => {
+      const packageName = `e2e_${testSuffix}_empty_py_pkg`;
+      
+      await vscode.commands.executeCommand('ramros.createPackage', {
+        packageName,
+        description: 'E2E test empty Python package',
+        authorName: 'E2E Test',
+        authorEmail: 'e2e@test.com',
+        license: 'MIT',
+        buildType: 'ament_python',
+        template: 'minimal-python',
+        dependencies: ['rclpy'],
+        includeTemplateNode: false
+      });
+
+      const packagePath = path.join(workspaceFolder.uri.fsPath, 'src', packageName);
+      assert.ok(fs.existsSync(packagePath), `Package directory not created at ${packagePath}`);
+      assert.ok(!fs.existsSync(path.join(packagePath, packageName, `${packageName}.py`)), 'Python node file should not be created');
+      assert.ok(fs.existsSync(path.join(packagePath, 'setup.py')), 'setup.py should be created');
+      assert.ok(fs.existsSync(path.join(packagePath, 'setup.cfg')), 'setup.cfg should be created');
+      assert.ok(fs.existsSync(path.join(packagePath, packageName, '__init__.py')), '__init__.py should be created');
     });
   });
 
