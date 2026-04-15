@@ -71,15 +71,7 @@ export interface LaunchFileInfo {
   path: string;
 }
 
-interface PackageXmlData {
-  name?: string;
-  version?: string;
-  description?: string;
-  maintainers: Array<{ name: string; email: string }>;
-  license?: string;
-  buildType?: 'ament_cmake' | 'ament_python' | 'cmake';
-  dependencies: Array<{ name: string; type: 'build' | 'exec' | 'test' }>;
-}
+
 
 export class PackageDiscoveryService {
   private cache: Map<string, PackageInfo[]> = new Map();
@@ -144,7 +136,7 @@ export class PackageDiscoveryService {
   private async buildPackageInfo(packageXmlPath: string): Promise<PackageInfo> {
     const packageDir = path.dirname(packageXmlPath);
     const xmlData = await this.parsePackageXml(packageXmlPath);
-    const packageType = this.detectPackageType(packageDir, xmlData);
+    const packageType = this.detectPackageType(packageDir);
     const packageName = xmlData.name || path.basename(packageDir);
     const nodes = await this.findExecutableNodes(packageDir, packageType, packageName);
     const interfaces = await this.findInterfaceFiles(packageDir);
@@ -267,8 +259,7 @@ export class PackageDiscoveryService {
   }
 
   detectPackageType(
-    packagePath: string,
-    xmlData: Partial<PackageInfo>
+    packagePath: string
   ): 'cpp' | 'python' | 'mixed' | 'interface' | 'empty' {
     const msgDir = path.join(packagePath, 'msg');
     const srvDir = path.join(packagePath, 'srv');
@@ -284,8 +275,8 @@ export class PackageDiscoveryService {
       return 'interface';
     }
 
-    const hasCppExecutables = this.hasCppExecutables(packagePath, xmlData);
-    const hasPythonExecutables = this.hasPythonExecutables(packagePath, xmlData);
+    const hasCppExecutables = this.hasCppExecutables(packagePath);
+    const hasPythonExecutables = this.hasPythonExecutables(packagePath);
 
     if (hasCppExecutables && hasPythonExecutables) {
       return 'mixed';
@@ -300,7 +291,7 @@ export class PackageDiscoveryService {
     return 'empty';
   }
 
-  private hasCppExecutables(packagePath: string, xmlData: Partial<PackageInfo>): boolean {
+  private hasCppExecutables(packagePath: string): boolean {
     const cmakeListsPath = path.join(packagePath, 'CMakeLists.txt');
     if (!fs.existsSync(cmakeListsPath)) {
       return false;
@@ -313,7 +304,7 @@ export class PackageDiscoveryService {
     return installTargetPattern.test(cmakeContent) && addExecutablePattern.test(cmakeContent);
   }
 
-  private hasPythonExecutables(packagePath: string, xmlData: Partial<PackageInfo>): boolean {
+  private hasPythonExecutables(packagePath: string): boolean {
     const setupPyPath = path.join(packagePath, 'setup.py');
     if (!fs.existsSync(setupPyPath)) {
       return false;
@@ -463,7 +454,6 @@ export class PackageDiscoveryService {
     while ((match = consoleScriptsPattern.exec(setupContent)) !== null) {
       const nodeName = match[1];
       const moduleName = match[2].trim();
-      const functionName = match[3];
 
       const nodePath = this.findPythonNodeSource(packagePath, moduleName, nodeName);
       if (nodePath) {
@@ -671,7 +661,7 @@ export class PackageDiscoveryService {
     const fieldType = parts[0];
     const fieldName = parts[1];
 
-    const arrayMatch = fieldType.match(/^([^\[\]]+)(?:\[(\d*)\])?$/);
+    const arrayMatch = fieldType.match(/^([^[\]]+)(?:\[(\d*)\])?$/);
     if (!arrayMatch) {
       return null;
     }

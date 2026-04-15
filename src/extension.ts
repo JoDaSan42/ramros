@@ -9,7 +9,8 @@ import { RamrosTreeProvider } from './treeview/tree-provider';
 import { TerminalManager } from './executor/terminal-manager';
 import { PackageCreator } from './wizard/package-creator';
 import { PackageFormValidator } from './wizard/package-form-validator';
-import { PackageInfo, NodeInfo, LaunchFileInfo, PackageDiscoveryService } from './core/package-discovery';
+import { NodeInfo, LaunchFileInfo, PackageDiscoveryService } from './core/package-discovery';
+import { TreeItemBase } from './treeview/tree-items';
 
 let cacheManager: CacheManager;
 let terminalManager: TerminalManager;
@@ -504,7 +505,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     }),
     
-    vscode.commands.registerCommand('ramros.buildPackage', async (treeItem?: any) => {
+    vscode.commands.registerCommand('ramros.buildPackage', async (treeItem?: TreeItemBase) => {
       const workspaces = treeProvider.getWorkspaces();
       if (workspaces.length === 0) {
         void vscode.window.showWarningMessage('No ROS2 workspaces found');
@@ -514,7 +515,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const selectedWorkspace = workspaces[0];
       let packageNameToBuild: string | undefined;
       
-      if (treeItem && typeof treeItem.getPackageInfo === 'function') {
+      if (treeItem && 'getPackageInfo' in treeItem && typeof treeItem.getPackageInfo === 'function') {
         const packageInfo = treeItem.getPackageInfo();
         packageNameToBuild = packageInfo.name;
       }
@@ -541,7 +542,7 @@ export async function activate(context: vscode.ExtensionContext) {
       });
     }),
     
-    vscode.commands.registerCommand('ramros.runNode', async (treeItem?: any) => {
+    vscode.commands.registerCommand('ramros.runNode', async (treeItem?: TreeItemBase) => {
       const workspaces = treeProvider.getWorkspaces();
       if (workspaces.length === 0) {
         void vscode.window.showWarningMessage('No ROS2 workspaces found');
@@ -552,7 +553,7 @@ export async function activate(context: vscode.ExtensionContext) {
       
       let nodeToRun: NodeInfo | undefined;
       
-      if (treeItem && typeof treeItem.getNodeInfo === 'function') {
+      if (treeItem && 'getNodeInfo' in treeItem && typeof treeItem.getNodeInfo === 'function') {
         nodeToRun = treeItem.getNodeInfo();
       } else {
         const allNodes = workspaces
@@ -585,10 +586,10 @@ export async function activate(context: vscode.ExtensionContext) {
         runCommand = `ros2 run ${nodeToRun.packageName} ${nodeToRun.name}`;
       }
       
-      const terminal = await terminalManager.executeInTerminal(runCommand, selectedWorkspace);
+      await terminalManager.executeInTerminal(runCommand, selectedWorkspace);
     }),
     
-    vscode.commands.registerCommand('ramros.debugNode', async (treeItem?: any) => {
+    vscode.commands.registerCommand('ramros.debugNode', async (treeItem?: TreeItemBase) => {
       const workspaces = treeProvider.getWorkspaces();
       if (workspaces.length === 0) {
         void vscode.window.showWarningMessage('No ROS2 workspaces found');
@@ -599,7 +600,7 @@ export async function activate(context: vscode.ExtensionContext) {
       
       let nodeToDebug: NodeInfo | undefined;
       
-      if (treeItem && typeof treeItem.getNodeInfo === 'function') {
+      if (treeItem && 'getNodeInfo' in treeItem && typeof treeItem.getNodeInfo === 'function') {
         nodeToDebug = treeItem.getNodeInfo();
       } else {
         const allNodes = workspaces
@@ -640,7 +641,7 @@ export async function activate(context: vscode.ExtensionContext) {
       await vscode.debug.startDebugging(vscode.workspace.workspaceFolders?.[0], debugConfig);
     }),
     
-    vscode.commands.registerCommand('ramros.openPackageTerminal', async (treeItem?: any) => {
+    vscode.commands.registerCommand('ramros.openPackageTerminal', async (treeItem?: TreeItemBase) => {
       const workspaces = treeProvider.getWorkspaces();
       if (workspaces.length === 0) {
         void vscode.window.showWarningMessage('No ROS2 workspaces found');
@@ -650,7 +651,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const selectedWorkspace = workspaces[0];
       let packagePath: string | undefined;
       
-      if (treeItem && typeof treeItem.getPackageInfo === 'function') {
+      if (treeItem && 'getPackageInfo' in treeItem && typeof treeItem.getPackageInfo === 'function') {
         const packageInfo = treeItem.getPackageInfo();
         packagePath = packageInfo.path;
       }
@@ -689,7 +690,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     }),
     
-    vscode.commands.registerCommand('ramros.runLaunchFile', async (treeItem?: any) => {
+    vscode.commands.registerCommand('ramros.runLaunchFile', async (treeItem?: TreeItemBase) => {
       const workspaces = treeProvider.getWorkspaces();
       if (workspaces.length === 0) {
         void vscode.window.showWarningMessage('No ROS2 workspaces found');
@@ -700,7 +701,7 @@ export async function activate(context: vscode.ExtensionContext) {
       
       let launchFileToRun: LaunchFileInfo | undefined;
       
-      if (treeItem && typeof treeItem.getLaunchFileInfo === 'function') {
+      if (treeItem && 'getLaunchFileInfo' in treeItem && typeof treeItem.getLaunchFileInfo === 'function') {
         launchFileToRun = treeItem.getLaunchFileInfo();
       } else {
         const allLaunchFiles = workspaces
@@ -733,7 +734,7 @@ export async function activate(context: vscode.ExtensionContext) {
         runCommand = `ros2 launch ${launchFileToRun.path}`;
       }
       
-      const terminal = await terminalManager.executeInTerminal(runCommand, selectedWorkspace);
+      await terminalManager.executeInTerminal(runCommand, selectedWorkspace);
     })
   );
   

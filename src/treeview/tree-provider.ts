@@ -22,7 +22,7 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
     enableAutoRefresh: boolean = true
   ) {
     this.packageDiscovery = packageDiscovery || new PackageDiscoveryService();
-    this.initialize();
+    void this.initialize();
     if (enableAutoRefresh) {
       this.startAutoRefresh();
       this.setupFileWatcher();
@@ -41,7 +41,7 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
   
   private startAutoRefresh(): void {
     this.autoRefreshInterval = setInterval(() => {
-      this.loadWorkspacesSilent();
+      void this.loadWorkspacesSilent();
     }, this.AUTO_REFRESH_MS);
   }
   

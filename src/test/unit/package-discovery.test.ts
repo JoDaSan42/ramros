@@ -109,8 +109,7 @@ describe('PackageDiscoveryService', () => {
       const pythonPackagePath = path.join(__dirname, '../../../test-fixtures/workspace-valid/src/my_package');
       
       if (fs.existsSync(pythonPackagePath)) {
-        const xmlData = { buildType: 'ament_python' as const };
-        const type = service.detectPackageType(pythonPackagePath, xmlData);
+        const type = service.detectPackageType(pythonPackagePath);
         
         expect(['python', 'mixed', 'empty']).toContain(type);
       }
@@ -120,8 +119,7 @@ describe('PackageDiscoveryService', () => {
       const cppPackagePath = path.join(__dirname, '../../../test-fixtures/workspace-valid/src/cpp_pkg');
       
       if (fs.existsSync(cppPackagePath)) {
-        const xmlData = { buildType: 'ament_cmake' as const };
-        const type = service.detectPackageType(cppPackagePath, xmlData);
+        const type = service.detectPackageType(cppPackagePath);
         
         expect(['cpp', 'mixed', 'empty']).toContain(type);
       }
@@ -133,8 +131,7 @@ describe('PackageDiscoveryService', () => {
       if (fs.existsSync(interfacePackagePath)) {
         const msgDir = path.join(interfacePackagePath, 'msg');
         if (fs.existsSync(msgDir) && fs.readdirSync(msgDir).length > 0) {
-          const xmlData = { buildType: 'ament_cmake' as const };
-          const type = service.detectPackageType(interfacePackagePath, xmlData);
+          const type = service.detectPackageType(interfacePackagePath);
           
           expect(type).toBe('interface');
         }
