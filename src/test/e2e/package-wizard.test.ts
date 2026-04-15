@@ -96,7 +96,7 @@ describe('Package Creation Wizard E2E Tests', () => {
       const packagePath = path.join(workspaceFolder.uri.fsPath, 'src', packageName);
       assert.ok(fs.existsSync(packagePath), `Package directory not created at ${packagePath}`);
       assert.ok(fs.existsSync(path.join(packagePath, 'src', `${nodeName}.cpp`)), 'C++ node file not created');
-      assert.ok(fs.existsSync(path.join(packagePath, 'include', `${nodeName}.hpp`)), 'Header file not created');
+      assert.ok(fs.existsSync(path.join(packagePath, 'include', packageName, `${nodeName}.hpp`)), 'Header file not created');
       assert.ok(fs.existsSync(path.join(packagePath, 'launch', 'example_launch.py')), 'Launch file not created');
       
       const nodeContent = fs.readFileSync(path.join(packagePath, 'src', `${nodeName}.cpp`), 'utf-8');
@@ -158,9 +158,10 @@ describe('Package Creation Wizard E2E Tests', () => {
       const packagePath = path.join(workspaceFolder.uri.fsPath, 'src', packageName);
       assert.ok(fs.existsSync(packagePath), `Package directory not created at ${packagePath}`);
       assert.ok(fs.existsSync(path.join(packagePath, 'src', `${nodeName}.cpp`)), 'C++ node file not created');
+      assert.ok(fs.existsSync(path.join(packagePath, 'include', packageName, `${nodeName}.hpp`)), 'C++ header file not created');
       assert.ok(fs.existsSync(path.join(packagePath, packageName, `${nodeName}.py`)), 'Python node file not created');
       assert.ok(fs.existsSync(path.join(packagePath, 'CMakeLists.txt')), 'CMakeLists.txt not created');
-      assert.ok(fs.existsSync(path.join(packagePath, 'setup.py')), 'setup.py not created');
+      assert.ok(fs.existsSync(path.join(packagePath, 'launch', 'example_launch.py')), 'Launch file not created');
     });
   });
 
