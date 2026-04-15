@@ -36,22 +36,55 @@ A VSCode extension for managing ROS2 workspaces efficiently.
 
 ### Tree View
 
-The RAMROS Explorer shows:
-- All detected workspaces with their structure
-- Packages within each workspace
-- Warnings for issues (e.g., unbuilt workspaces)
-- Conflicts section showing duplicate packages
+The RAMROS Explorer provides a hierarchical view of your ROS2 workspace:
+
+**Workspace Level:**
+- Shows workspace name and ROS distribution
+- Displays warnings/errors if any
+- Contains discovered packages
+
+**Package Level:**
+- Package name with version badge
+- Type indicator emoji:
+  - ⚙️ C++ package (ament_cmake with C++ executables)
+  - 🐍 Python package (ament_python with Python nodes)
+  - 🔀 Mixed package (both C++ and Python nodes)
+  - 📋 Interface package (msg/srv/action definitions)
+  - 📦 Empty package (no nodes or interfaces)
+
+**Node Level:**
+- Node name with language indicator (.cpp or .py)
+- Static analysis information in tooltip:
+  - Declared parameters with default values
+  - Publishers (topic name and message type)
+  - Subscriptions (topic name and message type)
+  
+**Interface Files:**
+- Grouped by type: Messages, Services, Actions
+- Shows field definitions in tooltip
+- Click to open interface file
+
+**Launch Files:**
+- Lists all `.launch.py` and `.launch.xml` files
+- Click to open launch file
+
+> **Note on Static Analysis**: Node information (parameters, publishers, subscriptions) is extracted via static code analysis. This means only explicitly declared constructs are detected. Dynamically created topics or parameters may not appear. No disclaimer is shown in tooltips to keep the UI clean.
 
 ### Commands
 
 Access commands from the tree view context menu or command palette (`Ctrl+Shift+P`):
 
-| Command | Description |
-|---------|-------------|
-| `RAMROS: Create New Package` | Launch package creation wizard |
-| `RAMROS: Refresh All Workspaces` | Reload workspace detection |
-| `RAMROS: Source Workspace` | Open terminal with sourced ROS environment |
-| `RAMROS: Build Workspace` | Run `colcon build` in workspace |
+| Command | Description | Context Menu |
+|---------|-------------|--------------|
+| `RAMROS: Create New Package` | Launch package creation wizard | Workspace root |
+| `RAMROS: Refresh All Workspaces` | Reload workspace detection | View title |
+| `RAMROS: Source Workspace` | Open terminal with sourced ROS environment | Workspace root |
+| `RAMROS: Build Workspace` | Run `colcon build` in workspace | Workspace root |
+| `RAMROS: Build Package` | Build specific package (`colcon build --packages-select`) | Package |
+| `RAMROS: Run Node` | Execute node via `ros2 run <package> <node>` | Node |
+| `RAMROS: Debug Node` | Start debug session for node | Node |
+| `RAMROS: Open in Terminal` | Open new terminal in package directory | Package |
+| `RAMROS: Run Launch File` | Execute launch file via `ros2 launch` | Launch file |
 
 ### Package Creation Wizard
 
@@ -261,6 +294,13 @@ src/
   - [x] Minimal Python template
   - [x] Standard hybrid template
   - [x] Interface package template (messages, services, actions)
+- [x] Tree View Display of Packages and Nodes
+  - [x] Package discovery on workspace load
+  - [x] Package type badges (C++, Python, Mixed, Interface, Empty)
+  - [x] Node display with static analysis (parameters, publishers, subscriptions)
+  - [x] Interface file grouping and display
+  - [x] Launch file listing
+  - [x] Context menu commands (build, run, debug, terminal)
 - [ ] Launch Configuration Management
 - [ ] Topic/Service Graph Visualization (Cytoscape.js)
 - [ ] Parameter Editor

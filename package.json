@@ -59,6 +59,31 @@
         "command": "ramros.createPackage",
         "title": "Create New Package",
         "icon": "$(new-file)"
+      },
+      {
+        "command": "ramros.buildPackage",
+        "title": "Build Package",
+        "icon": "$(wrench)"
+      },
+      {
+        "command": "ramros.runNode",
+        "title": "Run Node",
+        "icon": "$(play)"
+      },
+      {
+        "command": "ramros.debugNode",
+        "title": "Debug Node",
+        "icon": "$(debug)"
+      },
+      {
+        "command": "ramros.openPackageTerminal",
+        "title": "Open in Terminal",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "ramros.runLaunchFile",
+        "title": "Run Launch File",
+        "icon": "$(play-circle)"
       }
     ],
     "menus": {
@@ -96,6 +121,51 @@
         {
           "command": "ramros.buildWorkspace",
           "when": "view == ramrosExplorer && viewItem == workspaceRoot"
+        },
+        {
+          "command": "ramros.buildPackage",
+          "when": "view == ramrosExplorer && viewItem == package",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.openPackageTerminal",
+          "when": "view == ramrosExplorer && viewItem == package",
+          "group": "inline@2"
+        },
+        {
+          "command": "ramros.runNode",
+          "when": "view == ramrosExplorer && viewItem == node",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.debugNode",
+          "when": "view == ramrosExplorer && viewItem == node",
+          "group": "inline@2"
+        },
+        {
+          "command": "ramros.runLaunchFile",
+          "when": "view == ramrosExplorer && viewItem == launchFile",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.buildPackage",
+          "when": "view == ramrosExplorer && viewItem == package"
+        },
+        {
+          "command": "ramros.openPackageTerminal",
+          "when": "view == ramrosExplorer && viewItem == package"
+        },
+        {
+          "command": "ramros.runNode",
+          "when": "view == ramrosExplorer && viewItem == node"
+        },
+        {
+          "command": "ramros.debugNode",
+          "when": "view == ramrosExplorer && viewItem == node"
+        },
+        {
+          "command": "ramros.runLaunchFile",
+          "when": "view == ramrosExplorer && viewItem == launchFile"
         }
       ]
     }

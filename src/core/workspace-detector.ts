@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { RosDistribution } from './ros-environment';
+import { PackageDiscoveryService, PackageInfo } from './package-discovery';
 
 export interface WorkspaceInfo {
   id: string;
@@ -14,14 +15,24 @@ export interface WorkspaceInfo {
   isValid: boolean;
   errors: string[];
   warnings: string[];
+  packages?: PackageInfo[];
 }
 
 export class WorkspaceDetector {
+  private packageDiscovery: PackageDiscoveryService;
+
   constructor(
-    private readonly getRosDistributions: () => Promise<RosDistribution[]>
-  ) {}
+    private readonly getRosDistributions: () => Promise<RosDistribution[]>,
+    packageDiscovery?: PackageDiscoveryService
+  ) {
+    this.packageDiscovery = packageDiscovery || new PackageDiscoveryService();
+  }
   
-  async detectWorkspaces(): Promise<WorkspaceInfo[]> {
+  async detectWorkspaces(forceRefresh: boolean = true): Promise<WorkspaceInfo[]> {
+    if (forceRefresh) {
+      this.packageDiscovery.clearCache();
+    }
+    
     const workspaceFolders = vscode.workspace.workspaceFolders || [];
     const workspaces: WorkspaceInfo[] = [];
     
@@ -54,6 +65,15 @@ export class WorkspaceDetector {
     
     if (info.rosDistribution === null) {
       info.warnings.push('No ROS2 installation found for this workspace.');
+    }
+    
+    if (srcExists && info.srcPath) {
+      try {
+        info.packages = await this.packageDiscovery.discoverPackages(info.srcPath.fsPath);
+      } catch (error) {
+        info.warnings.push(`Package discovery failed: ${(error as Error).message}`);
+        info.packages = [];
+      }
     }
     
     info.isValid = true;
