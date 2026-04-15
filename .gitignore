@@ -12,6 +12,7 @@ coverage/
 
 # IDE
 .vscode/
+.vscode-test/
 .idea/
 *.swp
 *.swo
