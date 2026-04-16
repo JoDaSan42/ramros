@@ -127,7 +127,7 @@ export class PackagesPlaceholderItem extends TreeItemBase {
 
 export class PackagesFolderItem extends TreeItemBase {
   constructor(private readonly packages: PackageInfo[]) {
-    super('Packages', vscode.TreeItemCollapsibleState.Collapsed);
+    super('Packages', vscode.TreeItemCollapsibleState.Expanded);
     
     this.description = `(${packages.length})`;
     this.iconPath = new vscode.ThemeIcon('folder-library');
@@ -207,7 +207,7 @@ export class PackageItem extends TreeItemBase {
 
 export class NodesFolderItem extends TreeItemBase {
   constructor(private readonly nodes: NodeInfo[]) {
-    super('Nodes', vscode.TreeItemCollapsibleState.Collapsed);
+    super('Nodes', vscode.TreeItemCollapsibleState.Expanded);
     
     this.description = `(${nodes.length})`;
     this.iconPath = new vscode.ThemeIcon('broadcast');
@@ -275,7 +275,7 @@ export class NodeItem extends TreeItemBase {
 
 export class InterfacesFolderItem extends TreeItemBase {
   constructor(private readonly interfaces: InterfaceInfo[]) {
-    super('Interfaces', vscode.TreeItemCollapsibleState.Collapsed);
+    super('Interfaces', vscode.TreeItemCollapsibleState.Expanded);
     
     const msgCount = interfaces.filter(i => i.type === 'message').length;
     const srvCount = interfaces.filter(i => i.type === 'service').length;
@@ -377,7 +377,7 @@ export class InterfaceFileItem extends TreeItemBase {
 
 export class LaunchFilesFolderItem extends TreeItemBase {
   constructor(private readonly launchFiles: LaunchFileInfo[]) {
-    super('Launch Files', vscode.TreeItemCollapsibleState.Collapsed);
+    super('Launch Files', vscode.TreeItemCollapsibleState.Expanded);
     
     this.description = `(${launchFiles.length})`;
     this.iconPath = new vscode.ThemeIcon('rocket');
@@ -464,7 +464,7 @@ class LocationItem extends TreeItemBase {
 
 export class CategoryNodesFolderItem extends TreeItemBase {
   constructor(private readonly packages: PackageInfo[]) {
-    super('Nodes', vscode.TreeItemCollapsibleState.Collapsed);
+    super('Nodes', vscode.TreeItemCollapsibleState.Expanded);
     
     const allNodes = packages.flatMap(pkg => pkg.nodes);
     this.description = `(${allNodes.length})`;
@@ -502,7 +502,7 @@ export class CategoryNodeItem extends TreeItemBase {
 
 export class CategoryInterfacesFolderItem extends TreeItemBase {
   constructor(private readonly packages: PackageInfo[]) {
-    super('Interfaces', vscode.TreeItemCollapsibleState.Collapsed);
+    super('Interfaces', vscode.TreeItemCollapsibleState.Expanded);
     
     const allInterfaces = packages.flatMap(pkg => pkg.interfaces);
     this.description = `(${allInterfaces.length})`;
@@ -603,7 +603,7 @@ export class CategoryInterfaceFileItem extends TreeItemBase {
 
 export class CategoryLaunchFilesFolderItem extends TreeItemBase {
   constructor(private readonly packages: PackageInfo[]) {
-    super('Launch Files', vscode.TreeItemCollapsibleState.Collapsed);
+    super('Launch Files', vscode.TreeItemCollapsibleState.Expanded);
     
     const allLaunchFiles = packages.flatMap(pkg => pkg.launchFiles);
     this.description = `(${allLaunchFiles.length})`;
