@@ -221,6 +221,7 @@
     "typecheck": "tsc --noEmit",
     "test:unit": "jest --config=jest.unit.config.ts",
     "test:integration": "jest --config=jest.integration.config.ts",
+    "test:ci": "jest --config=jest.ci.config.ts",
     "test:e2e": "node ./dist/test/e2e/runTest.js",
     "test:coverage": "jest --coverage",
     "test:watch": "jest --watch",

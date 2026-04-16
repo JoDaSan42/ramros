@@ -41,7 +41,7 @@ jobs:
           fail_ci_if_error: false
 
   test-integration:
-    name: Integration Tests
+    name: Integration Tests (Non-ROS)
     runs-on: ubuntu-latest
     needs: lint
     steps:
@@ -52,7 +52,7 @@ jobs:
           node-version: '24'
           cache: 'npm'
       - run: npm ci
-      - run: npm run test:integration
+      - run: npm run test:ci
 
   build-extension:
     name: Build Extension
