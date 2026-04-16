@@ -25,7 +25,8 @@ const config: Config = {
   testPathIgnorePatterns: [
     '<rootDir>/src/__tests__/integration/terminal-manager.integration.test.ts',
     '<rootDir>/src/__tests__/integration/tree-provider.integration.test.ts',
-    '<rootDir>/src/__tests__/integration/workspace-detector.integration.test.ts'
+    '<rootDir>/src/__tests__/integration/workspace-detector.integration.test.ts',
+    '<rootDir>/src/__tests__/integration/wizard/package-creator.test.ts'
   ]
 };
 
