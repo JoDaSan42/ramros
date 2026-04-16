@@ -393,7 +393,7 @@ export class LaunchFileItem extends TreeItemBase {
   constructor(private readonly file: LaunchFileInfo) {
     super(file.name, vscode.TreeItemCollapsibleState.None);
     
-    this.iconPath = new vscode.ThemeIcon('file-code');
+    this.iconPath = new vscode.ThemeIcon('rocket');
     this.contextValue = 'launchFile';
     this.command = { command: 'vscode.open', title: 'Open File', arguments: [vscode.Uri.file(file.path)] };
     
@@ -627,7 +627,7 @@ export class CategoryLaunchFileItem extends TreeItemBase {
     super(file.name, vscode.TreeItemCollapsibleState.None);
     
     this.description = `(${packageName})`;
-    this.iconPath = new vscode.ThemeIcon('file-code');
+    this.iconPath = new vscode.ThemeIcon('rocket');
     this.contextValue = 'launchFile';
     this.command = { command: 'vscode.open', title: 'Open File', arguments: [vscode.Uri.file(file.path)] };
     
