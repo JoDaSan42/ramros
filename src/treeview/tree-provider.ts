@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { WorkspaceInfo, WorkspaceDetector } from '../core/workspace-detector';
 import { DuplicatePackageDetector, PackageConflict } from '../core/duplicate-package-detector';
 import { PackageDiscoveryService } from '../core/package-discovery';
-import { TreeItemBase, WorkspaceRootItem, ConflictsItem } from './tree-items';
+import { TreeItemBase, WorkspaceRootItem, ConflictsItem, CategoryNodesFolderItem, CategoryInterfacesFolderItem, CategoryLaunchFilesFolderItem } from './tree-items';
 
 export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   private _onDidChangeTreeData: vscode.EventEmitter<TreeItemBase | undefined | null | void> = new vscode.EventEmitter();
@@ -14,6 +14,7 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
   private autoRefreshInterval: NodeJS.Timeout | undefined;
   private readonly AUTO_REFRESH_MS = 3000;
   private fileWatcher: vscode.FileSystemWatcher | undefined;
+  private sortMode: 'byPackage' | 'byCategory' = 'byPackage';
   
   constructor(
     private readonly workspaceDetector: WorkspaceDetector,
@@ -130,7 +131,29 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
       return rootItems;
     }
     
+    if (element instanceof WorkspaceRootItem && this.sortMode === 'byCategory') {
+      return this.getCategoryChildren(element);
+    }
+    
     return element.getChildren();
+  }
+  
+  private getCategoryChildren(element: TreeItemBase): TreeItemBase[] {
+    if (!(element instanceof WorkspaceRootItem)) {
+      return [];
+    }
+    
+    const packages = element.getWorkspace().packages || [];
+    
+    const children: TreeItemBase[] = [];
+    
+    if (packages.length > 0) {
+      children.push(new CategoryNodesFolderItem(packages));
+      children.push(new CategoryInterfacesFolderItem(packages));
+      children.push(new CategoryLaunchFilesFolderItem(packages));
+    }
+    
+    return children;
   }
   
   getWorkspaces(): WorkspaceInfo[] {
@@ -139,5 +162,14 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
   
   getConflicts(): PackageConflict[] {
     return [...this.conflicts];
+  }
+  
+  toggleSortMode(): void {
+    this.sortMode = this.sortMode === 'byPackage' ? 'byCategory' : 'byPackage';
+    this._onDidChangeTreeData.fire();
+  }
+  
+  getSortMode(): 'byPackage' | 'byCategory' {
+    return this.sortMode;
   }
 }

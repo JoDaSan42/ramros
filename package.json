@@ -46,6 +46,12 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "ramros.toggleTreeSortMode",
+        "title": "Toggle Tree View Mode",
+        "icon": "$(list-ordered)",
+        "category": "RAMROS"
+      },
+      {
         "command": "ramros.sourceWorkspace",
         "title": "Source Workspace",
         "icon": "$(terminal)"
@@ -95,6 +101,11 @@
       "view/title": [
         {
           "command": "ramros.refreshWorkspaces",
+          "when": "view == ramrosExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "ramros.toggleTreeSortMode",
           "when": "view == ramrosExplorer",
           "group": "navigation"
         }

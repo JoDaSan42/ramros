@@ -55,6 +55,15 @@ export async function activate(context: vscode.ExtensionContext) {
       void vscode.window.showInformationMessage('Workspaces refreshed');
     }),
     
+    vscode.commands.registerCommand('ramros.toggleTreeSortMode', async () => {
+      treeProvider.toggleSortMode();
+      const mode = treeProvider.getSortMode();
+      const message = mode === 'byPackage' 
+        ? '📦 Tree view: Grouped by package' 
+        : '📂 Tree view: Grouped by category';
+      void vscode.window.showInformationMessage(message);
+    }),
+    
     vscode.commands.registerCommand('ramros.sourceWorkspace', async (item?: WorkspaceInfo) => {
       const workspaces = treeProvider.getWorkspaces();
       

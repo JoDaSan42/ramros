@@ -22,6 +22,10 @@ export class WorkspaceRootItem extends TreeItemBase {
     this.updateTooltip();
   }
   
+  getWorkspace(): WorkspaceInfo {
+    return this.workspace;
+  }
+  
   getChildren(): Promise<TreeItemBase[]> {
     const children: TreeItemBase[] = [];
     
@@ -206,7 +210,7 @@ export class NodesFolderItem extends TreeItemBase {
     super('Nodes', vscode.TreeItemCollapsibleState.Collapsed);
     
     this.description = `(${nodes.length})`;
-    this.iconPath = new vscode.ThemeIcon('symbol-method');
+    this.iconPath = new vscode.ThemeIcon('broadcast');
     this.contextValue = 'nodesFolder';
   }
   
@@ -220,7 +224,7 @@ export class NodeItem extends TreeItemBase {
     super(node.name, vscode.TreeItemCollapsibleState.None);
     
     this.description = node.language === 'cpp' ? '.cpp' : '.py';
-    this.iconPath = new vscode.ThemeIcon(node.language === 'cpp' ? 'symbol-class' : 'symbol-variable');
+    this.iconPath = new vscode.ThemeIcon('broadcast');
     this.contextValue = 'node';
     this.command = { command: 'vscode.open', title: 'Open File', arguments: [vscode.Uri.file(node.path)] };
     this.tooltip = new vscode.MarkdownString(`Package: ${node.packageName}`);
@@ -283,7 +287,7 @@ export class InterfacesFolderItem extends TreeItemBase {
     if (actionCount > 0) parts.push(`${actionCount} action`);
     
     this.description = `(${parts.join(', ')})`;
-    this.iconPath = new vscode.ThemeIcon('file-code');
+    this.iconPath = new vscode.ThemeIcon('link');
     this.contextValue = 'interfacesFolder';
   }
   
@@ -333,7 +337,7 @@ export class InterfaceFileItem extends TreeItemBase {
     
     const extension = this.getInterfaceExtension(iface.type);
     this.description = `.${extension}`;
-    this.iconPath = new vscode.ThemeIcon('file-code');
+    this.iconPath = new vscode.ThemeIcon('symbol-interface');
     this.contextValue = 'interfaceFile';
     this.command = { command: 'vscode.open', title: 'Open File', arguments: [vscode.Uri.file(iface.path)] };
     
@@ -376,7 +380,7 @@ export class LaunchFilesFolderItem extends TreeItemBase {
     super('Launch Files', vscode.TreeItemCollapsibleState.Collapsed);
     
     this.description = `(${launchFiles.length})`;
-    this.iconPath = new vscode.ThemeIcon('play-circle');
+    this.iconPath = new vscode.ThemeIcon('rocket');
     this.contextValue = 'launchFilesFolder';
   }
   
@@ -455,5 +459,186 @@ class LocationItem extends TreeItemBase {
   
   getChildren(): Promise<TreeItemBase[]> {
     return Promise.resolve([]);
+  }
+}
+
+export class CategoryNodesFolderItem extends TreeItemBase {
+  constructor(private readonly packages: PackageInfo[]) {
+    super('Nodes', vscode.TreeItemCollapsibleState.Collapsed);
+    
+    const allNodes = packages.flatMap(pkg => pkg.nodes);
+    this.description = `(${allNodes.length})`;
+    this.iconPath = new vscode.ThemeIcon('broadcast');
+    this.contextValue = 'categoryNodesFolder';
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    const allNodes = this.packages.flatMap(pkg => 
+      pkg.nodes.map(node => new CategoryNodeItem(node))
+    );
+    return allNodes;
+  }
+}
+
+export class CategoryNodeItem extends TreeItemBase {
+  constructor(private readonly node: NodeInfo) {
+    super(node.name, vscode.TreeItemCollapsibleState.None);
+    
+    this.description = `(${node.packageName})`;
+    this.iconPath = new vscode.ThemeIcon('broadcast');
+    this.contextValue = 'node';
+    this.command = { command: 'vscode.open', title: 'Open File', arguments: [vscode.Uri.file(node.path)] };
+    this.tooltip = new vscode.MarkdownString(`Package: ${node.packageName}`);
+  }
+  
+  getNodeInfo(): NodeInfo {
+    return this.node;
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
+export class CategoryInterfacesFolderItem extends TreeItemBase {
+  constructor(private readonly packages: PackageInfo[]) {
+    super('Interfaces', vscode.TreeItemCollapsibleState.Collapsed);
+    
+    const allInterfaces = packages.flatMap(pkg => pkg.interfaces);
+    this.description = `(${allInterfaces.length})`;
+    this.iconPath = new vscode.ThemeIcon('link');
+    this.contextValue = 'categoryInterfacesFolder';
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    const children: TreeItemBase[] = [];
+    
+    for (const pkg of this.packages) {
+      const messages = pkg.interfaces.filter(i => i.type === 'message');
+      const services = pkg.interfaces.filter(i => i.type === 'service');
+      const actions = pkg.interfaces.filter(i => i.type === 'action');
+      
+      if (messages.length > 0) {
+        children.push(new CategoryInterfaceGroupItem(`Messages (${pkg.name})`, messages, pkg.name));
+      }
+      
+      if (services.length > 0) {
+        children.push(new CategoryInterfaceGroupItem(`Services (${pkg.name})`, services, pkg.name));
+      }
+      
+      if (actions.length > 0) {
+        children.push(new CategoryInterfaceGroupItem(`Actions (${pkg.name})`, actions, pkg.name));
+      }
+    }
+    
+    return children;
+  }
+}
+
+export class CategoryInterfaceGroupItem extends TreeItemBase {
+  constructor(
+    groupName: string,
+    private readonly interfaces: InterfaceInfo[],
+    private readonly packageName: string
+  ) {
+    super(groupName, vscode.TreeItemCollapsibleState.Collapsed);
+    
+    this.description = `(${interfaces.length})`;
+    this.iconPath = new vscode.ThemeIcon('files');
+    this.contextValue = 'interfaceGroup';
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    return this.interfaces.map(iface => new CategoryInterfaceFileItem(iface, this.packageName));
+  }
+}
+
+export class CategoryInterfaceFileItem extends TreeItemBase {
+  constructor(
+    private readonly iface: InterfaceInfo,
+    private readonly packageName: string
+  ) {
+    super(iface.name, vscode.TreeItemCollapsibleState.None);
+    
+    const extension = this.getInterfaceExtension(iface.type);
+    this.description = `.${extension} (${packageName})`;
+    this.iconPath = new vscode.ThemeIcon('symbol-interface');
+    this.contextValue = 'interfaceFile';
+    this.command = { command: 'vscode.open', title: 'Open File', arguments: [vscode.Uri.file(iface.path)] };
+    
+    this.updateTooltip();
+  }
+  
+  private getInterfaceExtension(type: string): string {
+    switch (type) {
+      case 'message': return 'msg';
+      case 'service': return 'srv';
+      case 'action': return 'action';
+      default: return 'interface';
+    }
+  }
+  
+  private updateTooltip(): void {
+    const lines: string[] = [
+      `**${this.iface.name}**`,
+      '',
+      `Type: ${this.iface.type}`,
+      `Package: ${this.packageName}`,
+      '',
+      `**Fields (${this.iface.fields.length}):**`,
+    ];
+    
+    this.iface.fields.forEach(f => {
+      const arrayInfo = f.isArray ? (f.arraySize !== undefined ? `[${f.arraySize}]` : '[]') : '';
+      lines.push(`- ${f.type}${arrayInfo} ${f.name}`);
+    });
+    
+    this.tooltip = new vscode.MarkdownString(lines.join('\n'));
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
+export class CategoryLaunchFilesFolderItem extends TreeItemBase {
+  constructor(private readonly packages: PackageInfo[]) {
+    super('Launch Files', vscode.TreeItemCollapsibleState.Collapsed);
+    
+    const allLaunchFiles = packages.flatMap(pkg => pkg.launchFiles);
+    this.description = `(${allLaunchFiles.length})`;
+    this.iconPath = new vscode.ThemeIcon('rocket');
+    this.contextValue = 'categoryLaunchFilesFolder';
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    const allLaunchFiles = this.packages.flatMap(pkg => 
+      pkg.launchFiles.map(file => new CategoryLaunchFileItem(file, pkg.name))
+    );
+    return allLaunchFiles;
+  }
+}
+
+export class CategoryLaunchFileItem extends TreeItemBase {
+  constructor(
+    private readonly file: LaunchFileInfo,
+    private readonly packageName: string
+  ) {
+    super(file.name, vscode.TreeItemCollapsibleState.None);
+    
+    this.description = `(${packageName})`;
+    this.iconPath = new vscode.ThemeIcon('file-code');
+    this.contextValue = 'launchFile';
+    this.command = { command: 'vscode.open', title: 'Open File', arguments: [vscode.Uri.file(file.path)] };
+    
+    this.tooltip = new vscode.MarkdownString(`**${this.file.name}**\n\nPackage: ${packageName}\nPath: ${file.path}`);
+  }
+  
+  getLaunchFileInfo(): LaunchFileInfo {
+    return this.file;
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
   }
 }
