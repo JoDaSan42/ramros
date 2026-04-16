@@ -84,6 +84,11 @@
         "command": "ramros.runLaunchFile",
         "title": "Run Launch File",
         "icon": "$(play-circle)"
+      },
+      {
+        "command": "ramros.addNodeToPackage",
+        "title": "Add Node/Interface to Package",
+        "icon": "$(add)"
       }
     ],
     "menus": {
@@ -166,6 +171,33 @@
         {
           "command": "ramros.runLaunchFile",
           "when": "view == ramrosExplorer && viewItem == launchFile"
+        },
+        {
+          "command": "ramros.addNodeToPackage",
+          "when": "view == ramrosExplorer && viewItem == package",
+          "group": "inline@3"
+        },
+        {
+          "command": "ramros.addNodeToPackage",
+          "when": "view == ramrosExplorer && viewItem == nodesFolder",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.addNodeToPackage",
+          "when": "view == ramrosExplorer && viewItem == interfacesFolder",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.addNodeToPackage",
+          "when": "view == ramrosExplorer && viewItem == package"
+        },
+        {
+          "command": "ramros.addNodeToPackage",
+          "when": "view == ramrosExplorer && viewItem == nodesFolder"
+        },
+        {
+          "command": "ramros.addNodeToPackage",
+          "when": "view == ramrosExplorer && viewItem == interfacesFolder"
         }
       ]
     }

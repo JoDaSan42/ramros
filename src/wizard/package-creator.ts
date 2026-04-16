@@ -22,6 +22,13 @@ interface PackageConfig {
   includeTemplateNode?: boolean;
 }
 
+interface AddNodeConfig {
+  nodeType: 'cpp' | 'python';
+  nodeName: string;
+  includeTemplateNode: boolean;
+  dependencies?: string[];
+}
+
 export class PackageCreator {
   private readonly templateDir: string;
 
@@ -228,6 +235,45 @@ if __name__ == '__main__':
     
     const nodeFilePath = path.join(pythonPackageDir, `${nodeName}.py`);
     fs.writeFileSync(nodeFilePath, pyContent);
+    
+    const setupPath = path.join(packagePath, 'setup.py');
+    if (!fs.existsSync(setupPath)) {
+      const setupContent = `from setuptools import setup
+
+package_name = '${config.packageName}'
+
+setup(
+    name=package_name,
+    version='0.0.0',
+    packages=[package_name],
+    data_files=[
+        ('share/' + package_name, ['package.xml']),
+        ('share/ament_index/resource_index/packages',
+            ['resource/' + package_name]),
+    ],
+    install_requires=['setuptools'],
+    zip_safe=True,
+    author='${config.authorName}',
+    author_email='${config.authorEmail}',
+    maintainer='${config.authorName}',
+    maintainer_email='${config.authorEmail}',
+    description='${config.description}',
+    license='${config.license}',
+    tests_require=['pytest'],
+    entry_points={
+        'console_scripts': [
+            '${nodeName} = {package_name}.{nodeName}:main',
+        ],
+    },
+)
+`;
+      const resourceDir = path.join(packagePath, 'resource');
+      if (!fs.existsSync(resourceDir)) {
+        fs.mkdirSync(resourceDir, { recursive: true });
+      }
+      fs.writeFileSync(path.join(resourceDir, config.packageName), '');
+      fs.writeFileSync(setupPath, setupContent);
+    }
   }
   
   private async writeLaunchFile(packagePath: string, packageName: string, nodeName: string): Promise<void> {
@@ -513,5 +559,368 @@ def generate_launch_description():
     } catch {
       return false;
     }
+  }
+
+  async addNodeToPackage(
+    packagePath: string,
+    packageName: string,
+    config: AddNodeConfig
+  ): Promise<void> {
+    if (config.nodeType === 'cpp') {
+      await this.addCppNode(packagePath, packageName, config.nodeName, config.includeTemplateNode);
+      
+      const deps = config.dependencies || [];
+      const defaultDeps = ['rclcpp', 'std_msgs'];
+      const allDeps = [...new Set([...deps, ...defaultDeps])];
+      
+      this.updateCppCMakeLists(packagePath, config.nodeName, allDeps);
+      this.addDependenciesToPackageXml(packagePath, allDeps);
+      
+    } else if (config.nodeType === 'python') {
+      await this.addPythonNode(packagePath, packageName, config.nodeName, config.includeTemplateNode);
+      
+      const deps = config.dependencies || [];
+      const defaultDeps = ['rclpy', 'std_msgs'];
+      const allDeps = [...new Set([...deps, ...defaultDeps])];
+      
+      this.updatePythonSetupPy(packagePath, packageName, config.nodeName);
+      this.addDependenciesToPackageXml(packagePath, allDeps);
+    }
+    
+    if (config.includeTemplateNode) {
+      await this.writeLaunchFile(packagePath, packageName, config.nodeName);
+    }
+  }
+
+  private async addCppNode(
+    packagePath: string,
+    packageName: string,
+    nodeName: string,
+    includeTemplate: boolean
+  ): Promise<void> {
+    const cppSrcDir = path.join(packagePath, 'src');
+    const includeDir = path.join(packagePath, 'include', packageName);
+    
+    if (!fs.existsSync(cppSrcDir)) fs.mkdirSync(cppSrcDir, { recursive: true });
+    if (!fs.existsSync(includeDir)) fs.mkdirSync(includeDir, { recursive: true });
+    
+    const cppClassName = this.toPascalCase(nodeName) + 'Node';
+    
+    if (includeTemplate) {
+      const cppContent = `#include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/string.hpp"
+
+using namespace std::chrono_literals;
+
+class ${cppClassName} : public rclcpp::Node
+{
+public:
+  ${cppClassName}()
+  : Node("${nodeName}")
+  {
+    publisher_ = this->create_publisher<std_msgs::msg::String>("topic", 10);
+    timer_ = this->create_wall_timer(
+      500ms,
+      [this]() { this->timer_callback(); });
+  }
+
+private:
+  void timer_callback()
+  {
+    static int64_t count = 0;
+    auto message = std_msgs::msg::String();
+    message.data = "Hello World: " + std::to_string(++count);
+    RCLCPP_INFO(this->get_logger(), "Publishing: '%s'", message.data.c_str());
+    publisher_->publish(message);
+  }
+
+  rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher_;
+};
+
+int main(int argc, char * argv[])
+{
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<${cppClassName}>());
+  rclcpp::shutdown();
+  return 0;
+}
+`;
+      fs.writeFileSync(path.join(cppSrcDir, `${nodeName}.cpp`), cppContent);
+      
+      const headerGuard = packageName.toUpperCase().replace(/-/g, '_');
+      const hppContent = `#ifndef ${headerGuard}_NODE_HPP
+#define ${headerGuard}_NODE_HPP
+
+#endif // ${headerGuard}_NODE_HPP
+`;
+      fs.writeFileSync(path.join(includeDir, `${nodeName}.hpp`), hppContent);
+    } else {
+      const cppContent = `#include "rclcpp/rclcpp.hpp"
+
+int main(int argc, char * argv[])
+{
+  rclcpp::init(argc, argv);
+  rclcpp::shutdown();
+  return 0;
+}
+`;
+      fs.writeFileSync(path.join(cppSrcDir, `${nodeName}.cpp`), cppContent);
+      
+      const headerGuard = packageName.toUpperCase().replace(/-/g, '_');
+      const hppContent = `#ifndef ${headerGuard}_NODE_HPP
+#define ${headerGuard}_NODE_HPP
+
+#endif // ${headerGuard}_NODE_HPP
+`;
+      fs.writeFileSync(path.join(includeDir, `${nodeName}.hpp`), hppContent);
+    }
+  }
+
+  private async addPythonNode(
+    packagePath: string,
+    packageName: string,
+    nodeName: string,
+    includeTemplate: boolean
+  ): Promise<void> {
+    const pythonPackageDir = path.join(packagePath, packageName);
+    
+    if (!fs.existsSync(pythonPackageDir)) {
+      fs.mkdirSync(pythonPackageDir, { recursive: true });
+      fs.writeFileSync(path.join(pythonPackageDir, '__init__.py'), '');
+    }
+    
+    const pythonClassName = this.toPascalCase(nodeName) + 'Node';
+    
+    if (includeTemplate) {
+      const pyContent = `import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+
+
+class ${pythonClassName}(Node):
+
+    def __init__(self):
+        super().__init__('${nodeName}')
+        self.publisher_ = self.create_publisher(String, 'topic', 10)
+        timer_period = 0.5
+        self.timer = self.create_timer(timer_period, self.timer_callback)
+        self.i = 0
+
+    def timer_callback(self):
+        msg = String()
+        msg.data = f'Hello from ${packageName}: {self.i}'
+        self.publisher_.publish(msg)
+        self.get_logger().info(f'Publishing: {msg.data}')
+        self.i += 1
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = ${pythonClassName}()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
+`;
+      fs.writeFileSync(path.join(pythonPackageDir, `${nodeName}.py`), pyContent);
+    } else {
+      const pyContent = `import rclpy
+from rclpy.node import Node
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = Node('${nodeName}')
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
+`;
+      fs.writeFileSync(path.join(pythonPackageDir, `${nodeName}.py`), pyContent);
+    }
+  }
+
+  private updateCppCMakeLists(
+    packagePath: string,
+    nodeName: string,
+    dependencies: string[]
+  ): void {
+    const cmakePath = path.join(packagePath, 'CMakeLists.txt');
+    let cmakeContent = fs.readFileSync(cmakePath, 'utf-8');
+    
+    for (const dep of dependencies) {
+      const findPackagePattern = new RegExp(`find_package\\(${dep} REQUIRED\\)`, 'i');
+      if (!findPackagePattern.test(cmakeContent)) {
+        const findPackageLine = `find_package(${dep} REQUIRED)`;
+        cmakeContent = cmakeContent.replace(
+          /(find_package\(ament_cmake REQUIRED\))/,
+          `$1\n${findPackageLine}`
+        );
+      }
+    }
+    
+    const executablePattern = new RegExp(`add_executable\\(${nodeName}`, 'i');
+    if (!executablePattern.test(cmakeContent)) {
+      const executableBlock = `\nadd_executable(${nodeName} src/${nodeName}.cpp)\nament_target_dependencies(${nodeName} ${dependencies.join(' ')})\n\ninstall(TARGETS ${nodeName}\n  DESTINATION lib/\${PROJECT_NAME})\n`;
+      
+      const installPattern = /install\s*\(\s*DIRECTORIES?/i;
+      if (installPattern.test(cmakeContent)) {
+        cmakeContent = cmakeContent.replace(installPattern, executableBlock + '\ninstall(DIRECTORIES');
+      } else {
+        cmakeContent = cmakeContent.replace(
+          /(ament_package\(\))/,
+          `${executableBlock}\n$1`
+        );
+      }
+    }
+    
+    fs.writeFileSync(cmakePath, cmakeContent);
+  }
+
+  private updatePythonSetupPy(
+    packagePath: string,
+    packageName: string,
+    nodeName: string
+  ): void {
+    const setupPath = path.join(packagePath, 'setup.py');
+    let setupContent = fs.readFileSync(setupPath, 'utf-8');
+    
+    const entryPointPattern = /console_scripts\s*:\s*\[/i;
+    const newEntryPoint = `'${nodeName} = ${packageName}.${nodeName}:main'`;
+    
+    if (entryPointPattern.test(setupContent)) {
+      const existingEntriesPattern = /console_scripts\s*:\s*\[([^\]]*)\]/i;
+      const match = setupContent.match(existingEntriesPattern);
+      
+      if (match && match[1]) {
+        const existingEntries = match[1].trim();
+        if (existingEntries && !existingEntries.includes(nodeName)) {
+          const updatedEntries = existingEntries.endsWith(',') 
+            ? `${existingEntries}\n            ${newEntryPoint},`
+            : `${existingEntries},\n            ${newEntryPoint},`;
+          
+          setupContent = setupContent.replace(
+            existingEntriesPattern,
+            `console_scripts: [\n            ${updatedEntries}\n        ]`
+          );
+        }
+      }
+    } else {
+      const entryPointsBlock = `entry_points={
+        'console_scripts': [
+            ${newEntryPoint},
+        ],
+    },`;
+      
+      setupContent = setupContent.replace(
+        /zip_safe=True,/,
+        `zip_safe=True,\n    ${entryPointsBlock}`
+      );
+    }
+    
+    fs.writeFileSync(setupPath, setupContent);
+  }
+
+  private addDependenciesToPackageXml(
+    packagePath: string,
+    dependencies: string[]
+  ): void {
+    const packageXmlPath = path.join(packagePath, 'package.xml');
+    let packageXmlContent = fs.readFileSync(packageXmlPath, 'utf-8');
+    
+    for (const dep of dependencies) {
+      const dependPattern = new RegExp(`<depend>${dep}</depend>`, 'i');
+      if (!dependPattern.test(packageXmlContent)) {
+        const buildExportPattern = /(<build_export_depend>[^<]+<\/build_export_depend>)/i;
+        if (buildExportPattern.test(packageXmlContent)) {
+          packageXmlContent = packageXmlContent.replace(
+            buildExportPattern,
+            `$1\n  <depend>${dep}</depend>`
+          );
+        } else {
+          const descriptionPattern = /(<description>[^<]*<\/description>)/i;
+          packageXmlContent = packageXmlContent.replace(
+            descriptionPattern,
+            `$1\n  <depend>${dep}</depend>`
+          );
+        }
+      }
+    }
+    
+    fs.writeFileSync(packageXmlPath, packageXmlContent);
+  }
+
+  async addInterfaceToPackage(
+    packagePath: string,
+    packageName: string,
+    interfaceDef: InterfaceDefinition,
+    additionalDependencies?: string[]
+  ): Promise<void> {
+    const interfaceDir = this.getInterfaceDirectory(packagePath, interfaceDef.type);
+    
+    if (!fs.existsSync(interfaceDir)) {
+      fs.mkdirSync(interfaceDir, { recursive: true });
+    }
+    
+    const filePath = path.join(interfaceDir, `${interfaceDef.name}.${this.getInterfaceExtension(interfaceDef.type)}`);
+    fs.writeFileSync(filePath, interfaceDef.definition);
+    
+    this.updateInterfaceCMakeLists(packagePath, interfaceDef);
+    
+    if (additionalDependencies && additionalDependencies.length > 0) {
+      this.addDependenciesToPackageXml(packagePath, additionalDependencies);
+    }
+  }
+
+  private getInterfaceDirectory(packagePath: string, type: 'message' | 'service' | 'action'): string {
+    switch (type) {
+      case 'message': return path.join(packagePath, 'msg');
+      case 'service': return path.join(packagePath, 'srv');
+      case 'action': return path.join(packagePath, 'action');
+    }
+  }
+
+  private updateInterfaceCMakeLists(
+    packagePath: string,
+    newInterface: InterfaceDefinition
+  ): void {
+    const cmakePath = path.join(packagePath, 'CMakeLists.txt');
+    let cmakeContent = fs.readFileSync(cmakePath, 'utf-8');
+    
+    const extension = this.getInterfaceExtension(newInterface.type);
+    const newInterfaceFile = `"${newInterface.type === 'message' ? 'msg' : newInterface.type === 'service' ? 'srv' : 'action'}/${newInterface.name}.${extension}"`;
+    
+    const rosidlPattern = /(rosidl_generate_interfaces\(\$\{PROJECT_NAME\})([\s\S]*?)(\))/;
+    const match = cmakeContent.match(rosidlPattern);
+    
+    if (match) {
+      const existingFiles = match[2];
+      if (!existingFiles.includes(newInterface.name)) {
+        const updatedFiles = `${existingFiles.trim()}\n  ${newInterfaceFile}`;
+        cmakeContent = cmakeContent.replace(
+          rosidlPattern,
+          `$1${updatedFiles}$3`
+        );
+      }
+    } else {
+      const rosidlBlock = `rosidl_generate_interfaces(\${PROJECT_NAME}
+  ${newInterfaceFile}
+  DEPENDENCIES builtin_interfaces
+)`;
+      
+      cmakeContent = cmakeContent.replace(
+        /(ament_package\(\))/,
+        `${rosidlBlock}\n\n$1`
+      );
+    }
+    
+    fs.writeFileSync(cmakePath, cmakeContent);
   }
 }

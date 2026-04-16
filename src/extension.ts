@@ -9,7 +9,7 @@ import { RamrosTreeProvider } from './treeview/tree-provider';
 import { TerminalManager } from './executor/terminal-manager';
 import { PackageCreator } from './wizard/package-creator';
 import { PackageFormValidator } from './wizard/package-form-validator';
-import { NodeInfo, LaunchFileInfo, PackageDiscoveryService } from './core/package-discovery';
+import { NodeInfo, LaunchFileInfo, PackageDiscoveryService, PackageInfo } from './core/package-discovery';
 import { TreeItemBase } from './treeview/tree-items';
 
 let cacheManager: CacheManager;
@@ -735,6 +735,302 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       
       await terminalManager.executeInTerminal(runCommand, selectedWorkspace);
+    }),
+    
+    vscode.commands.registerCommand('ramros.addNodeToPackage', async (treeItem?: TreeItemBase) => {
+      const workspaces = treeProvider.getWorkspaces();
+      if (workspaces.length === 0) {
+        void vscode.window.showWarningMessage('No ROS2 workspaces found');
+        return;
+      }
+      
+      let selectedPackage: PackageInfo | undefined;
+      
+      if (treeItem && 'getPackageInfo' in treeItem && typeof treeItem.getPackageInfo === 'function') {
+        selectedPackage = treeItem.getPackageInfo();
+      }
+      
+      if (!selectedPackage) {
+        const packages = workspaces.flatMap(w => w.packages || []);
+        if (packages.length === 0) {
+          void vscode.window.showWarningMessage('No packages found');
+          return;
+        }
+        
+        const packageNames = packages.map(p => p.name);
+        const selected = await vscode.window.showQuickPick(packageNames, {
+          placeHolder: 'Select a package'
+        });
+        
+        if (!selected) return;
+        
+        selectedPackage = packages.find(p => p.name === selected);
+      }
+      
+      if (!selectedPackage) return;
+      
+      const addType = await vscode.window.showQuickPick([
+        { label: 'node', description: 'Add a new node (C++ or Python)' },
+        { label: 'interface', description: 'Add a new interface (msg/srv/action)' }
+      ], {
+        placeHolder: 'What would you like to add?'
+      });
+      
+      if (!addType) return;
+      
+      if (addType.label === 'interface') {
+        const validateInterfaceName = (value: string): string | null => {
+          if (!value || value.trim().length === 0) {
+            return 'Name cannot be empty';
+          }
+          if (!/^[A-Z][a-zA-Z0-9_]*$/.test(value)) {
+            return 'Name must start with uppercase letter and contain only letters, numbers, and underscores';
+          }
+          return null;
+        };
+        
+        const validateFieldType = (value: string): string | null => {
+          const validTypes = [
+            'bool', 'byte', 'char',
+            'float32', 'float64',
+            'int8', 'uint8', 'int16', 'uint16', 'int32', 'uint32', 'int64', 'uint64',
+            'string', 'wstring'
+          ];
+          if (!value || value.trim().length === 0) {
+            return 'Type cannot be empty';
+          }
+          if (!validTypes.includes(value.toLowerCase())) {
+            return `Unknown type '${value}'. Valid types: ${validTypes.join(', ')}`;
+          }
+          return null;
+        };
+        
+        const validateFieldName = (value: string): string | null => {
+          if (!value || value.trim().length === 0) {
+            return 'Field name cannot be empty';
+          }
+          if (!/^[a-z][a-zA-Z0-9_]*$/.test(value)) {
+            return 'Field name must start with lowercase letter and contain only letters, numbers, and underscores';
+          }
+          return null;
+        };
+        
+        const collectFields = async (sectionName: string): Promise<string[]> => {
+          const fields: string[] = [];
+          
+          void vscode.window.showInformationMessage(`Adding fields for ${sectionName}`);
+          
+          const addAnotherField = async (): Promise<boolean> => {
+            const fieldType = await vscode.window.showInputBox({
+              prompt: `Enter field type for ${sectionName}`,
+              placeHolder: 'string, int32, float64, etc.',
+              validateInput: validateFieldType
+            });
+            
+            if (!fieldType) {
+              return false;
+            }
+            
+            const fieldName = await vscode.window.showInputBox({
+              prompt: `Enter field name for ${sectionName}`,
+              placeHolder: 'my_field',
+              validateInput: validateFieldName
+            });
+            
+            if (!fieldName) {
+              return false;
+            }
+            
+            fields.push(`${fieldType} ${fieldName}`);
+            void vscode.window.showInformationMessage(`Added field: ${fieldType} ${fieldName}`);
+            
+            const addMoreChoice = await vscode.window.showQuickPick([
+              { label: 'yes', description: 'Add another field' },
+              { label: 'no', description: sectionName === 'request' || sectionName === 'goal' 
+                ? `Continue to ${sectionName === 'request' ? 'response' : 'feedback'} fields`
+                : sectionName === 'response' || sectionName === 'feedback'
+                ? sectionName === 'response' ? 'Finish service' : 'Continue to result fields'
+                : 'Finish interface' }
+            ], {
+              placeHolder: `Add another field to ${sectionName}?`
+            });
+            
+            return addMoreChoice?.label === 'yes';
+          };
+          
+          let shouldAddMore = true;
+          while (shouldAddMore) {
+            shouldAddMore = await addAnotherField();
+          }
+          
+          return fields;
+        };
+        
+        const buildDefinition = (fields: string[]): string => {
+          return fields.join('\n');
+        };
+        
+        const interfaceTypePick = await vscode.window.showQuickPick([
+          { label: 'message', description: 'Message (.msg)', detail: 'Data structures for publishing/subscribing' },
+          { label: 'service', description: 'Service (.srv)', detail: 'Request/response communication' },
+          { label: 'action', description: 'Action (.action)', detail: 'Goal-based long-running tasks' }
+        ], {
+          placeHolder: 'Select interface type'
+        });
+        
+        if (!interfaceTypePick) return;
+        
+        const interfaceType = interfaceTypePick.label as 'message' | 'service' | 'action';
+        
+        const name = await vscode.window.showInputBox({
+          prompt: `Enter ${interfaceType} name`,
+          placeHolder: `My${interfaceType.charAt(0).toUpperCase() + interfaceType.slice(1)}`,
+          validateInput: validateInterfaceName
+        });
+        
+        if (!name) return;
+        
+        let definition = '';
+        
+        if (interfaceType === 'message') {
+          const msgFields = await collectFields('message');
+          if (msgFields.length === 0) {
+            void vscode.window.showWarningMessage('No fields defined for message');
+            return;
+          }
+          definition = buildDefinition(msgFields);
+        } else if (interfaceType === 'service') {
+          const reqFields = await collectFields('request');
+          if (reqFields.length === 0) {
+            void vscode.window.showWarningMessage('No fields defined for request');
+            return;
+          }
+          const respFields = await collectFields('response');
+          if (respFields.length === 0) {
+            void vscode.window.showWarningMessage('No fields defined for response');
+            return;
+          }
+          definition = `${buildDefinition(reqFields)}\n---\n${buildDefinition(respFields)}`;
+        } else if (interfaceType === 'action') {
+          const goalFields = await collectFields('goal');
+          if (goalFields.length === 0) {
+            void vscode.window.showWarningMessage('No fields defined for goal');
+            return;
+          }
+          const feedbackFields = await collectFields('feedback');
+          if (feedbackFields.length === 0) {
+            void vscode.window.showWarningMessage('No fields defined for feedback');
+            return;
+          }
+          const resultFields = await collectFields('result');
+          if (resultFields.length === 0) {
+            void vscode.window.showWarningMessage('No fields defined for result');
+            return;
+          }
+          definition = `${buildDefinition(goalFields)}\n---\n${buildDefinition(feedbackFields)}\n---\n${buildDefinition(resultFields)}`;
+        }
+        
+        try {
+          await packageCreator.addInterfaceToPackage(
+            selectedPackage.path,
+            selectedPackage.name,
+            { type: interfaceType, name, definition }
+          );
+          await treeProvider.refresh();
+          void vscode.window.showInformationMessage(`Interface '${name}' added to package '${selectedPackage.name}'`);
+          void vscode.window.showInformationMessage('Build workspace to compile');
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          void vscode.window.showErrorMessage(`Failed to add interface: ${message}`);
+        }
+        
+        return;
+      }
+      
+      const isCppPackage = selectedPackage.packageType === 'cpp' || selectedPackage.packageType === 'mixed';
+      const isPythonPackage = selectedPackage.packageType === 'python' || selectedPackage.packageType === 'mixed';
+      
+      let languageChoices: { label: string; description: string }[] = [];
+      if (isCppPackage && isPythonPackage) {
+        languageChoices = [
+          { label: 'cpp', description: 'C++ node' },
+          { label: 'python', description: 'Python node' }
+        ];
+      } else if (isCppPackage) {
+        languageChoices = [{ label: 'cpp', description: 'C++ node' }];
+      } else if (isPythonPackage) {
+        languageChoices = [{ label: 'python', description: 'Python node' }];
+      }
+      
+      if (languageChoices.length === 0) {
+        void vscode.window.showErrorMessage('Package type not recognized');
+        return;
+      }
+      
+      const languagePick = languageChoices.length === 1 
+        ? languageChoices[0]
+        : await vscode.window.showQuickPick(languageChoices, {
+            placeHolder: 'Select node language'
+          });
+      
+      if (!languagePick) return;
+      
+      const nodeName = await vscode.window.showInputBox({
+        prompt: 'Enter node name',
+        placeHolder: 'my_node',
+        validateInput: (value) => {
+          if (!value || value.trim().length === 0) {
+            return 'Node name cannot be empty';
+          }
+          if (!/^[a-z][a-z0-9_]*$/.test(value)) {
+            return 'Node name must start with lowercase letter and contain only lowercase letters, numbers, and underscores';
+          }
+          return null;
+        }
+      });
+      
+      if (!nodeName) return;
+      
+      const includeTemplate = await vscode.window.showQuickPick([
+        { label: 'yes', description: 'Create node with template implementation' },
+        { label: 'no', description: 'Create empty node file' }
+      ], {
+        placeHolder: 'Include template node implementation?'
+      });
+      
+      const useTemplate = includeTemplate?.label === 'yes';
+      
+      let defaultDeps: string[] = [];
+      if (languagePick.label === 'cpp') {
+        defaultDeps = ['rclcpp', 'std_msgs'];
+      } else {
+        defaultDeps = ['rclpy', 'std_msgs'];
+      }
+      
+      const depsInput = await vscode.window.showInputBox({
+        prompt: 'Enter additional dependencies (comma-separated)',
+        placeHolder: defaultDeps.join(', '),
+        value: defaultDeps.join(', ')
+      });
+      
+      const dependencies = depsInput && depsInput.trim().length > 0
+        ? depsInput.split(',').map((d: string) => d.trim()).filter((d: string) => d.length > 0)
+        : defaultDeps;
+      
+      try {
+        await packageCreator.addNodeToPackage(selectedPackage.path, selectedPackage.name, {
+          nodeType: languagePick.label as 'cpp' | 'python',
+          nodeName,
+          includeTemplateNode: useTemplate,
+          dependencies
+        });
+        await treeProvider.refresh();
+        void vscode.window.showInformationMessage(`Node '${nodeName}' added to package '${selectedPackage.name}'`);
+        void vscode.window.showInformationMessage('Build workspace to compile');
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        void vscode.window.showErrorMessage(`Failed to add node: ${message}`);
+      }
     })
   );
   

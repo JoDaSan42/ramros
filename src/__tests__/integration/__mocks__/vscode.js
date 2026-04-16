@@ -45,6 +45,9 @@ module.exports = {
   MarkdownString: class MarkdownString {
     constructor(_value) {}
   },
+  RelativePattern: class RelativePattern {
+    constructor(_baseUriOrWorkspaceFolder, _path) {}
+  },
   Uri: {
     file: (path) => ({ fsPath: path, path }),
     joinPath: (uri, ...paths) => {

@@ -135,7 +135,7 @@ export class PackageDiscoveryService {
 
   private async buildPackageInfo(packageXmlPath: string): Promise<PackageInfo> {
     const packageDir = path.dirname(packageXmlPath);
-    const xmlData = await this.parsePackageXml(packageXmlPath);
+    const xmlData = await this.parsePackageXml(packageXmlPath) || {};
     const packageType = this.detectPackageType(packageDir);
     const packageName = xmlData.name || path.basename(packageDir);
     const nodes = await this.findExecutableNodes(packageDir, packageType, packageName);
@@ -158,7 +158,11 @@ export class PackageDiscoveryService {
     };
   }
 
-  async parsePackageXml(packageXmlPath: string): Promise<Partial<PackageInfo>> {
+  async parsePackageXml(packageXmlPath: string): Promise<Partial<PackageInfo> | undefined> {
+    if (!fs.existsSync(packageXmlPath)) {
+      return undefined;
+    }
+    
     const content = fs.readFileSync(packageXmlPath, 'utf-8');
     
     const name = this.extractXmlTag(content, 'name');

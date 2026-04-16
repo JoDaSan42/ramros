@@ -1,0 +1,11 @@
+geometry_msgs/PoseStamped goal_pose
+float64 max_speed
+float64 tolerance
+---
+geometry_msgs/Twist current_velocity
+float32 distance_remaining
+string navigation_status
+---
+bool success
+float64 total_time
+int32 error_code

@@ -90,7 +90,7 @@ describe('PackageCreator', () => {
       expect(fs.existsSync(packagePath)).toBe(true);
       expect(fs.existsSync(path.join(packagePath, 'src/cpp_node_cpp.cpp'))).toBe(false);
       expect(fs.existsSync(path.join(packagePath, 'src/cpp_node.cpp'))).toBe(true);
-      expect(fs.existsSync(path.join(packagePath, 'include/cpp_node.hpp'))).toBe(true);
+      expect(fs.existsSync(path.join(packagePath, 'include/cpp_node_pkg/cpp_node.hpp'))).toBe(true);
       expect(fs.existsSync(path.join(packagePath, 'launch/example_launch.py'))).toBe(true);
     });
 
@@ -159,7 +159,7 @@ describe('PackageCreator', () => {
       const nodePath = path.join(testWorkspace, 'src', 'test_py', 'test_py', 'my_py_node.py');
       const content = fs.readFileSync(nodePath, 'utf-8');
 
-      expect(content).toContain('class my_py_node');
+      expect(content).toContain('class TestPyNode');
       expect(content).toContain('import rclpy');
       expect(content).toContain('def main(args=None)');
     });
@@ -244,6 +244,250 @@ describe('PackageCreator', () => {
       await expect(creator.createPackage(testWorkspace, config)).rejects.toThrow(
         "Template 'nonexistent' not found"
       );
+    });
+  });
+
+  describe('addNodeToPackage - C++ nodes', () => {
+    let cppPackagePath: string;
+
+    beforeEach(async () => {
+      const config = {
+        packageName: 'cpp_test_pkg',
+        description: 'C++ test package',
+        authorName: 'Test User',
+        authorEmail: 'test@example.com',
+        license: 'MIT',
+        buildType: 'ament_cmake' as const,
+        template: 'minimal-cpp' as const,
+        nodeName: 'original_node',
+        dependencies: ['rclcpp', 'std_msgs'],
+      };
+
+      await creator.createPackage(testWorkspace, config);
+      cppPackagePath = path.join(testWorkspace, 'src', 'cpp_test_pkg');
+    });
+
+    it('should add a new C++ node with template', async () => {
+      await creator.addNodeToPackage(cppPackagePath, 'cpp_test_pkg', {
+        nodeType: 'cpp',
+        nodeName: 'new_cpp_node',
+        includeTemplateNode: true,
+        dependencies: ['rclcpp', 'std_msgs'],
+      });
+
+      expect(fs.existsSync(path.join(cppPackagePath, 'src/new_cpp_node.cpp'))).toBe(true);
+      expect(fs.existsSync(path.join(cppPackagePath, 'include/cpp_test_pkg/new_cpp_node.hpp'))).toBe(true);
+
+      const cmakeContent = fs.readFileSync(path.join(cppPackagePath, 'CMakeLists.txt'), 'utf-8');
+      expect(cmakeContent).toContain('add_executable(new_cpp_node src/new_cpp_node.cpp)');
+      expect(cmakeContent).toContain('ament_target_dependencies(new_cpp_node rclcpp std_msgs)');
+      expect(cmakeContent).toContain('install(TARGETS new_cpp_node');
+    });
+
+    it('should add an empty C++ node without template', async () => {
+      await creator.addNodeToPackage(cppPackagePath, 'cpp_test_pkg', {
+        nodeType: 'cpp',
+        nodeName: 'empty_cpp_node',
+        includeTemplateNode: false,
+        dependencies: [],
+      });
+
+      expect(fs.existsSync(path.join(cppPackagePath, 'src/empty_cpp_node.cpp'))).toBe(true);
+      const nodeContent = fs.readFileSync(path.join(cppPackagePath, 'src/empty_cpp_node.cpp'), 'utf-8');
+      expect(nodeContent).not.toContain('class EmptyCppNodeNode');
+    });
+
+    it('should update package.xml with new dependencies', async () => {
+      await creator.addNodeToPackage(cppPackagePath, 'cpp_test_pkg', {
+        nodeType: 'cpp',
+        nodeName: 'dep_test_node',
+        includeTemplateNode: true,
+        dependencies: ['geometry_msgs', 'sensor_msgs'],
+      });
+
+      const packageXmlContent = fs.readFileSync(path.join(cppPackagePath, 'package.xml'), 'utf-8');
+      expect(packageXmlContent).toContain('<depend>geometry_msgs</depend>');
+      expect(packageXmlContent).toContain('<depend>sensor_msgs</depend>');
+    });
+
+    it('should generate valid C++ code for added node', async () => {
+      await creator.addNodeToPackage(cppPackagePath, 'cpp_test_pkg', {
+        nodeType: 'cpp',
+        nodeName: 'template_node',
+        includeTemplateNode: true,
+        dependencies: ['rclcpp', 'std_msgs'],
+      });
+
+      const nodePath = path.join(cppPackagePath, 'src/template_node.cpp');
+      const content = fs.readFileSync(nodePath, 'utf-8');
+
+      expect(content).toContain('class TemplateNodeNode');
+      expect(content).toContain('#include "rclcpp/rclcpp.hpp"');
+      expect(content).toContain('#include "std_msgs/msg/string.hpp"');
+      expect(content).toContain('rclcpp::init(argc, argv)');
+    });
+  });
+
+  describe('addNodeToPackage - Python nodes', () => {
+    let pythonPackagePath: string;
+
+    beforeEach(async () => {
+      const config = {
+        packageName: 'py_test_pkg',
+        description: 'Python test package',
+        authorName: 'Test User',
+        authorEmail: 'test@example.com',
+        license: 'MIT',
+        buildType: 'ament_python' as const,
+        template: 'minimal-python' as const,
+        nodeName: 'original_py_node',
+        dependencies: ['rclpy', 'std_msgs'],
+      };
+
+      await creator.createPackage(testWorkspace, config);
+      pythonPackagePath = path.join(testWorkspace, 'src', 'py_test_pkg');
+    });
+
+    it('should add a new Python node with template', async () => {
+      await creator.addNodeToPackage(pythonPackagePath, 'py_test_pkg', {
+        nodeType: 'python',
+        nodeName: 'new_py_node',
+        includeTemplateNode: true,
+        dependencies: ['rclpy', 'std_msgs'],
+      });
+
+      expect(fs.existsSync(path.join(pythonPackagePath, 'py_test_pkg/new_py_node.py'))).toBe(true);
+
+      const setupContent = fs.readFileSync(path.join(pythonPackagePath, 'setup.py'), 'utf-8');
+      expect(setupContent).toContain("'new_py_node = py_test_pkg.new_py_node:main'");
+    });
+
+    it('should add an empty Python node without template', async () => {
+      await creator.addNodeToPackage(pythonPackagePath, 'py_test_pkg', {
+        nodeType: 'python',
+        nodeName: 'empty_py_node',
+        includeTemplateNode: false,
+        dependencies: [],
+      });
+
+      expect(fs.existsSync(path.join(pythonPackagePath, 'py_test_pkg/empty_py_node.py'))).toBe(true);
+      const nodeContent = fs.readFileSync(path.join(pythonPackagePath, 'py_test_pkg/empty_py_node.py'), 'utf-8');
+      expect(nodeContent).not.toContain('class empty_py_node');
+    });
+
+    it('should update package.xml with new dependencies', async () => {
+      await creator.addNodeToPackage(pythonPackagePath, 'py_test_pkg', {
+        nodeType: 'python',
+        nodeName: 'dep_test_py_node',
+        includeTemplateNode: true,
+        dependencies: ['geometry_msgs', 'nav_msgs'],
+      });
+
+      const packageXmlContent = fs.readFileSync(path.join(pythonPackagePath, 'package.xml'), 'utf-8');
+      expect(packageXmlContent).toContain('<depend>geometry_msgs</depend>');
+      expect(packageXmlContent).toContain('<depend>nav_msgs</depend>');
+    });
+
+    it('should generate valid Python code for added node', async () => {
+      await creator.addNodeToPackage(pythonPackagePath, 'py_test_pkg', {
+        nodeType: 'python',
+        nodeName: 'template_py_node',
+        includeTemplateNode: true,
+        dependencies: ['rclpy', 'std_msgs'],
+      });
+
+      const nodePath = path.join(pythonPackagePath, 'py_test_pkg', 'template_py_node.py');
+      const content = fs.readFileSync(nodePath, 'utf-8');
+
+      expect(content).toContain('class TemplatePyNodeNode');
+      expect(content).toContain('import rclpy');
+      expect(content).toContain('from std_msgs.msg import String');
+      expect(content).toContain('def main(args=None)');
+    });
+  });
+
+  describe('addInterfaceToPackage', () => {
+    let interfacePackagePath: string;
+
+    beforeEach(async () => {
+      const config = {
+        packageName: 'interface_test_pkg',
+        description: 'Interface test package',
+        authorName: 'Test User',
+        authorEmail: 'test@example.com',
+        license: 'MIT',
+        buildType: 'ament_cmake' as const,
+        template: 'interface' as const,
+        dependencies: ['std_msgs'],
+      };
+
+      await creator.createPackage(testWorkspace, config);
+      interfacePackagePath = path.join(testWorkspace, 'src', 'interface_test_pkg');
+    });
+
+    it('should add a message interface', async () => {
+      await creator.addInterfaceToPackage(interfacePackagePath, 'interface_test_pkg', {
+        type: 'message',
+        name: 'TestMessage',
+        definition: 'string name\nint32 value',
+      });
+
+      expect(fs.existsSync(path.join(interfacePackagePath, 'msg/TestMessage.msg'))).toBe(true);
+      const msgContent = fs.readFileSync(path.join(interfacePackagePath, 'msg/TestMessage.msg'), 'utf-8');
+      expect(msgContent).toContain('string name');
+      expect(msgContent).toContain('int32 value');
+
+      const cmakeContent = fs.readFileSync(path.join(interfacePackagePath, 'CMakeLists.txt'), 'utf-8');
+      expect(cmakeContent).toContain('TestMessage.msg');
+    });
+
+    it('should add a service interface', async () => {
+      await creator.addInterfaceToPackage(interfacePackagePath, 'interface_test_pkg', {
+        type: 'service',
+        name: 'TestService',
+        definition: 'string request\n---\nbool response',
+      });
+
+      expect(fs.existsSync(path.join(interfacePackagePath, 'srv/TestService.srv'))).toBe(true);
+      const srvContent = fs.readFileSync(path.join(interfacePackagePath, 'srv/TestService.srv'), 'utf-8');
+      expect(srvContent).toContain('string request');
+      expect(srvContent).toContain('---');
+      expect(srvContent).toContain('bool response');
+
+      const cmakeContent = fs.readFileSync(path.join(interfacePackagePath, 'CMakeLists.txt'), 'utf-8');
+      expect(cmakeContent).toContain('TestService.srv');
+    });
+
+    it('should add an action interface', async () => {
+      await creator.addInterfaceToPackage(interfacePackagePath, 'interface_test_pkg', {
+        type: 'action',
+        name: 'TestAction',
+        definition: 'string goal\n---\nfloat32 feedback\n---\nbool result',
+      });
+
+      expect(fs.existsSync(path.join(interfacePackagePath, 'action/TestAction.action'))).toBe(true);
+      const actionContent = fs.readFileSync(path.join(interfacePackagePath, 'action/TestAction.action'), 'utf-8');
+      expect(actionContent).toContain('string goal');
+      expect(actionContent).toContain('---');
+      expect(actionContent).toContain('float32 feedback');
+      expect(actionContent).toContain('---');
+      expect(actionContent).toContain('bool result');
+
+      const cmakeContent = fs.readFileSync(path.join(interfacePackagePath, 'CMakeLists.txt'), 'utf-8');
+      expect(cmakeContent).toContain('TestAction.action');
+    });
+
+    it('should update CMakeLists.txt with rosidl_generate_interfaces', async () => {
+      await creator.addInterfaceToPackage(interfacePackagePath, 'interface_test_pkg', {
+        type: 'message',
+        name: 'NewMessage',
+        definition: 'int32 id',
+      });
+
+      const cmakeContent = fs.readFileSync(path.join(interfacePackagePath, 'CMakeLists.txt'), 'utf-8');
+      expect(cmakeContent).toContain('rosidl_generate_interfaces(${PROJECT_NAME}');
+      expect(cmakeContent).toContain('NewMessage.msg');
+      expect(cmakeContent).toContain('ament_package()');
     });
   });
 });

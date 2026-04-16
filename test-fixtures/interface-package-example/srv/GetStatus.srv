@@ -1,0 +1,4 @@
+---
+bool ready
+string status_message
+int32 battery_level
