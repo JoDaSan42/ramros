@@ -70,6 +70,29 @@ export class TerminalManager implements vscode.Disposable {
     return terminal;
   }
   
+  async executeInNewTerminal(command: string, workspace: WorkspaceInfo, terminalName?: string): Promise<vscode.Terminal> {
+    const name = terminalName || `ROS Run: ${new Date().toLocaleTimeString()}`;
+    
+    const terminal = vscode.window.createTerminal({
+      name
+    });
+    
+    terminal.show();
+    
+    if (workspace.installPath) {
+      const setupBashPath = path.join(workspace.installPath.fsPath, 'setup.bash');
+      if (fs.existsSync(setupBashPath)) {
+        terminal.sendText(`source "${setupBashPath}" && ${command}`);
+      } else {
+        terminal.sendText(command);
+      }
+    } else {
+      terminal.sendText(command);
+    }
+    
+    return terminal;
+  }
+  
   async buildWorkspace(workspace: WorkspaceInfo, options?: BuildOptions | string): Promise<vscode.Terminal> {
     const packageName = typeof options === 'string' ? options : options?.packageName;
     const useSymlinkInstall = typeof options === 'object' ? options?.useSymlinkInstall : false;

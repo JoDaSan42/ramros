@@ -595,7 +595,7 @@ export async function activate(context: vscode.ExtensionContext) {
         runCommand = `ros2 run ${nodeToRun.packageName} ${nodeToRun.name}`;
       }
       
-      await terminalManager.executeInTerminal(runCommand, selectedWorkspace);
+      await terminalManager.executeInNewTerminal(runCommand, selectedWorkspace, `Node: ${nodeToRun.name}`);
     }),
     
     vscode.commands.registerCommand('ramros.debugNode', async (treeItem?: TreeItemBase) => {
@@ -743,7 +743,7 @@ export async function activate(context: vscode.ExtensionContext) {
         runCommand = `ros2 launch ${launchFileToRun.path}`;
       }
       
-      await terminalManager.executeInTerminal(runCommand, selectedWorkspace);
+      await terminalManager.executeInNewTerminal(runCommand, selectedWorkspace, `Launch: ${launchFileToRun.name}`);
     }),
     
     vscode.commands.registerCommand('ramros.addNodeToPackage', async (treeItem?: TreeItemBase) => {
