@@ -1,11 +1,13 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { execSync } from 'child_process';
 import { RosEnvironmentService } from './core/ros-environment';
 import { WorkspaceDetector, WorkspaceInfo } from './core/workspace-detector';
 import { DuplicatePackageDetector } from './core/duplicate-package-detector';
 import { CacheManager } from './cache/cache-manager';
 import { RamrosTreeProvider } from './treeview/tree-provider';
+import { ToolsTreeProvider } from './treeview/tools-tree-provider';
 import { TerminalManager } from './executor/terminal-manager';
 import { PackageCreator } from './wizard/package-creator';
 import { PackageFormValidator } from './wizard/package-form-validator';
@@ -15,7 +17,45 @@ import { TreeItemBase } from './treeview/tree-items';
 let cacheManager: CacheManager;
 let terminalManager: TerminalManager;
 let treeProvider: RamrosTreeProvider;
+let toolsTreeProvider: ToolsTreeProvider;
 let packageCreator: PackageCreator;
+
+async function pickWorkspace(): Promise<WorkspaceInfo | undefined> {
+  const workspaces = treeProvider.getWorkspaces();
+  
+  if (workspaces.length === 0) {
+    void vscode.window.showWarningMessage('No ROS2 workspaces found');
+    return undefined;
+  }
+  
+  if (workspaces.length === 1) {
+    return workspaces[0];
+  }
+  
+  const workspaceNames = workspaces.map(w => w.name);
+  const selected = await vscode.window.showQuickPick(workspaceNames, {
+    placeHolder: 'Select a workspace'
+  });
+  
+  if (!selected) return undefined;
+  
+  return workspaces.find(w => w.name === selected);
+}
+
+function executeCommandAndGetOutput(command: string): string[] {
+  try {
+    const output = execSync(command, { encoding: 'utf-8' });
+    return output.split('\n').filter(line => line.trim().length > 0);
+  } catch (error) {
+    console.error(`Failed to execute command: ${command}`, error);
+    return [];
+  }
+}
+
+async function discoverTopics(): Promise<string[]> {
+  const topics = executeCommandAndGetOutput('ros2 topic list');
+  return topics;
+}
 
 export async function activate(context: vscode.ExtensionContext) {
   console.log('RAMROS Extension activated');
@@ -37,6 +77,7 @@ export async function activate(context: vscode.ExtensionContext) {
   terminalManager = new TerminalManager();
   
   treeProvider = new RamrosTreeProvider(workspaceDetector, duplicateDetector, packageDiscovery);
+  toolsTreeProvider = new ToolsTreeProvider();
   
   packageCreator = new PackageCreator(context.extensionPath);
   
@@ -45,8 +86,14 @@ export async function activate(context: vscode.ExtensionContext) {
     showCollapseAll: true
   });
   
+  const toolsTreeView = vscode.window.createTreeView('ramrosTools', {
+    treeDataProvider: toolsTreeProvider,
+    showCollapseAll: false
+  });
+  
   context.subscriptions.push(
     treeView,
+    toolsTreeView,
     cacheManager,
     terminalManager,
     
@@ -1040,6 +1087,79 @@ export async function activate(context: vscode.ExtensionContext) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         void vscode.window.showErrorMessage(`Failed to add node: ${message}`);
       }
+    }),
+    
+    vscode.commands.registerCommand('ramros.launchTool.rviz2', async () => {
+      const workspace = await pickWorkspace();
+      if (!workspace) return;
+      await terminalManager.executeInNewTerminal('rviz2', workspace, 'RVIZ2');
+    }),
+    
+    vscode.commands.registerCommand('ramros.launchTool.rqt_graph', async () => {
+      const workspace = await pickWorkspace();
+      if (!workspace) return;
+      await terminalManager.executeInNewTerminal('rqt_graph', workspace, 'rqt_graph');
+    }),
+    
+
+    
+    vscode.commands.registerCommand('ramros.launchTool.bag-record', async () => {
+      const workspace = await pickWorkspace();
+      if (!workspace) return;
+      
+      const filename = await vscode.window.showInputBox({
+        prompt: 'Enter bag filename (without extension)',
+        placeHolder: 'my_recording'
+      });
+      
+      if (!filename) return;
+      
+      const topics = await discoverTopics();
+      
+      if (topics.length === 0) {
+        void vscode.window.showWarningMessage('No topics available to record');
+        return;
+      }
+      
+      const topicItems = topics.map(topic => ({
+        label: topic,
+        picked: true
+      }));
+      
+      const selectedTopics = await vscode.window.showQuickPick(topicItems, {
+        canPickMany: true,
+        placeHolder: 'Select topics to record (click to toggle)'
+      });
+      
+      if (!selectedTopics || selectedTopics.length === 0) {
+        void vscode.window.showWarningMessage('No topics selected for recording');
+        return;
+      }
+      
+      const topicArgs = selectedTopics.map(t => `-t ${t.label}`).join(' ');
+      const recordCommand = `ros2 bag record -o ${filename} ${topicArgs}`;
+      
+      await terminalManager.executeInNewTerminal(recordCommand, workspace, `Bag Record: ${filename}`);
+    }),
+    
+    vscode.commands.registerCommand('ramros.launchTool.bag-play', async () => {
+      const workspace = await pickWorkspace();
+      if (!workspace) return;
+      
+      const selectedUris = await vscode.window.showOpenDialog({
+        openLabel: 'Select Bag File',
+        filters: {
+          'ROS2 Bag Files': ['db3', 'mcap']
+        },
+        canSelectMany: false
+      });
+      
+      if (!selectedUris || selectedUris.length === 0) return;
+      
+      const bagPath = selectedUris[0].fsPath;
+      const playCommand = `ros2 bag play "${bagPath}"`;
+      
+      await terminalManager.executeInNewTerminal(playCommand, workspace, `Bag Play: ${path.basename(bagPath)}`);
     })
   );
   

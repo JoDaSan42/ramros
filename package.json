@@ -17,7 +17,8 @@
     "Programming Languages"
   ],
   "activationEvents": [
-    "onView:ramrosExplorer"
+    "onView:ramrosExplorer",
+    "onView:ramrosTools"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -33,9 +34,14 @@
     "views": {
       "ramros-container": [
         {
+          "id": "ramrosTools",
+          "name": "ROS2 Tools",
+          "icon": "$(tools)"
+        },
+        {
           "id": "ramrosExplorer",
-          "name": "RAMROS Explorer",
-          "icon": "$(debug-start)"
+          "name": "Workspaces",
+          "icon": "$(folder)"
         }
       ]
     },
@@ -95,6 +101,27 @@
         "command": "ramros.addNodeToPackage",
         "title": "Add Node/Interface to Package",
         "icon": "$(add)"
+      },
+      {
+        "command": "ramros.launchTool.rviz2",
+        "title": "Launch RVIZ2",
+        "icon": "$(vm)"
+      },
+      {
+        "command": "ramros.launchTool.rqt_graph",
+        "title": "Launch rqt_graph",
+        "icon": "$(graph)"
+      },
+
+      {
+        "command": "ramros.launchTool.bag-record",
+        "title": "Record Bag File",
+        "icon": "$(record)"
+      },
+      {
+        "command": "ramros.launchTool.bag-play",
+        "title": "Play Bag File",
+        "icon": "$(play-circle)"
       }
     ],
     "menus": {
@@ -209,6 +236,22 @@
         {
           "command": "ramros.addNodeToPackage",
           "when": "view == ramrosExplorer && viewItem == interfacesFolder"
+        },
+        {
+          "command": "ramros.launchTool.rviz2",
+          "when": "view == ramrosTools && viewItem == tool"
+        },
+        {
+          "command": "ramros.launchTool.rqt_graph",
+          "when": "view == ramrosTools && viewItem == tool"
+        },
+        {
+          "command": "ramros.launchTool.bag-record",
+          "when": "view == ramrosTools && viewItem == tool"
+        },
+        {
+          "command": "ramros.launchTool.bag-play",
+          "when": "view == ramrosTools && viewItem == tool"
         }
       ]
     }

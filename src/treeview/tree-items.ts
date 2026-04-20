@@ -7,6 +7,59 @@ export abstract class TreeItemBase extends vscode.TreeItem {
   abstract getChildren(): Promise<TreeItemBase[]>;
 }
 
+export class ToolsFolderItem extends TreeItemBase {
+  constructor() {
+    super('Tools', vscode.TreeItemCollapsibleState.Collapsed);
+    this.iconPath = new vscode.ThemeIcon('tools');
+    this.contextValue = 'toolsFolder';
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [
+      new ToolItem('RVIZ2', 'rviz2', 'vm'),
+      new ToolItem('rqt_graph', 'rqt_graph', 'symbol-network'),
+      new ToolItem('ros2 bag record', 'bag-record', 'record'),
+      new ToolItem('ros2 bag play', 'bag-play', 'play-circle')
+    ];
+  }
+}
+
+export class SeparatorItem extends TreeItemBase {
+  constructor(label: string) {
+    super('', vscode.TreeItemCollapsibleState.None);
+    this.label = '';
+    this.iconPath = undefined;
+    this.contextValue = 'separator';
+    this.description = label;
+    this.tooltip = undefined;
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
+export class ToolItem extends TreeItemBase {
+  constructor(
+    label: string,
+    private readonly toolType: string,
+    iconId: string
+  ) {
+    super(label, vscode.TreeItemCollapsibleState.None);
+    this.iconPath = new vscode.ThemeIcon(iconId);
+    this.contextValue = 'tool';
+    this.command = { command: `ramros.launchTool.${toolType}`, title: 'Launch Tool' };
+  }
+  
+  getToolType(): string {
+    return this.toolType;
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
 export class WorkspaceRootItem extends TreeItemBase {
   constructor(private readonly workspace: WorkspaceInfo) {
     super(workspace.name, vscode.TreeItemCollapsibleState.Expanded);
