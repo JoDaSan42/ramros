@@ -40,6 +40,9 @@ export interface ParameterInfo {
 export interface TopicEndpointInfo {
   topicName: string;
   messageType: string;
+  nodeName?: string;
+  nodeNamespace?: string;
+  messageTypes?: string[];
 }
 
 export interface ServiceInfo {

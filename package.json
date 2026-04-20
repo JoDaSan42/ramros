@@ -134,13 +134,9 @@
         "icon": "$(refresh)"
       },
       {
-        "command": "ramros.live.startMonitoring",
-        "title": "Start Monitoring Topic Hz",
-        "icon": "$(pulse)"
-      },
-      {
-        "command": "ramros.live.stopMonitoring",
-        "title": "Stop Monitoring Topic Hz"
+        "command": "ramros.live.settings",
+        "title": "Live View Settings",
+        "icon": "$(gear)"
       }
     ],
     "menus": {
@@ -156,9 +152,14 @@
           "group": "navigation"
         },
         {
+          "command": "ramros.live.settings",
+          "when": "view == ramrosLive",
+          "group": "navigation@1"
+        },
+        {
           "command": "ramros.live.refresh",
           "when": "view == ramrosLive",
-          "group": "navigation"
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -276,24 +277,6 @@
         {
           "command": "ramros.launchTool.bag-play",
           "when": "view == ramrosTools && viewItem == tool"
-        },
-        {
-          "command": "ramros.live.startMonitoring",
-          "when": "view == ramrosLive && viewItem == liveTopic",
-          "group": "inline@1"
-        },
-        {
-          "command": "ramros.live.stopMonitoring",
-          "when": "view == ramrosLive && viewItem == liveTopic",
-          "group": "inline@2"
-        },
-        {
-          "command": "ramros.live.startMonitoring",
-          "when": "view == ramrosLive && viewItem == liveTopic"
-        },
-        {
-          "command": "ramros.live.stopMonitoring",
-          "when": "view == ramrosLive && viewItem == liveTopic"
         }
       ]
     },
@@ -306,6 +289,11 @@
           "minimum": 1,
           "maximum": 60,
           "description": "Refresh rate for ROS2 Live view in seconds"
+        },
+        "ramros.liveView.hideSystemTopics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Hide system topics like /parameter_events and /rosout from the Live view"
         }
       }
     }

@@ -1175,52 +1175,8 @@ export async function activate(context: vscode.ExtensionContext) {
       void vscode.window.showInformationMessage('ROS2 Live view refreshed');
     }),
     
-    vscode.commands.registerCommand('ramros.live.startMonitoring', async (item?: LiveTopicItem) => {
-      if (!item) {
-        const topics = liveTreeProvider.getActiveTopics();
-        if (topics.length === 0) {
-          void vscode.window.showWarningMessage('No active topics found');
-          return;
-        }
-        
-        const selected = await vscode.window.showQuickPick(topics, {
-          placeHolder: 'Select a topic to monitor'
-        });
-        
-        if (!selected) return;
-        
-        liveTreeProvider.startMonitoringTopic(selected);
-      } else {
-        const topicName = item.getTopicName();
-        liveTreeProvider.startMonitoringTopic(topicName);
-      }
-      
-      await liveTreeProvider.refresh();
-    }),
-    
-    vscode.commands.registerCommand('ramros.live.stopMonitoring', async (item?: LiveTopicItem) => {
-      if (!item) {
-        const topics = liveTreeProvider.getActiveTopics();
-        const monitoredTopics = topics.filter(t => liveTreeProvider.isMonitoring(t));
-        
-        if (monitoredTopics.length === 0) {
-          void vscode.window.showWarningMessage('No topics are currently being monitored');
-          return;
-        }
-        
-        const selected = await vscode.window.showQuickPick(monitoredTopics, {
-          placeHolder: 'Select a topic to stop monitoring'
-        });
-        
-        if (!selected) return;
-        
-        liveTreeProvider.stopMonitoringTopic(selected);
-      } else {
-        const topicName = item.getTopicName();
-        liveTreeProvider.stopMonitoringTopic(topicName);
-      }
-      
-      await liveTreeProvider.refresh();
+    vscode.commands.registerCommand('ramros.live.settings', async () => {
+      liveTreeProvider.openSettings();
     })
   );
   

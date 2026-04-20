@@ -2,18 +2,34 @@ import * as vscode from 'vscode';
 import { TreeItemBase, LiveFolderItem, LiveNodeItem, LiveTopicItem } from './tree-items';
 import { execSync } from 'child_process';
 
+interface TopicInfo {
+  name: string;
+  messageType: string;
+  publishers: string[];
+  subscribers: string[];
+}
+
+interface NodeInfo {
+  name: string;
+  publishedTopics: string[];
+  subscribedTopics: string[];
+}
+
 export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   private _onDidChangeTreeData: vscode.EventEmitter<TreeItemBase | undefined | null | void> = new vscode.EventEmitter();
   readonly onDidChangeTreeData: vscode.Event<TreeItemBase | undefined | null | void> = this._onDidChangeTreeData.event;
 
-  private monitoredTopics: Map<string, NodeJS.Timeout> = new Map();
-  private topicHzRates: Map<string, number> = new Map();
   private autoRefreshInterval: NodeJS.Timeout | null = null;
   private refreshRate: number;
+  private autoRefreshEnabled: boolean = true;
+  private hideSystemTopics: boolean;
+
+  private readonly SYSTEM_TOPICS = ['/parameter_events', '/rosout'];
 
   constructor() {
     const config = vscode.workspace.getConfiguration('ramros.liveView');
     this.refreshRate = config.get<number>('refreshRate') || 5;
+    this.hideSystemTopics = config.get<boolean>('hideSystemTopics', true);
     this.startAutoRefresh();
     
     vscode.workspace.onDidChangeConfiguration(e => {
@@ -22,17 +38,47 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
         this.refreshRate = newConfig.get<number>('refreshRate') || 5;
         this.startAutoRefresh();
         void vscode.window.showInformationMessage(`ROS2 Live view refresh rate updated to ${this.refreshRate} seconds`);
+      } else if (e.affectsConfiguration('ramros.liveView.hideSystemTopics')) {
+        const newConfig = vscode.workspace.getConfiguration('ramros.liveView');
+        this.hideSystemTopics = newConfig.get<boolean>('hideSystemTopics', true);
+        this.refresh();
       }
     });
+  }
+
+  private isSystemTopic(topicName: string): boolean {
+    return this.SYSTEM_TOPICS.includes(topicName);
+  }
+
+  isAutoRefreshEnabled(): boolean {
+    return this.autoRefreshEnabled;
+  }
+
+  setAutoRefresh(enabled: boolean): void {
+    this.autoRefreshEnabled = enabled;
+    if (this.autoRefreshEnabled) {
+      this.startAutoRefresh();
+    } else {
+      if (this.autoRefreshInterval) {
+        clearInterval(this.autoRefreshInterval);
+        this.autoRefreshInterval = null;
+      }
+    }
+  }
+
+  openSettings(): void {
+    void vscode.commands.executeCommand('workbench.action.openSettings', 'ramros.liveView');
   }
 
   private startAutoRefresh(): void {
     if (this.autoRefreshInterval) {
       clearInterval(this.autoRefreshInterval);
     }
-    this.autoRefreshInterval = setInterval(() => {
-      this._onDidChangeTreeData.fire(undefined);
-    }, this.refreshRate * 1000);
+    if (this.autoRefreshEnabled) {
+      this.autoRefreshInterval = setInterval(() => {
+        this._onDidChangeTreeData.fire(null);
+      }, this.refreshRate * 1000);
+    }
   }
 
   async refresh(): Promise<void> {
@@ -56,10 +102,34 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
       
       if (folderType === 'active-nodes') {
         const nodes = this.getActiveNodes();
-        return nodes.map(name => new LiveNodeItem(name));
+        return nodes.map(name => {
+          const info = this.getNodeInfo(name);
+          if (info) {
+            return new LiveNodeItem(
+              info.name,
+              info.publishedTopics,
+              info.subscribedTopics
+            );
+          }
+          return new LiveNodeItem(name);
+        });
       } else if (folderType === 'active-topics') {
-        const topics = this.getActiveTopics();
-        return topics.map(name => new LiveTopicItem(name, this.topicHzRates.get(name)));
+        let topicNames = this.getActiveTopics();
+        if (this.hideSystemTopics) {
+          topicNames = topicNames.filter(name => !this.isSystemTopic(name));
+        }
+        return topicNames.map(name => {
+          const info = this.getTopicInfo(name);
+          if (info) {
+            return new LiveTopicItem(
+              info.name,
+              info.messageType,
+              info.publishers,
+              info.subscribers
+            );
+          }
+          return new LiveTopicItem(name);
+        });
       }
     }
 
@@ -88,69 +158,111 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
     return this.executeCommand('ros2 topic list');
   }
 
-  startMonitoringTopic(topicName: string): void {
-    if (this.monitoredTopics.has(topicName)) {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      this.measureTopicHz(topicName);
-    }, 2000);
-
-    this.monitoredTopics.set(topicName, interval);
-    this.measureTopicHz(topicName);
-  }
-
-  stopMonitoringTopic(topicName: string): void {
-    const interval = this.monitoredTopics.get(topicName);
-    if (interval) {
-      clearInterval(interval);
-      this.monitoredTopics.delete(topicName);
-      this.topicHzRates.delete(topicName);
-      this._onDidChangeTreeData.fire(undefined);
-    }
-  }
-
-  isMonitoring(topicName: string): boolean {
-    return this.monitoredTopics.has(topicName);
-  }
-
-  getHzRate(topicName: string): number | undefined {
-    return this.topicHzRates.get(topicName);
-  }
-
-  private measureTopicHz(topicName: string): void {
+  getTopicInfo(topicName: string): TopicInfo | null {
     try {
-      const output = execSync(`ros2 topic hz ${topicName} --window 2`, { 
-        encoding: 'utf-8', 
-        timeout: 3000,
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
-      
+      const output = execSync(`ros2 topic info ${topicName} --verbose`, { encoding: 'utf-8', timeout: 5000 });
       const lines = output.split('\n');
+      
+      let messageType = '';
+      const publishers: string[] = [];
+      const subscribers: string[] = [];
+      
+      let section: 'none' | 'publishers' | 'subscribers' = 'none';
+      
       for (const line of lines) {
-        if (line.includes('average rate:')) {
-          const match = line.match(/average rate:\s+([\d.]+)/);
+        const trimmedLine = line.trim();
+        
+        if (trimmedLine.startsWith('Type:')) {
+          const match = trimmedLine.match(/Type:\s+(.+)/);
           if (match && match[1]) {
-            const hz = parseFloat(match[1]);
-            this.topicHzRates.set(topicName, hz);
-            this._onDidChangeTreeData.fire(undefined);
-            break;
+            messageType = match[1].trim();
+          }
+        } else if (trimmedLine.startsWith('Publisher count:')) {
+          section = 'publishers';
+          continue;
+        } else if (trimmedLine.startsWith('Subscription count:')) {
+          section = 'subscribers';
+          continue;
+        } else if (trimmedLine.startsWith('Node name:') && section === 'publishers') {
+          const nodeName = trimmedLine.replace('Node name:', '').trim();
+          if (nodeName) {
+            publishers.push(nodeName);
+          }
+        } else if (trimmedLine.startsWith('Node name:') && section === 'subscribers') {
+          const nodeName = trimmedLine.replace('Node name:', '').trim();
+          if (nodeName) {
+            subscribers.push(nodeName);
+          }
+        } else if (trimmedLine.startsWith('Endpoint type:')) {
+          continue;
+        } else if (trimmedLine === '') {
+          continue;
+        }
+      }
+      
+      return {
+        name: topicName,
+        messageType,
+        publishers,
+        subscribers
+      };
+    } catch (error) {
+      console.error(`Failed to get info for topic ${topicName}`, error);
+      return null;
+    }
+  }
+  
+  getNodeInfo(nodeName: string): NodeInfo | null {
+    try {
+      let publishedTopics: string[] = [];
+      let subscribedTopics: string[] = [];
+      
+      const output = execSync(`ros2 node info ${nodeName}`, { encoding: 'utf-8', timeout: 5000 });
+      const lines = output.split('\n');
+      
+      let section: 'none' | 'subscribers' | 'publishers' = 'none';
+      
+      for (const line of lines) {
+        const trimmedLine = line.trim();
+        
+        if (trimmedLine === 'Subscribers:') {
+          section = 'subscribers';
+          continue;
+        } else if (trimmedLine === 'Publishers:') {
+          section = 'publishers';
+          continue;
+        } else if (trimmedLine === 'Service Servers:' || trimmedLine === 'Service Clients:' || trimmedLine === 'Action Servers:' || trimmedLine === 'Action Clients:') {
+          section = 'none';
+          continue;
+        } else if (section !== 'none' && trimmedLine.startsWith('/')) {
+          const topicName = trimmedLine.split(':')[0].trim();
+          if (topicName) {
+            if (section === 'publishers') {
+              publishedTopics.push(topicName);
+            } else if (section === 'subscribers') {
+              subscribedTopics.push(topicName);
+            }
           }
         }
       }
+      
+      if (this.hideSystemTopics) {
+        publishedTopics = publishedTopics.filter(name => !this.isSystemTopic(name));
+        subscribedTopics = subscribedTopics.filter(name => !this.isSystemTopic(name));
+      }
+      
+      return {
+        name: nodeName,
+        publishedTopics,
+        subscribedTopics
+      };
     } catch (error) {
-      console.error(`Failed to measure Hz for topic ${topicName}`, error);
+      console.error(`Failed to get info for node ${nodeName}`, error);
+      return null;
     }
   }
 
   dispose(): void {
-    for (const interval of this.monitoredTopics.values()) {
-      clearInterval(interval);
-    }
-    this.monitoredTopics.clear();
-    this.topicHzRates.clear();
-    
     if (this.autoRefreshInterval) {
       clearInterval(this.autoRefreshInterval);
       this.autoRefreshInterval = null;
