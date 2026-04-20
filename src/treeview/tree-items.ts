@@ -17,7 +17,7 @@ export class ToolsFolderItem extends TreeItemBase {
   async getChildren(): Promise<TreeItemBase[]> {
     return [
       new ToolItem('RVIZ2', 'rviz2', 'vm'),
-      new ToolItem('rqt_graph', 'rqt_graph', 'symbol-network'),
+      new ToolItem('rqt_graph', 'rqt_graph', 'git-compare'),
       new ToolItem('ros2 bag record', 'bag-record', 'record'),
       new ToolItem('ros2 bag play', 'bag-play', 'play-circle')
     ];
@@ -53,6 +53,77 @@ export class ToolItem extends TreeItemBase {
   
   getToolType(): string {
     return this.toolType;
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
+export class LiveFolderItem extends TreeItemBase {
+  constructor(
+    label: string,
+    private readonly folderType: string
+  ) {
+    super(label, vscode.TreeItemCollapsibleState.Collapsed);
+    this.iconPath = new vscode.ThemeIcon(folderType === 'active-nodes' ? 'broadcast' : 'symbol-event');
+    this.contextValue = folderType === 'active-nodes' ? 'liveNodesFolder' : 'liveTopicsFolder';
+  }
+  
+  getFolderType(): string {
+    return this.folderType;
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
+export class LiveNodeItem extends TreeItemBase {
+  constructor(private readonly nodeName: string) {
+    super(nodeName, vscode.TreeItemCollapsibleState.None);
+    this.iconPath = new vscode.ThemeIcon('broadcast', new vscode.ThemeColor('charts.green'));
+    this.contextValue = 'liveNode';
+    this.description = 'running';
+  }
+  
+  getNodeName(): string {
+    return this.nodeName;
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
+export class LiveTopicItem extends TreeItemBase {
+  constructor(
+    private readonly topicName: string,
+    private readonly hzRate?: number
+  ) {
+    super(topicName, vscode.TreeItemCollapsibleState.None);
+    this.updateDisplay();
+  }
+  
+  private updateDisplay(): void {
+    this.iconPath = new vscode.ThemeIcon('pulse', new vscode.ThemeColor('charts.blue'));
+    this.contextValue = 'liveTopic';
+    
+    if (this.hzRate !== undefined) {
+      const color = this.hzRate > 10 ? 'charts.green' : this.hzRate > 1 ? 'charts.yellow' : 'charts.red';
+      this.iconPath = new vscode.ThemeIcon('pulse', new vscode.ThemeColor(color));
+      this.description = `${this.hzRate.toFixed(1)} Hz`;
+    } else {
+      this.description = 'monitoring stopped';
+    }
+  }
+  
+  getTopicName(): string {
+    return this.topicName;
+  }
+  
+  getHzRate(): number | undefined {
+    return this.hzRate;
   }
   
   async getChildren(): Promise<TreeItemBase[]> {

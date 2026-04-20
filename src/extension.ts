@@ -8,16 +8,18 @@ import { DuplicatePackageDetector } from './core/duplicate-package-detector';
 import { CacheManager } from './cache/cache-manager';
 import { RamrosTreeProvider } from './treeview/tree-provider';
 import { ToolsTreeProvider } from './treeview/tools-tree-provider';
+import { LiveTreeProvider } from './treeview/live-tree-provider';
 import { TerminalManager } from './executor/terminal-manager';
 import { PackageCreator } from './wizard/package-creator';
 import { PackageFormValidator } from './wizard/package-form-validator';
 import { NodeInfo, LaunchFileInfo, PackageDiscoveryService, PackageInfo } from './core/package-discovery';
-import { TreeItemBase } from './treeview/tree-items';
+import { TreeItemBase, LiveTopicItem } from './treeview/tree-items';
 
 let cacheManager: CacheManager;
 let terminalManager: TerminalManager;
 let treeProvider: RamrosTreeProvider;
 let toolsTreeProvider: ToolsTreeProvider;
+let liveTreeProvider: LiveTreeProvider;
 let packageCreator: PackageCreator;
 
 async function pickWorkspace(): Promise<WorkspaceInfo | undefined> {
@@ -78,6 +80,7 @@ export async function activate(context: vscode.ExtensionContext) {
   
   treeProvider = new RamrosTreeProvider(workspaceDetector, duplicateDetector, packageDiscovery);
   toolsTreeProvider = new ToolsTreeProvider();
+  liveTreeProvider = new LiveTreeProvider();
   
   packageCreator = new PackageCreator(context.extensionPath);
   
@@ -91,11 +94,18 @@ export async function activate(context: vscode.ExtensionContext) {
     showCollapseAll: false
   });
   
+  const liveTreeView = vscode.window.createTreeView('ramrosLive', {
+    treeDataProvider: liveTreeProvider,
+    showCollapseAll: false
+  });
+  
   context.subscriptions.push(
     treeView,
     toolsTreeView,
+    liveTreeView,
     cacheManager,
     terminalManager,
+    liveTreeProvider,
     
     vscode.commands.registerCommand('ramros.refreshWorkspaces', async () => {
       await treeProvider.refresh();
@@ -1101,8 +1111,6 @@ export async function activate(context: vscode.ExtensionContext) {
       await terminalManager.executeInNewTerminal('rqt_graph', workspace, 'rqt_graph');
     }),
     
-
-    
     vscode.commands.registerCommand('ramros.launchTool.bag-record', async () => {
       const workspace = await pickWorkspace();
       if (!workspace) return;
@@ -1160,6 +1168,59 @@ export async function activate(context: vscode.ExtensionContext) {
       const playCommand = `ros2 bag play "${bagPath}"`;
       
       await terminalManager.executeInNewTerminal(playCommand, workspace, `Bag Play: ${path.basename(bagPath)}`);
+    }),
+    
+    vscode.commands.registerCommand('ramros.live.refresh', async () => {
+      await liveTreeProvider.refresh();
+      void vscode.window.showInformationMessage('ROS2 Live view refreshed');
+    }),
+    
+    vscode.commands.registerCommand('ramros.live.startMonitoring', async (item?: LiveTopicItem) => {
+      if (!item) {
+        const topics = liveTreeProvider.getActiveTopics();
+        if (topics.length === 0) {
+          void vscode.window.showWarningMessage('No active topics found');
+          return;
+        }
+        
+        const selected = await vscode.window.showQuickPick(topics, {
+          placeHolder: 'Select a topic to monitor'
+        });
+        
+        if (!selected) return;
+        
+        liveTreeProvider.startMonitoringTopic(selected);
+      } else {
+        const topicName = item.getTopicName();
+        liveTreeProvider.startMonitoringTopic(topicName);
+      }
+      
+      await liveTreeProvider.refresh();
+    }),
+    
+    vscode.commands.registerCommand('ramros.live.stopMonitoring', async (item?: LiveTopicItem) => {
+      if (!item) {
+        const topics = liveTreeProvider.getActiveTopics();
+        const monitoredTopics = topics.filter(t => liveTreeProvider.isMonitoring(t));
+        
+        if (monitoredTopics.length === 0) {
+          void vscode.window.showWarningMessage('No topics are currently being monitored');
+          return;
+        }
+        
+        const selected = await vscode.window.showQuickPick(monitoredTopics, {
+          placeHolder: 'Select a topic to stop monitoring'
+        });
+        
+        if (!selected) return;
+        
+        liveTreeProvider.stopMonitoringTopic(selected);
+      } else {
+        const topicName = item.getTopicName();
+        liveTreeProvider.stopMonitoringTopic(topicName);
+      }
+      
+      await liveTreeProvider.refresh();
     })
   );
   
