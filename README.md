@@ -1,5 +1,8 @@
 # RAMROS - Really Awesome Management of ROS
 
+
+<img src="./img/RAMROS_logo_color.png">
+
 A VSCode extension for managing ROS2 workspaces efficiently.
 
 ## Features

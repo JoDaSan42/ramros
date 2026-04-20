@@ -18,7 +18,7 @@
 Grundlegende ROS2-Workspace-Erkennung und Validierung
 
 ### Features
-- [ ] **FR-1:** Erkennung des/der geöffneten VSCode-Ordner als ROS2 Workspace
+- [ ] **FR-1:** Erkennung des/der gesöffneten VSCode-Ordner als ROS2 Workspace
   - **Multi-Workspace Support:** Beliebige Anzahl Workspaces gleichzeitig
   - **Duplicate Detection:** Gleiche Paketnamen im selben Workspace blockieren
   - **Cross-Workspace Warning:** Gleiche Paketnamen über Workspaces hinweg markieren

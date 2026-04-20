@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { WorkspaceInfo } from '../core/workspace-detector';
 import { PackageConflict } from '../core/duplicate-package-detector';
-import { PackageInfo, NodeInfo, InterfaceInfo, LaunchFileInfo } from '../core/package-discovery';
+import { PackageInfo, NodeInfo, InterfaceInfo, LaunchFileInfo, ParameterInfo, TopicEndpointInfo } from '../core/package-discovery';
 
 export abstract class TreeItemBase extends vscode.TreeItem {
   abstract getChildren(): Promise<TreeItemBase[]>;
@@ -221,13 +221,12 @@ export class NodesFolderItem extends TreeItemBase {
 
 export class NodeItem extends TreeItemBase {
   constructor(private readonly node: NodeInfo) {
-    super(node.name, vscode.TreeItemCollapsibleState.None);
+    super(node.name, vscode.TreeItemCollapsibleState.Collapsed);
     
     this.description = node.language === 'cpp' ? '.cpp' : '.py';
     this.iconPath = new vscode.ThemeIcon('broadcast');
     this.contextValue = 'node';
     this.command = { command: 'vscode.open', title: 'Open File', arguments: [vscode.Uri.file(node.path)] };
-    this.tooltip = new vscode.MarkdownString(`Package: ${node.packageName}`);
     
     this.updateTooltip();
   }
@@ -237,35 +236,143 @@ export class NodeItem extends TreeItemBase {
   }
   
   private updateTooltip(): void {
+    const pubCount = this.node.publishers?.length || 0;
+    const subCount = this.node.subscriptions?.length || 0;
+    const paramCount = this.node.parameters?.length || 0;
+    
     const lines: string[] = [
       `**${this.node.name}**`,
       '',
+      `Package: ${this.node.packageName}`,
       `Language: ${this.node.language}`,
       `Executable: ${this.node.isExecutable ? 'Yes' : 'No'}`,
+      '',
+      `⬆️ Publishers: ${pubCount}`,
+      `⬇️ Subscribers: ${subCount}`,
+      `⚙️ Parameters: ${paramCount}`,
     ];
     
-    if (this.node.parameters && this.node.parameters.length > 0) {
-      lines.push('', `**Parameters (${this.node.parameters.length}):**`);
-      this.node.parameters.forEach(p => {
-        lines.push(`- ${p.name}${p.defaultValue !== undefined ? ` = ${p.defaultValue}` : ''}`);
-      });
-    }
-    
     if (this.node.publishers && this.node.publishers.length > 0) {
-      lines.push('', `**Publishers (${this.node.publishers.length}):**`);
+      lines.push('', `**Publishers:**`);
       this.node.publishers.forEach(pub => {
         lines.push(`- ${pub.topicName} (${pub.messageType})`);
       });
     }
     
     if (this.node.subscriptions && this.node.subscriptions.length > 0) {
-      lines.push('', `**Subscriptions (${this.node.subscriptions.length}):**`);
+      lines.push('', `**Subscriptions:**`);
       this.node.subscriptions.forEach(sub => {
         lines.push(`- ${sub.topicName} (${sub.messageType})`);
       });
     }
     
+    if (this.node.parameters && this.node.parameters.length > 0) {
+      lines.push('', `**Parameters:**`);
+      this.node.parameters.forEach(p => {
+        lines.push(`- ${p.name}${p.defaultValue !== undefined ? ` = ${p.defaultValue}` : ''}`);
+      });
+    }
+    
     this.tooltip = new vscode.MarkdownString(lines.join('\n'));
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    const children: TreeItemBase[] = [];
+    
+    if (this.node.publishers && this.node.publishers.length > 0) {
+      const pubItems = this.node.publishers.map(pub => new PublisherItem(pub));
+      children.push(new NodeMetadataFolderItem('Publishers', pubItems, 'arrow-up'));
+    }
+    
+    if (this.node.subscriptions && this.node.subscriptions.length > 0) {
+      const subItems = this.node.subscriptions.map(sub => new SubscriberItem(sub));
+      children.push(new NodeMetadataFolderItem('Subscribers', subItems, 'arrow-down'));
+    }
+    
+    if (this.node.parameters && this.node.parameters.length > 0) {
+      const paramItems = this.node.parameters.map(param => new ParameterItem(param));
+      children.push(new NodeMetadataFolderItem('Parameters', paramItems, 'gear'));
+    }
+    
+    return children;
+  }
+}
+
+export class NodeMetadataFolderItem extends TreeItemBase {
+  constructor(
+    label: string,
+    private readonly children: TreeItemBase[],
+    iconId: string
+  ) {
+    super(label, vscode.TreeItemCollapsibleState.Collapsed);
+    this.iconPath = new vscode.ThemeIcon(iconId);
+    this.contextValue = `${label.toLowerCase()}Folder`;
+    this.description = `(${children.length})`;
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    return this.children;
+  }
+}
+
+export class PublisherItem extends TreeItemBase {
+  constructor(private readonly publisher: TopicEndpointInfo) {
+    super(publisher.topicName, vscode.TreeItemCollapsibleState.None);
+    
+    this.description = `(${publisher.messageType})`;
+    this.iconPath = new vscode.ThemeIcon('arrow-up', new vscode.ThemeColor('charts.green'));
+    this.contextValue = 'publisher';
+    this.tooltip = new vscode.MarkdownString(`**Publisher**\n\nTopic: ${publisher.topicName}\nType: ${publisher.messageType}`);
+  }
+  
+  getTopicEndpointInfo(): TopicEndpointInfo {
+    return this.publisher;
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
+export class SubscriberItem extends TreeItemBase {
+  constructor(private readonly subscriber: TopicEndpointInfo) {
+    super(subscriber.topicName, vscode.TreeItemCollapsibleState.None);
+    
+    this.description = `(${subscriber.messageType})`;
+    this.iconPath = new vscode.ThemeIcon('arrow-down', new vscode.ThemeColor('charts.blue'));
+    this.contextValue = 'subscriber';
+    this.tooltip = new vscode.MarkdownString(`**Subscriber**\n\nTopic: ${subscriber.topicName}\nType: ${subscriber.messageType}`);
+  }
+  
+  getTopicEndpointInfo(): TopicEndpointInfo {
+    return this.subscriber;
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
+export class ParameterItem extends TreeItemBase {
+  constructor(private readonly parameter: ParameterInfo) {
+    super(parameter.name, vscode.TreeItemCollapsibleState.None);
+    
+    const defaultStr = parameter.defaultValue !== undefined ? `:= ${parameter.defaultValue}` : '';
+    const typeStr = parameter.type ? ` (${parameter.type})` : '';
+    this.description = `${defaultStr}${typeStr}`.trim();
+    
+    this.iconPath = new vscode.ThemeIcon('gear');
+    this.contextValue = 'parameter';
+    
+    this.tooltip = new vscode.MarkdownString(
+      `**Parameter**\n\nName: ${parameter.name}\n` +
+      `Default: ${parameter.defaultValue ?? 'none'}\n` +
+      `Type: ${parameter.type ?? 'auto-detect'}`
+    );
+  }
+  
+  getParameterInfo(): ParameterInfo {
+    return this.parameter;
   }
   
   async getChildren(): Promise<TreeItemBase[]> {

@@ -400,6 +400,17 @@ export class PackageDiscoveryService {
     return null;
   }
 
+  private inferParamType(defaultValue: string | undefined): string {
+    if (!defaultValue) return 'unspecified';
+    const trimmed = defaultValue.trim();
+    if (trimmed === 'true' || trimmed === 'false') return 'bool';
+    if (/^-?\d+$/.test(trimmed)) return 'int';
+    if (/^-?\d+\.\d+$/.test(trimmed)) return 'double';
+    if (trimmed.startsWith("'") || trimmed.startsWith('"')) return 'string';
+    if (trimmed.startsWith('[')) return 'list';
+    return 'string';
+  }
+
   private async analyzeCppNode(filePath: string): Promise<Partial<NodeInfo>> {
     if (!fs.existsSync(filePath)) {
       return {};
@@ -410,7 +421,7 @@ export class PackageDiscoveryService {
     const subscriptions: TopicEndpointInfo[] = [];
     const parameters: ParameterInfo[] = [];
 
-    const publisherPattern = /create_publisher\s*<\s*([^>]+)>\s*\(\s*["']([^"']+)["']/g;
+    const publisherPattern = /create_publisher\s*<\s*([^>]+)>\s*\(\s*["']([^"']+)["']/gs;
     let match: RegExpExecArray | null;
 
     while ((match = publisherPattern.exec(content)) !== null) {
@@ -420,7 +431,7 @@ export class PackageDiscoveryService {
       });
     }
 
-    const subscriptionPattern = /create_subscription\s*<\s*([^>]+)>\s*\(\s*["']([^"']+)["']/g;
+    const subscriptionPattern = /create_subscription\s*<\s*([^>]+)>\s*\(\s*["']([^"']+)["']/gs;
     while ((match = subscriptionPattern.exec(content)) !== null) {
       subscriptions.push({
         messageType: match[1].trim(),
@@ -430,9 +441,20 @@ export class PackageDiscoveryService {
 
     const paramPattern = /declare_parameter\s*\(\s*["']([^"']+)["']\s*(?:,\s*([^)]+))?/g;
     while ((match = paramPattern.exec(content)) !== null) {
+      const paramName = match[1];
+      const rawDefault = match[2]?.trim();
+      let defaultValue: string | undefined;
+      let paramType: string | undefined;
+      
+      if (rawDefault) {
+        defaultValue = rawDefault.replace(/^["']|["']$/g, '');
+        paramType = this.inferParamType(rawDefault);
+      }
+      
       parameters.push({
-        name: match[1],
-        defaultValue: match[2]?.trim().replace(/^["']|["']$/g, ''),
+        name: paramName,
+        defaultValue,
+        type: paramType,
       });
     }
 
@@ -513,7 +535,7 @@ export class PackageDiscoveryService {
     const subscriptions: TopicEndpointInfo[] = [];
     const parameters: ParameterInfo[] = [];
 
-    const publisherPattern = /create_publisher\s*\(\s*([^,]+),\s*["']([^"']+)["']/g;
+    const publisherPattern = /create_publisher\s*\(\s*([^,]+),\s*["']([^"']+)["']/gs;
     let match: RegExpExecArray | null;
 
     while ((match = publisherPattern.exec(content)) !== null) {
@@ -524,7 +546,7 @@ export class PackageDiscoveryService {
       });
     }
 
-    const subscriptionPattern = /create_subscription\s*\(\s*([^,]+),\s*["']([^"']+)["']/g;
+    const subscriptionPattern = /create_subscription\s*\(\s*([^,]+),\s*["']([^"']+)["']/gs;
     while ((match = subscriptionPattern.exec(content)) !== null) {
       const msgType = match[1].trim().replace(/\s*\([^)]*\)\s*$/, '');
       subscriptions.push({
@@ -535,16 +557,23 @@ export class PackageDiscoveryService {
 
     const paramPattern = /declare_parameter\s*\(['"]([^'"]+)['"]\s*(?:,\s*([^)]+))?/g;
     while ((match = paramPattern.exec(content)) !== null) {
+      const paramName = match[1];
+      const rawDefault = match[2]?.trim();
       let defaultValue: string | undefined;
-      if (match[2]) {
-        defaultValue = match[2].trim();
+      let paramType: string | undefined;
+      
+      if (rawDefault) {
+        defaultValue = rawDefault;
         if (defaultValue.startsWith("'") || defaultValue.startsWith('"')) {
           defaultValue = defaultValue.slice(1, -1);
         }
+        paramType = this.inferParamType(rawDefault);
       }
+      
       parameters.push({
-        name: match[1],
+        name: paramName,
         defaultValue,
+        type: paramType,
       });
     }
 
