@@ -41,7 +41,7 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
       } else if (e.affectsConfiguration('ramros.liveView.hideSystemTopics')) {
         const newConfig = vscode.workspace.getConfiguration('ramros.liveView');
         this.hideSystemTopics = newConfig.get<boolean>('hideSystemTopics', true);
-        this.refresh();
+        void this.refresh();
       }
     });
   }
