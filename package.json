@@ -2,7 +2,7 @@
   "name": "ramros",
   "displayName": "Really Awesome Management of ROS (RAMROS)",
   "description": "VSCode Extension for ROS2 Workspace Management",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "publisher": "ramros-team",
   "license": "MIT",
   "repository": {
