@@ -13,9 +13,6 @@ A VSCode extension for managing ROS2 workspaces efficiently.
 4. Click the "..." menu → "Install from VSIX"
 5. Select the downloaded `.vsix` file
 
-### From OpenVSX / VS Marketplace
-Search for "RAMROS" in your preferred extension marketplace and install directly.
-
 ## Building from Source
 
 ### Prerequisites
