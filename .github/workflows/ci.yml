@@ -79,9 +79,9 @@ jobs:
           else
             echo "type=release" >> $GITHUB_OUTPUT
           fi
-      - run: npx vsce package --pre-release
+      - run: npx @vscode/vsce package --pre-release
         if: steps.package-type.outputs.type == 'prerelease'
-      - run: npx vsce package
+      - run: npx @vscode/vsce package
         if: steps.package-type.outputs.type == 'release'
       - name: Upload Artifact
         uses: actions/upload-artifact@v5
