@@ -16,11 +16,6 @@
     "Other",
     "Programming Languages"
   ],
-  "activationEvents": [
-    "onView:ramrosExplorer",
-    "onView:ramrosTools",
-    "onView:ramrosLive"
-  ],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -119,14 +114,39 @@
         "icon": "$(git-compare)"
       },
       {
-        "command": "ramros.launchTool.bag-record",
-        "title": "Record Bag File",
+        "command": "ramros.bag.startRecording",
+        "title": "Start Recording Bag",
         "icon": "$(record)"
       },
       {
-        "command": "ramros.launchTool.bag-play",
-        "title": "Play Bag File",
-        "icon": "$(play-circle)"
+        "command": "ramros.bag.pauseResumeRecording",
+        "title": "Pause/Resume Recording",
+        "icon": "$(debug-pause)"
+      },
+      {
+        "command": "ramros.bag.stopRecording",
+        "title": "Stop Recording Bag",
+        "icon": "$(stop)"
+      },
+      {
+        "command": "ramros.bag.selectFile",
+        "title": "Select Bag File for Playback",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "ramros.bag.playPause",
+        "title": "Play/Pause Bag Playback",
+        "icon": "$(play)"
+      },
+      {
+        "command": "ramros.bag.toggleLoop",
+        "title": "Toggle Loop Playback",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "ramros.bag.stop",
+        "title": "Stop Bag Playback",
+        "icon": "$(stop)"
       },
       {
         "command": "ramros.live.refresh",
@@ -137,6 +157,11 @@
         "command": "ramros.live.settings",
         "title": "Live View Settings",
         "icon": "$(gear)"
+      },
+      {
+        "command": "ramros.createLaunchFile",
+        "title": "Create Launch File",
+        "icon": "$(rocket)"
       }
     ],
     "menus": {
@@ -263,6 +288,42 @@
           "when": "view == ramrosExplorer && viewItem == interfacesFolder"
         },
         {
+          "command": "ramros.createLaunchFile",
+          "when": "view == ramrosExplorer && viewItem == workspaceRoot",
+          "group": "inline@5"
+        },
+        {
+          "command": "ramros.createLaunchFile",
+          "when": "view == ramrosExplorer && viewItem == workspaceRoot"
+        },
+        {
+          "command": "ramros.createLaunchFile",
+          "when": "view == ramrosExplorer && viewItem == package",
+          "group": "inline@5"
+        },
+        {
+          "command": "ramros.createLaunchFile",
+          "when": "view == ramrosExplorer && viewItem == package"
+        },
+        {
+          "command": "ramros.createLaunchFile",
+          "when": "view == ramrosExplorer && viewItem == launchFilesFolder",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.createLaunchFile",
+          "when": "view == ramrosExplorer && viewItem == launchFilesFolder"
+        },
+        {
+          "command": "ramros.createLaunchFile",
+          "when": "view == ramrosExplorer && viewItem == categoryLaunchFilesFolder",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.createLaunchFile",
+          "when": "view == ramrosExplorer && viewItem == categoryLaunchFilesFolder"
+        },
+        {
           "command": "ramros.launchTool.rviz2",
           "when": "view == ramrosTools && viewItem == tool"
         },
@@ -271,12 +332,37 @@
           "when": "view == ramrosTools && viewItem == tool"
         },
         {
-          "command": "ramros.launchTool.bag-record",
+          "command": "ramros.bag.startRecording",
           "when": "view == ramrosTools && viewItem == tool"
         },
         {
-          "command": "ramros.launchTool.bag-play",
+          "command": "ramros.bag.selectFile",
           "when": "view == ramrosTools && viewItem == tool"
+        },
+        {
+          "command": "ramros.bag.playPause",
+          "when": "view == ramrosTools && viewItem == bagPlayControl",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.bag.stop",
+          "when": "view == ramrosTools && viewItem == bagStopControl",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.bag.toggleLoop",
+          "when": "view == ramrosTools && viewItem == bagLoop",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.bag.pauseResumeRecording",
+          "when": "view == ramrosTools && viewItem == bagPauseResumeRecording",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.bag.stopRecording",
+          "when": "view == ramrosTools && viewItem == bagStopRecording",
+          "group": "inline@1"
         }
       ]
     },
@@ -294,6 +380,21 @@
           "type": "boolean",
           "default": true,
           "description": "Hide system topics like /parameter_events and /rosout from the Live view"
+        },
+        "ramros.launchGenerator.defaultLocation": {
+          "type": "string",
+          "default": "package_launch_folder",
+          "enum": [
+            "package_launch_folder",
+            "workspace_root",
+            "custom"
+          ],
+          "description": "Default location for generated launch files"
+        },
+        "ramros.launchGenerator.customPath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path for launch files (used when defaultLocation is 'custom'). Use {workspace} for workspace root, {package} for package name"
         }
       }
     }

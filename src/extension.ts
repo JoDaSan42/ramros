@@ -13,7 +13,8 @@ import { TerminalManager } from './executor/terminal-manager';
 import { PackageCreator } from './wizard/package-creator';
 import { PackageFormValidator } from './wizard/package-form-validator';
 import { NodeInfo, LaunchFileInfo, PackageDiscoveryService, PackageInfo } from './core/package-discovery';
-import { TreeItemBase, LiveTopicItem } from './treeview/tree-items';
+import { TreeItemBase, BagPlayItem, BagPlayControlItem, BagLoopItem, BagRecordItem, BagFilesFolderItem } from './treeview/tree-items';
+import { LaunchWizard } from './wizard/launch-wizard';
 
 let cacheManager: CacheManager;
 let terminalManager: TerminalManager;
@@ -21,6 +22,13 @@ let treeProvider: RamrosTreeProvider;
 let toolsTreeProvider: ToolsTreeProvider;
 let liveTreeProvider: LiveTreeProvider;
 let packageCreator: PackageCreator;
+
+// Bag recording/playback state
+let activeRecordingTerminal: vscode.Terminal | null = null;
+let isRecordingPaused: boolean = false;
+let activePlaybackTerminal: vscode.Terminal | null = null;
+let isPlaybackPaused: boolean = false;
+let isPlaybackLooping: boolean = false;
 
 async function pickWorkspace(): Promise<WorkspaceInfo | undefined> {
   const workspaces = treeProvider.getWorkspaces();
@@ -756,7 +764,21 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     }),
     
-    vscode.commands.registerCommand('ramros.runLaunchFile', async (treeItem?: TreeItemBase) => {
+    vscode.commands.registerCommand('ramros.createLaunchFile', async () => {
+      const workspaces = treeProvider.getWorkspaces();
+      if (workspaces.length === 0) {
+        void vscode.window.showWarningMessage('No ROS2 workspaces found');
+        return;
+      }
+      
+      const selectedWorkspace = workspaces[0];
+      const workspacePath = selectedWorkspace.rootPath.fsPath;
+      
+      const wizard = new LaunchWizard(workspacePath, packageDiscovery);
+      await wizard.run();
+    }),
+    
+    vscode.commands.registerCommand('ramros.runLaunchFile', async (arg?: TreeItemBase) => {
       const workspaces = treeProvider.getWorkspaces();
       if (workspaces.length === 0) {
         void vscode.window.showWarningMessage('No ROS2 workspaces found');
@@ -767,8 +789,8 @@ export async function activate(context: vscode.ExtensionContext) {
       
       let launchFileToRun: LaunchFileInfo | undefined;
       
-      if (treeItem && 'getLaunchFileInfo' in treeItem && typeof treeItem.getLaunchFileInfo === 'function') {
-        launchFileToRun = treeItem.getLaunchFileInfo();
+      if (arg && 'getLaunchFileInfo' in arg) {
+        launchFileToRun = (arg as unknown as { getLaunchFileInfo: () => LaunchFileInfo }).getLaunchFileInfo();
       } else {
         const allLaunchFiles = workspaces
           .flatMap(w => w.packages || [])
@@ -795,9 +817,9 @@ export async function activate(context: vscode.ExtensionContext) {
       
       let runCommand: string;
       if (fs.existsSync(setupBashPath)) {
-        runCommand = `source "${setupBashPath}" && ros2 launch ${launchFileToRun.path}`;
+        runCommand = `source "${setupBashPath}" && ros2 launch ${launchFileToRun.packageName} ${launchFileToRun.name}`;
       } else {
-        runCommand = `ros2 launch ${launchFileToRun.path}`;
+        runCommand = `ros2 launch ${launchFileToRun.packageName} ${launchFileToRun.name}`;
       }
       
       await terminalManager.executeInNewTerminal(runCommand, selectedWorkspace, `Launch: ${launchFileToRun.name}`);
@@ -1111,7 +1133,12 @@ export async function activate(context: vscode.ExtensionContext) {
       await terminalManager.executeInNewTerminal('rqt_graph', workspace, 'rqt_graph');
     }),
     
-    vscode.commands.registerCommand('ramros.launchTool.bag-record', async () => {
+    vscode.commands.registerCommand('ramros.bag.startRecording', async () => {
+      if (activeRecordingTerminal) {
+        void vscode.window.showWarningMessage('Recording is already in progress');
+        return;
+      }
+      
       const workspace = await pickWorkspace();
       if (!workspace) return;
       
@@ -1122,6 +1149,18 @@ export async function activate(context: vscode.ExtensionContext) {
       
       if (!filename) return;
       
+      const folders = await vscode.window.showOpenDialog({
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        title: 'Select folder to store bag file'
+      });
+      
+      if (!folders || folders.length === 0) return;
+      
+      const outputDir = folders[0].fsPath;
+      const outputPath = path.join(outputDir, filename);
+      
       const topics = await discoverTopics();
       
       if (topics.length === 0) {
@@ -1131,29 +1170,90 @@ export async function activate(context: vscode.ExtensionContext) {
       
       const topicItems = topics.map(topic => ({
         label: topic,
-        picked: true
+        picked: true,
+        description: topic
       }));
       
       const selectedTopics = await vscode.window.showQuickPick(topicItems, {
         canPickMany: true,
-        placeHolder: 'Select topics to record (click to toggle)'
+        placeHolder: 'Select topics to record (use Ctrl+A / Cmd+A to select all, or click individual items)',
+        title: `Rosbag Recording: ${filename}`
       });
       
-      if (!selectedTopics || selectedTopics.length === 0) {
-        void vscode.window.showWarningMessage('No topics selected for recording');
+      if (!selectedTopics) return;
+      
+      const topicArgs = selectedTopics.map(t => t.label).join(' ');
+      // Use script command to enable proper terminal interaction for keyboard controls
+      const recordCommand = `script -q -c 'ros2 bag record -o "${outputPath}" ${topicArgs}' /dev/null`;
+      
+      activeRecordingTerminal = await terminalManager.executeInNewTerminal(recordCommand, workspace, `Bag Record: ${filename}`);
+      
+      // Update state
+      BagRecordItem.setRecordingState(true);
+      isRecordingPaused = false;
+      BagRecordItem.setPausedState(false);
+      
+      // Update tree view
+      await toolsTreeProvider.refresh();
+    }),
+    
+    vscode.commands.registerCommand('ramros.bag.pauseResumeRecording', async () => {
+      if (!activeRecordingTerminal) {
+        void vscode.window.showWarningMessage('No active recording');
         return;
       }
       
-      const topicArgs = selectedTopics.map(t => `-t ${t.label}`).join(' ');
-      const recordCommand = `ros2 bag record -o ${filename} ${topicArgs}`;
+      // Show the terminal first to ensure it can receive input
+      activeRecordingTerminal.show(true);
       
-      await terminalManager.executeInNewTerminal(recordCommand, workspace, `Bag Record: ${filename}`);
+      // Small delay to ensure terminal is focused
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Send space key to toggle pause/resume in ros2 bag record
+      // Send as raw keystroke (shouldExecute=false means don't add newline)
+      activeRecordingTerminal.sendText(' ', false);
+      isRecordingPaused = !isRecordingPaused;
+      BagRecordItem.setPausedState(isRecordingPaused);
+      
+      await toolsTreeProvider.refresh();
+      
+      const status = isRecordingPaused ? 'paused' : 'resumed';
+      void vscode.window.showInformationMessage(`Recording ${status}`);
     }),
     
-    vscode.commands.registerCommand('ramros.launchTool.bag-play', async () => {
-      const workspace = await pickWorkspace();
-      if (!workspace) return;
-      
+    vscode.commands.registerCommand('ramros.bag.stopRecording', async () => {
+      if (activeRecordingTerminal) {
+        activeRecordingTerminal.sendText('\x03'); // Ctrl+C
+        
+        // Clear terminal reference and state
+        activeRecordingTerminal.dispose();
+        activeRecordingTerminal = null;
+        isRecordingPaused = false;
+        BagRecordItem.setRecordingState(false);
+        BagRecordItem.setPausedState(false);
+        
+        // Reset instances to clear the controls from the tree
+        BagFilesFolderItem.resetInstances();
+        
+        // Update tree view
+        await toolsTreeProvider.refresh();
+        
+        void vscode.window.showInformationMessage('Recording stopped');
+      } else {
+        void vscode.window.showWarningMessage('No active recording');
+      }
+    }),
+    
+    vscode.commands.registerCommand('ramros.live.refresh', async () => {
+      await liveTreeProvider.refresh();
+      void vscode.window.showInformationMessage('ROS2 Live view refreshed');
+    }),
+    
+    vscode.commands.registerCommand('ramros.live.settings', async () => {
+      liveTreeProvider.openSettings();
+    }),
+    
+    vscode.commands.registerCommand('ramros.bag.selectFile', async () => {
       const selectedUris = await vscode.window.showOpenDialog({
         openLabel: 'Select Bag File',
         filters: {
@@ -1165,18 +1265,129 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!selectedUris || selectedUris.length === 0) return;
       
       const bagPath = selectedUris[0].fsPath;
-      const playCommand = `ros2 bag play "${bagPath}"`;
+      BagPlayItem.setSelectedBag(bagPath);
       
-      await terminalManager.executeInNewTerminal(playCommand, workspace, `Bag Play: ${path.basename(bagPath)}`);
+      // Get bag info
+      try {
+        const bagInfoOutput = execSync(`ros2 bag info "${bagPath}"`, { encoding: 'utf-8' });
+        
+        // Filter out "closing." lines from the output
+        const filteredOutput = bagInfoOutput.split('\n').filter(line => !line.includes('closing.')).join('\n');
+        
+        // Update BagInfoItem with bag path and info
+        await toolsTreeProvider.setBagInfo(filteredOutput, bagPath);
+      } catch (error) {
+        void vscode.window.showErrorMessage(`Failed to get bag info: ${error}`);
+      }
+      
+      // Refresh tree to show play controls and bag info
+      await toolsTreeProvider.refresh();
+      
+      void vscode.window.showInformationMessage(`Bag file selected: ${path.basename(bagPath)}`);
     }),
     
-    vscode.commands.registerCommand('ramros.live.refresh', async () => {
-      await liveTreeProvider.refresh();
-      void vscode.window.showInformationMessage('ROS2 Live view refreshed');
+    vscode.commands.registerCommand('ramros.bag.playPause', async () => {
+      const bagPath = BagPlayItem.getSelectedBag();
+      
+      if (!bagPath) {
+        void vscode.window.showWarningMessage('No bag file selected');
+        return;
+      }
+      
+      const workspace = await pickWorkspace();
+      if (!workspace) return;
+      
+      if (activePlaybackTerminal) {
+        // Show the terminal first to ensure it can receive input
+        activePlaybackTerminal.show(true);
+        
+        // Small delay to ensure terminal is focused
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Toggle pause - send space key to ros2 bag play
+        activePlaybackTerminal.sendText(' ', false);
+        isPlaybackPaused = !isPlaybackPaused;
+        BagPlayControlItem.setPlayingState(true, isPlaybackPaused);
+        await toolsTreeProvider.refresh();
+      } else {
+        // Start playback with script wrapper for keyboard control support
+        const loopArg = isPlaybackLooping ? '--loop' : '';
+        const playCommand = `script -q -c 'ros2 bag play "${bagPath}" ${loopArg}' /dev/null`;
+        activePlaybackTerminal = await terminalManager.executeInNewTerminal(playCommand, workspace, `Bag Play: ${path.basename(bagPath)}`);
+        isPlaybackPaused = false;
+        BagPlayControlItem.setPlayingState(true, false);
+        await toolsTreeProvider.refresh();
+      }
     }),
     
-    vscode.commands.registerCommand('ramros.live.settings', async () => {
-      liveTreeProvider.openSettings();
+    vscode.commands.registerCommand('ramros.bag.toggleLoop', async () => {
+      isPlaybackLooping = !isPlaybackLooping;
+      BagLoopItem.setLoopingState(isPlaybackLooping);
+      
+      void vscode.window.showInformationMessage(`Loop playback ${isPlaybackLooping ? 'enabled' : 'disabled'}`);
+      
+      // If currently playing, restart with new loop setting
+      if (activePlaybackTerminal) {
+        // Stop current playback
+        activePlaybackTerminal.sendText('\x03'); // Ctrl+C
+        activePlaybackTerminal.dispose();
+        activePlaybackTerminal = null;
+        BagPlayControlItem.setPlayingState(false, false);
+        
+        const bagPath = BagPlayItem.getSelectedBag();
+        if (bagPath && isPlaybackLooping) {
+          const workspace = await pickWorkspace();
+          if (workspace) {
+            setTimeout(async () => {
+              const loopArg = '--loop';
+              const playCommand = `script -q -c 'ros2 bag play "${bagPath}" ${loopArg}' /dev/null`;
+              activePlaybackTerminal = await terminalManager.executeInNewTerminal(playCommand, workspace, `Bag Play: ${path.basename(bagPath)}`);
+              isPlaybackPaused = false;
+              BagPlayControlItem.setPlayingState(true, false);
+              
+              await toolsTreeProvider.refresh();
+            }, 500);
+          }
+        }
+      }
+      
+      await toolsTreeProvider.refresh();
+    }),
+    
+    vscode.commands.registerCommand('ramros.bag.stop', async () => {
+      if (activePlaybackTerminal) {
+        activePlaybackTerminal.sendText('\x03'); // Ctrl+C
+        activePlaybackTerminal.dispose();
+        activePlaybackTerminal = null;
+        isPlaybackPaused = false;
+        BagPlayControlItem.setPlayingState(false, false);
+        
+        // Reset instances to clear the controls from the tree
+        BagFilesFolderItem.resetInstances();
+        
+        await toolsTreeProvider.refresh();
+        void vscode.window.showInformationMessage('Bag playback stopped');
+      } else {
+        void vscode.window.showWarningMessage('No active bag playback');
+      }
+    }),
+    
+    vscode.commands.registerCommand('ramros.bag.stopRecording', async () => {
+      if (activeRecordingTerminal) {
+        activeRecordingTerminal.sendText('\x03'); // Ctrl+C
+        activeRecordingTerminal = null;
+        isRecordingPaused = false;
+        BagRecordItem.setRecordingState(false);
+        BagRecordItem.setPausedState(false);
+        
+        // Reset instances to clear the controls from the tree
+        BagFilesFolderItem.resetInstances();
+        
+        await toolsTreeProvider.refresh();
+        void vscode.window.showInformationMessage('Bag recording stopped');
+      } else {
+        void vscode.window.showWarningMessage('No active bag recording');
+      }
     })
   );
   
