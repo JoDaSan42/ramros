@@ -114,6 +114,8 @@ jobs:
     needs: build-extension
     if: startsWith(github.ref, 'refs/tags/v')
     environment: production
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
       - name: Download Artifact
