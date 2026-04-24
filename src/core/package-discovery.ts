@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { execSync } from 'child_process';
 
 export interface PackageInfo {
   name: string;
@@ -72,12 +73,137 @@ export interface InterfaceFieldInfo {
 export interface LaunchFileInfo {
   name: string;
   path: string;
+  packageName: string;
 }
 
+export interface InstalledPackageInfo extends PackageInfo {
+  source: 'installed';
+  installPath: string;
+}
+
+export type PackageInfoWithSource = PackageInfo | InstalledPackageInfo;
 
 
 export class PackageDiscoveryService {
   private cache: Map<string, PackageInfo[]> = new Map();
+  private installedPackagesCache: InstalledPackageInfo[] | null = null;
+
+  async discoverInstalledPackages(): Promise<InstalledPackageInfo[]> {
+    if (this.installedPackagesCache !== null) {
+      return this.installedPackagesCache;
+    }
+
+    try {
+      const { execSync } = await import('child_process');
+      
+      // Get all installed package names
+      const pkgListOutput = execSync('ros2 pkg list', { encoding: 'utf-8' });
+      const packageNames = pkgListOutput.split('\n').filter(line => line.trim().length > 0);
+
+      // Get all executables with their package names
+      const executablesOutput = execSync('ros2 pkg executables', { encoding: 'utf-8' });
+      const executableLines = executablesOutput.split('\n').filter(line => line.trim().length > 0);
+      
+      // Map: packageName -> [executable1, executable2, ...]
+      const packageExecutables = new Map<string, string[]>();
+      for (const line of executableLines) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 2) {
+          const packageName = parts[0];
+          const executableName = parts[1];
+          
+          if (!packageExecutables.has(packageName)) {
+            packageExecutables.set(packageName, []);
+          }
+          packageExecutables.get(packageName)!.push(executableName);
+        }
+      }
+
+      // Build InstalledPackageInfo for each package
+      const packages: InstalledPackageInfo[] = [];
+      
+      for (const pkgName of packageNames) {
+        try {
+          // Try to get package path via ros2 pkg prefix
+          const prefixOutput = execSync(`ros2 pkg prefix ${pkgName}`, { encoding: 'utf-8' }).trim();
+          
+          const installPath = prefixOutput;
+          const sharePath = path.join(installPath, 'share', pkgName);
+          
+          const nodes: NodeInfo[] = [];
+          const executables = packageExecutables.get(pkgName) || [];
+          
+          for (const exe of executables) {
+            nodes.push({
+              name: exe,
+              path: path.join(installPath, 'lib', pkgName, exe),
+              packageName: pkgName,
+              language: this.detectExecutableLanguage(path.join(installPath, 'lib', pkgName, exe)),
+              isExecutable: true,
+              parameters: [], // No parameter extraction for installed packages in Phase 1
+            });
+          }
+
+          packages.push({
+            name: pkgName,
+            path: sharePath,
+            installPath: installPath,
+            source: 'installed',
+            version: '',
+            description: '',
+            maintainers: [],
+            license: '',
+            buildType: 'ament_cmake',
+            packageType: 'empty',
+            dependencies: [],
+            nodes: nodes.sort((a, b) => a.name.localeCompare(b.name)),
+            interfaces: [],
+            launchFiles: [],
+          });
+        } catch (error) {
+          console.warn(`Failed to get info for installed package ${pkgName}:`, error);
+        }
+      }
+
+      packages.sort((a, b) => a.name.localeCompare(b.name));
+      this.installedPackagesCache = packages;
+      return packages;
+    } catch (error) {
+      console.error('Failed to discover installed packages:', error);
+      return [];
+    }
+  }
+
+  private detectExecutableLanguage(executablePath: string): 'cpp' | 'python' {
+    if (!fs.existsSync(executablePath)) {
+      return 'cpp';
+    }
+
+    try {
+      const fileOutput = execSync(`file "${executablePath}"`, { encoding: 'utf-8' });
+      
+      if (fileOutput.includes('Python') || fileOutput.includes('script')) {
+        return 'python';
+      }
+      if (fileOutput.includes('ELF') || fileOutput.includes('executable')) {
+        return 'cpp';
+      }
+
+      // Fallback: check file extension or first line
+      if (executablePath.endsWith('.py')) {
+        return 'python';
+      }
+
+      const firstLine = fs.readFileSync(executablePath, 'utf-8').split('\n')[0];
+      if (firstLine.includes('python')) {
+        return 'python';
+      }
+
+      return 'cpp';
+    } catch {
+      return 'cpp';
+    }
+  }
 
   async discoverPackages(workspaceSrcPath: string): Promise<PackageInfo[]> {
     const cached = this.cache.get(workspaceSrcPath);
@@ -143,7 +269,7 @@ export class PackageDiscoveryService {
     const packageName = xmlData.name || path.basename(packageDir);
     const nodes = await this.findExecutableNodes(packageDir, packageType, packageName);
     const interfaces = await this.findInterfaceFiles(packageDir);
-    const launchFiles = await this.findLaunchFiles(packageDir);
+    const launchFiles = await this.findLaunchFiles(packageDir, packageName);
 
     return {
       name: xmlData.name || path.basename(packageDir),
@@ -714,7 +840,7 @@ export class PackageDiscoveryService {
     };
   }
 
-  async findLaunchFiles(packagePath: string): Promise<LaunchFileInfo[]> {
+  async findLaunchFiles(packagePath: string, packageName: string): Promise<LaunchFileInfo[]> {
     const launchFiles: LaunchFileInfo[] = [];
     const launchDir = path.join(packagePath, 'launch');
 
@@ -728,6 +854,7 @@ export class PackageDiscoveryService {
       launchFiles.push({
         name: file,
         path: path.join(launchDir, file),
+        packageName: packageName,
       });
     }
 
