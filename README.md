@@ -223,22 +223,30 @@ No configuration required for basic usage. Optional settings:
 
 ```
 src/
-├── core/                    # Core business logic
-│   ├── ros-environment.ts   # ROS2 installation detection
-│   ├── workspace-detector.ts # Workspace discovery & validation
-│   └── duplicate-package-detector.ts # Conflict detection
-├── cache/                   # Caching layer
-│   └── cache-manager.ts     # TTL + LRU cache with FS invalidation
-├── executor/                # Command execution
-│   └── terminal-manager.ts  # Terminal management
-├── wizard/                  # Package creation wizard
-│   ├── launch-wizard.ts     # Interactive wizard UI
-│   └── launch-generator.ts  # Launch file generation
-├── treeview/                # UI components
-│   ├── tools-tree-provider.ts
-│   ├── live-tree-provider.ts
-│   └── tree-items.ts        # Tree item classes
-└── extension.ts             # Main entry point
+├── core/                      # Core business logic
+│   ├── ros-environment.ts     # ROS2 installation detection
+│   ├── workspace-detector.ts  # Workspace discovery & validation
+│   ├── package-discovery.ts   # Package/node/interface static analysis
+│   ├── duplicate-package-detector.ts # Conflict detection
+│   └── ros2-cli-service.ts    # Async wrapper for ros2 CLI commands
+├── cache/                     # Caching layer
+│   └── cache-manager.ts       # TTL + LRU cache with FS invalidation
+├── executor/                  # Command execution
+│   ├── terminal-manager.ts    # Terminal management
+│   └── bag-session-service.ts # Bag recording/playback state
+├── wizard/                    # Package & launch file creation
+│   ├── package-creator.ts     # Package/node/interface creation
+│   ├── package-form-validator.ts # Name/email validation
+│   ├── launch-wizard.ts       # Interactive launch file wizard
+│   ├── launch-generator.ts    # Launch file generation
+│   ├── interface-collector.ts # Interface definition wizard helpers
+│   └── build-file-patcher.ts  # CMakeLists/setup.py/package.xml patcher
+├── treeview/                  # UI components
+│   ├── tree-provider.ts       # Main workspace tree provider
+│   ├── tools-tree-provider.ts # ROS2 tools tree provider
+│   ├── live-tree-provider.ts  # Live ROS2 topic/node monitor
+│   └── tree-items.ts          # Tree item classes
+└── extension.ts               # Main entry point
 ```
 
 ## Planned Improvements
