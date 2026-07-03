@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
+import { RosEnvironmentService } from '../core/ros-environment';
 
 interface InterfaceDefinition {
   type: 'message' | 'service' | 'action';
@@ -31,8 +32,10 @@ interface AddNodeConfig {
 
 export class PackageCreator {
   private readonly templateDir: string;
+  private readonly rosEnvironment: RosEnvironmentService;
 
-  constructor(extensionPath?: string) {
+  constructor(extensionPath?: string, rosEnvironment?: RosEnvironmentService) {
+    this.rosEnvironment = rosEnvironment || new RosEnvironmentService();
     if (extensionPath && fs.existsSync(path.join(extensionPath, 'test-fixtures', 'packages'))) {
       this.templateDir = path.join(extensionPath, 'test-fixtures', 'packages');
     } else if (fs.existsSync(path.join(process.cwd(), 'test-fixtures', 'packages'))) {
@@ -63,9 +66,9 @@ export class PackageCreator {
       return;
     }
 
-    if (config.template !== 'empty' && !this.isRos2Available()) {
-      const templatePath = path.join(this.templateDir, `template-${config.template}`);
-      if (!fs.existsSync(templatePath)) {
+    if (config.template !== 'empty') {
+      const validTemplates = ['minimal-cpp', 'minimal-python', 'standard'];
+      if (!validTemplates.includes(config.template)) {
         throw new Error(`Template '${config.template}' not found`);
       }
     }
@@ -97,7 +100,8 @@ export class PackageCreator {
     }
 
     try {
-      execSync(`source /opt/ros/humble/setup.bash && ros2 ${args.join(' ')}`, { stdio: 'pipe', shell: '/bin/bash' });
+      const setupCmd = await this.getRosSetupCommand();
+      execSync(`${setupCmd} && ros2 ${args.join(' ')}`, { stdio: 'pipe', shell: '/bin/bash' });
       
       if (config.nodeName && (config.template === 'minimal-python' || config.template === 'minimal-cpp' || config.template === 'standard')) {
         const includeNode = config.includeTemplateNode ?? true;
@@ -552,9 +556,17 @@ def generate_launch_description():
       .join('');
   }
 
+  private async getRosSetupCommand(): Promise<string> {
+    const activeDist = await this.rosEnvironment.getActiveDistribution();
+    if (activeDist) {
+      return `source ${activeDist.setupBash}`;
+    }
+    throw new Error('No active ROS2 distribution found. Please ensure ROS2 is installed and ROS_DISTRO is set.');
+  }
+
   private isRos2Available(): boolean {
     try {
-      execSync('ros2 --version', { stdio: 'pipe' });
+      execSync('command -v ros2', { stdio: 'pipe' });
       return true;
     } catch {
       return false;

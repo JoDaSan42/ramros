@@ -90,7 +90,7 @@ export async function activate(context: vscode.ExtensionContext) {
   toolsTreeProvider = new ToolsTreeProvider();
   liveTreeProvider = new LiveTreeProvider();
   
-  packageCreator = new PackageCreator(context.extensionPath);
+   packageCreator = new PackageCreator(context.extensionPath, rosEnvironmentService);
   
   const treeView = vscode.window.createTreeView('ramrosExplorer', {
     treeDataProvider: treeProvider,
