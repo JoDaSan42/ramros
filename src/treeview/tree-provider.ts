@@ -13,7 +13,9 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
   private packageDiscovery: PackageDiscoveryService;
   private autoRefreshInterval: NodeJS.Timeout | undefined;
   private readonly AUTO_REFRESH_MS = 3000;
-  private fileWatcher: vscode.FileSystemWatcher | undefined;
+  private readonly fileWatchers: vscode.FileSystemWatcher[] = [];
+  private refreshDebounceTimer: NodeJS.Timeout | undefined;
+  private readonly DEBOUNCE_MS = 300;
   private sortMode: 'byPackage' | 'byCategory' = 'byPackage';
   
   constructor(
@@ -50,9 +52,7 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
     this.packageDiscovery.clearCache();
     const newWorkspaces = await this.workspaceDetector.detectWorkspaces(true);
     
-    for (const workspace of newWorkspaces) {
-      await this.workspaceDetector.validateWorkspace(workspace);
-    }
+    // detectWorkspaces already validates each workspace, no need to re-validate here
     
     const newConflicts = await this.duplicateDetector.detectDuplicates(newWorkspaces);
     
@@ -87,29 +87,38 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
       clearInterval(this.autoRefreshInterval);
       this.autoRefreshInterval = undefined;
     }
-    if (this.fileWatcher) {
-      this.fileWatcher.dispose();
-      this.fileWatcher = undefined;
+    if (this.refreshDebounceTimer) {
+      clearTimeout(this.refreshDebounceTimer);
+      this.refreshDebounceTimer = undefined;
     }
+    for (const watcher of this.fileWatchers) {
+      watcher.dispose();
+    }
+    this.fileWatchers.length = 0;
   }
-  
+   
   private setupFileWatcher(): void {
     const workspaceFolders = vscode.workspace.workspaceFolders || [];
     if (workspaceFolders.length === 0) return;
     
-    const watchers: vscode.FileSystemWatcher[] = [];
-    
     for (const folder of workspaceFolders) {
       const srcPattern = new vscode.RelativePattern(folder, 'src/**/package.xml');
       const watcher = vscode.workspace.createFileSystemWatcher(srcPattern);
-      watchers.push(watcher);
+      this.fileWatchers.push(watcher);
       
-      watcher.onDidCreate(() => this.refresh());
-      watcher.onDidDelete(() => this.refresh());
-      watcher.onDidChange(() => this.refresh());
+      const debouncedRefresh = (): void => {
+        if (this.refreshDebounceTimer) {
+          clearTimeout(this.refreshDebounceTimer);
+        }
+        this.refreshDebounceTimer = setTimeout(() => {
+          void this.refresh();
+        }, this.DEBOUNCE_MS);
+      };
+      
+      watcher.onDidCreate(debouncedRefresh);
+      watcher.onDidDelete(debouncedRefresh);
+      watcher.onDidChange(debouncedRefresh);
     }
-    
-    this.fileWatcher = watchers[0];
   }
   
   getTreeItem(element: TreeItemBase): vscode.TreeItem {
