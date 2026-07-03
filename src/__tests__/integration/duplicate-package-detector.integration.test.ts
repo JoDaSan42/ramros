@@ -282,10 +282,10 @@ describe('DuplicatePackageDetector Integration Tests', () => {
       await detector.scanWorkspace(workspace);
 
       // Check uniqueness (uses cache)
-      const isUnique = await detector.isPackageNameUnique('my_package', validWorkspacePath);
+      const isUnique = await detector.isPackageNameUnique('my_package', validWorkspacePath, [workspace]);
       expect(isUnique).toBe(false);
 
-      const isUniqueNew = await detector.isPackageNameUnique('new_package', validWorkspacePath);
+      const isUniqueNew = await detector.isPackageNameUnique('new_package', validWorkspacePath, [workspace]);
       expect(isUniqueNew).toBe(true);
     });
   });

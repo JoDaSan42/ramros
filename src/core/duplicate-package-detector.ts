@@ -127,18 +127,24 @@ export class DuplicatePackageDetector {
     return conflicts;
   }
   
-  async isPackageNameUnique(name: string, workspaceId: string): Promise<boolean> {
+  async isPackageNameUnique(name: string, workspaceId: string, allWorkspaces?: WorkspaceInfo[]): Promise<boolean> {
     const cacheKey = `${DuplicatePackageDetector.CACHE_PREFIX}${workspaceId}`;
     
+    let packages: PackageInfo[] | null;
+    
     if (this.cacheManager) {
-      const packages = await this.cacheManager.get<PackageInfo[]>(cacheKey);
-      if (!packages) {
-        return true;
-      }
-      return !packages.some(p => p.name === name);
+      packages = await this.cacheManager.get<PackageInfo[]>(cacheKey);
+    } else {
+      packages = this.packageCache.get(cacheKey) ?? null;
     }
     
-    const packages = this.packageCache.get(cacheKey);
+    // Cold cache: scan the workspace to populate cache before checking
+    if (!packages && allWorkspaces) {
+      const workspace = allWorkspaces.find(w => w.id === workspaceId);
+      if (workspace) {
+        packages = await this.scanWorkspace(workspace);
+      }
+    }
     
     if (!packages) {
       return true;
