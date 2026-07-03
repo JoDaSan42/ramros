@@ -1,21 +1,19 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { PackageInfo, NodeInfo, InstalledPackageInfo, LaunchFileInfo } from '../core/package-discovery';
+import { PackageInfo, NodeInfo, InstalledPackageInfo, LaunchFileInfo, PackageDiscoveryService } from '../core/package-discovery';
 import { LaunchGenerator, LaunchNodeConfig, LaunchFileConfig } from './launch-generator';
+import { ParameterCoercer, ParameterValue } from './build-file-patcher';
 
 export interface SelectedNodeForLaunch {
   node: NodeInfo;
   package: PackageInfo | InstalledPackageInfo;
-  parameters?: Array<{ name: string; value: boolean | number | string | (boolean | number | string)[] }>;
+  parameters?: Array<{ name: string; value: ParameterValue }>;
 }
 
 export interface SelectedLaunchFile {
   launchFile: LaunchFileInfo;
   package: PackageInfo | InstalledPackageInfo;
 }
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type PackageDiscoveryServiceType = any;
 
 export class LaunchWizard {
   private selectedNodes: SelectedNodeForLaunch[] = [];
@@ -24,7 +22,7 @@ export class LaunchWizard {
 
   constructor(
     private workspacePath: string,
-    private packageDiscovery: PackageDiscoveryServiceType
+    private packageDiscovery: PackageDiscoveryService
   ) {}
 
   async run(): Promise<void> {
@@ -223,7 +221,7 @@ export class LaunchWizard {
 
     // Configure parameters immediately for this node
     const isInstalled = (pkg as InstalledPackageInfo).source === 'installed';
-    const nodeParams: Array<{ name: string; value: boolean | number | string | (boolean | number | string)[] }> = [];
+    const nodeParams: Array<{ name: string; value: ParameterValue }> = [];
 
     if (!isInstalled && selected.node.parameters && selected.node.parameters.length > 0) {
       const shouldConfigure = await vscode.window.showQuickPick([
@@ -244,8 +242,7 @@ export class LaunchWizard {
           if (inputValue !== undefined && inputValue !== '') {
             nodeParams.push({
               name: param.name,
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              value: this.parseParameterValue(inputValue, param.type) as any
+              value: this.parseParameterValue(inputValue, param.type)
             });
           }
         }
@@ -290,27 +287,8 @@ export class LaunchWizard {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private parseParameterValue(value: string, type?: string): boolean | number | string | any[] {
-    if (type === 'bool' || type === 'boolean') {
-      return value.toLowerCase() === 'true';
-    }
-    if (type === 'int' || type === 'integer') {
-      const parsed = parseInt(value, 10);
-      return isNaN(parsed) ? value : parsed;
-    }
-    if (type === 'float' || type === 'double') {
-      const parsed = parseFloat(value);
-      return isNaN(parsed) ? value : parsed;
-    }
-    if (type === 'array' || type?.startsWith('[')) {
-      try {
-        return JSON.parse(value);
-      } catch {
-        return value.split(',').map(s => s.trim());
-      }
-    }
-    return value;
+  private parseParameterValue(value: string, type?: string): ParameterValue {
+    return ParameterCoercer.parse(value, type);
   }
 
   private async getFileName(): Promise<string | undefined> {

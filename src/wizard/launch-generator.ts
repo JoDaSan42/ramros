@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
+import { ParameterCoercer, ParameterValue } from './build-file-patcher';
 
 export interface LaunchArgumentConfig {
   name: string;
@@ -13,8 +14,7 @@ export interface LaunchNodeConfig {
   executableName: string;
   nodeName?: string;
   namespace?: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  parameters?: Array<{ name: string; value: any }>;
+  parameters?: Array<{ name: string; value: ParameterValue }>;
   remappings?: Array<{ from: string; to: string }>;
   output?: 'screen' | 'log';
   useSimTime?: boolean;
@@ -86,7 +86,7 @@ export class LaunchGenerator {
       
       // Merge user parameters and use_sim_time into a single parameters dict
       // to avoid emitting duplicate parameters=[...] keys (Python SyntaxError)
-      const allParams: Array<{ name: string; value: unknown }> = [];
+      const allParams: Array<{ name: string; value: ParameterValue }> = [];
       if (nodeConfig.parameters && nodeConfig.parameters.length > 0) {
         allParams.push(...nodeConfig.parameters);
       }
@@ -164,26 +164,8 @@ export class LaunchGenerator {
     return `${pkgPart}_${exePart}_node`;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private formatParameterValue(value: any): string {
-    if (typeof value === 'boolean') {
-      return value ? 'True' : 'False';
-    }
-    if (typeof value === 'number') {
-      return value.toString();
-    }
-    if (typeof value === 'string') {
-      // Check if it looks like a number string
-      if (/^-?\d+(\.\d+)?$/.test(value)) {
-        return value;
-      }
-      return `'${value.replace(/'/g, "\\'")}'`;
-    }
-    if (Array.isArray(value)) {
-      const items = value.map(v => this.formatParameterValue(v)).join(', ');
-      return `[${items}]`;
-    }
-    return `'${String(value).replace(/'/g, "\\'")}'`;
+  private formatParameterValue(value: ParameterValue): string {
+    return ParameterCoercer.formatPython(value);
   }
 
   async writeToFile(content: string, filePath: string): Promise<void> {

@@ -132,7 +132,7 @@ describe('TerminalManager Integration Tests', () => {
         warnings: []
       };
 
-      const terminal = await terminalManager.buildWorkspace(workspace, 'my_package');
+      const terminal = await terminalManager.buildWorkspace(workspace, { packageName: 'my_package' });
 
       expect(terminal).toBeDefined();
     });

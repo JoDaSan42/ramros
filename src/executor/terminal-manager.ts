@@ -112,16 +112,16 @@ export class TerminalManager implements vscode.Disposable {
     return terminal;
   }
   
-  async buildWorkspace(workspace: WorkspaceInfo, options?: BuildOptions | string): Promise<vscode.Terminal> {
-    const packageName = typeof options === 'string' ? options : options?.packageName;
-    const useSymlinkInstall = typeof options === 'object' ? options?.useSymlinkInstall : false;
-    const cleanFirst = typeof options === 'object' ? options?.cleanFirst : false;
+  async buildWorkspace(workspace: WorkspaceInfo, options?: BuildOptions): Promise<vscode.Terminal> {
+    const packageName = options?.packageName;
+    const useSymlinkInstall = options?.useSymlinkInstall ?? false;
+    const cleanFirst = options?.cleanFirst ?? false;
     
     const commands: string[] = [];
     
     if (cleanFirst) {
       const workspaceRoot = workspace.rootPath.fsPath;
-      commands.push(`rm -rf ${workspaceRoot}/build ${workspaceRoot}/log ${workspaceRoot}/install`);
+      commands.push(`rm -rf "${workspaceRoot}/build" "${workspaceRoot}/log" "${workspaceRoot}/install"`);
     }
     
     let buildCommand = 'colcon build';
@@ -140,7 +140,11 @@ export class TerminalManager implements vscode.Disposable {
       await this.executeInTerminal(command, workspace);
     }
     
-    return this.terminals.get(workspace.id)!;
+    const terminal = this.terminals.get(workspace.id);
+    if (!terminal) {
+      throw new Error(`Failed to get terminal for workspace ${workspace.name}`);
+    }
+    return terminal;
   }
   
   dispose(): void {
