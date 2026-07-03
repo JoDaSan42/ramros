@@ -6,8 +6,9 @@ export interface ValidationResult {
 
 export class PackageFormValidator {
   private readonly packageNameRegex = /^[a-z][a-z0-9_-]*$/;
+  private readonly nodeNameRegex = /^[a-z][a-z0-9_]*$/;
   private readonly emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  private readonly reservedNames = ['src', 'build', 'install', 'launch', 'test'];
+  private readonly reservedNames = ['src', 'build', 'install', 'launch', 'test', 'msg', 'srv', 'action'];
 
   validatePackageName(name: string, existingPackages: string[]): ValidationResult {
     const result: ValidationResult = { isValid: true, errors: [], warnings: [] };
@@ -86,14 +87,24 @@ export class PackageFormValidator {
   validateNodeName(name: string): ValidationResult {
     const result: ValidationResult = { isValid: true, errors: [], warnings: [] };
 
-    if (name && !this.packageNameRegex.test(name)) {
+    if (name && !this.nodeNameRegex.test(name)) {
       result.errors.push(
-        'Node name must start with a lowercase letter and contain only lowercase letters, numbers, underscores, and hyphens'
+        'Node name must start with a lowercase letter and contain only lowercase letters, numbers, and underscores'
       );
       result.isValid = false;
     }
 
     return result;
+  }
+
+  validateNodeNameInput(name: string): string | null {
+    if (!name || name.trim().length === 0) {
+      return 'Node name cannot be empty';
+    }
+    if (!this.nodeNameRegex.test(name)) {
+      return 'Node name must start with a lowercase letter and contain only lowercase letters, numbers, and underscores';
+    }
+    return null;
   }
 
   validateFullForm(

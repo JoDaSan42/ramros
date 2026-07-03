@@ -734,6 +734,7 @@ export async function activate(context: vscode.ExtensionContext) {
       
       const isCppPackage = selectedPackage.packageType === 'cpp' || selectedPackage.packageType === 'mixed';
       const isPythonPackage = selectedPackage.packageType === 'python' || selectedPackage.packageType === 'mixed';
+      const validator = new PackageFormValidator();
       
       let languageChoices: { label: string; description: string }[] = [];
       if (isCppPackage && isPythonPackage) {
@@ -763,15 +764,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const nodeName = await vscode.window.showInputBox({
         prompt: 'Enter node name',
         placeHolder: 'my_node',
-        validateInput: (value) => {
-          if (!value || value.trim().length === 0) {
-            return 'Node name cannot be empty';
-          }
-          if (!/^[a-z][a-z0-9_]*$/.test(value)) {
-            return 'Node name must start with lowercase letter and contain only lowercase letters, numbers, and underscores';
-          }
-          return null;
-        }
+        validateInput: (value) => validator.validateNodeNameInput(value)
       });
       
       if (!nodeName) return;

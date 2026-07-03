@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import { WorkspaceInfo } from './workspace-detector';
 import { CacheManager } from '../cache/cache-manager';
 
-export interface PackageInfo {
+export interface PackageRef {
   name: string;
   packagePath: string;
   workspaceId: string;
@@ -20,7 +20,7 @@ export interface PackageConflict {
 }
 
 export class DuplicatePackageDetector {
-  private readonly packageCache = new Map<string, PackageInfo[]>();
+  private readonly packageCache = new Map<string, PackageRef[]>();
   private readonly cacheManager?: CacheManager;
   private static readonly CACHE_PREFIX = 'duplicate-detector:';
 
@@ -28,11 +28,11 @@ export class DuplicatePackageDetector {
     this.cacheManager = cacheManager;
   }
   
-  async scanWorkspace(workspace: WorkspaceInfo): Promise<PackageInfo[]> {
+  async scanWorkspace(workspace: WorkspaceInfo): Promise<PackageRef[]> {
     const cacheKey = `${DuplicatePackageDetector.CACHE_PREFIX}${workspace.id}`;
     
     if (this.cacheManager) {
-      const cached = await this.cacheManager.get<PackageInfo[]>(cacheKey);
+      const cached = await this.cacheManager.get<PackageRef[]>(cacheKey);
       if (cached) {
         return cached;
       }
@@ -47,7 +47,7 @@ export class DuplicatePackageDetector {
       return [];
     }
     
-    const packages: PackageInfo[] = [];
+    const packages: PackageRef[] = [];
     const srcPath = workspace.srcPath.fsPath;
     
     if (!fs.existsSync(srcPath)) {
@@ -130,10 +130,10 @@ export class DuplicatePackageDetector {
   async isPackageNameUnique(name: string, workspaceId: string, allWorkspaces?: WorkspaceInfo[]): Promise<boolean> {
     const cacheKey = `${DuplicatePackageDetector.CACHE_PREFIX}${workspaceId}`;
     
-    let packages: PackageInfo[] | null;
+    let packages: PackageRef[] | null;
     
     if (this.cacheManager) {
-      packages = await this.cacheManager.get<PackageInfo[]>(cacheKey);
+      packages = await this.cacheManager.get<PackageRef[]>(cacheKey);
     } else {
       packages = this.packageCache.get(cacheKey) ?? null;
     }
@@ -165,7 +165,7 @@ export class DuplicatePackageDetector {
     if (workspacePackages.some(p => p.name === name)) {
       return {
         isValid: false,
-        error: `Package "${name}" existiert bereits in diesem Workspace`
+        error: `Package "${name}" already exists in this workspace`
       };
     }
     
@@ -176,7 +176,7 @@ export class DuplicatePackageDetector {
       if (packages.some(p => p.name === name)) {
         return {
           isValid: true,
-          warning: `Package "${name}" existiert in Workspace "${workspace.name}". Dies kann zu Konflikten führen.`
+          warning: `Package "${name}" exists in workspace "${workspace.name}". This may cause conflicts.`
         };
       }
     }
