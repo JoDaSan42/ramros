@@ -395,6 +395,20 @@
           "type": "string",
           "default": "",
           "description": "Custom path for launch files (used when defaultLocation is 'custom'). Use {workspace} for workspace root, {package} for package name"
+        },
+        "ramros.cache.ttlSeconds": {
+          "type": "number",
+          "default": 300,
+          "minimum": 1,
+          "maximum": 3600,
+          "description": "Time-to-live for cached workspace and package data in seconds"
+        },
+        "ramros.cache.maxEntries": {
+          "type": "number",
+          "default": 1000,
+          "minimum": 1,
+          "maximum": 10000,
+          "description": "Maximum number of cache entries (LRU eviction when exceeded)"
         }
       }
     }

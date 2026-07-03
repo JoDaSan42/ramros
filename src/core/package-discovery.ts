@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
+import * as vscode from 'vscode';
+import { CacheManager } from '../cache/cache-manager';
 
 export interface PackageInfo {
   name: string;
@@ -87,9 +89,20 @@ export type PackageInfoWithSource = PackageInfo | InstalledPackageInfo;
 export class PackageDiscoveryService {
   private cache: Map<string, PackageInfo[]> = new Map();
   private installedPackagesCache: InstalledPackageInfo[] | null = null;
+  private readonly cacheManager?: CacheManager;
+  private static readonly CACHE_PREFIX = 'package-discovery:';
+
+  constructor(cacheManager?: CacheManager) {
+    this.cacheManager = cacheManager;
+  }
 
   async discoverInstalledPackages(): Promise<InstalledPackageInfo[]> {
-    if (this.installedPackagesCache !== null) {
+    if (this.cacheManager) {
+      const cached = await this.cacheManager.get<InstalledPackageInfo[]>('package-discovery:installed');
+      if (cached) {
+        return cached;
+      }
+    } else if (this.installedPackagesCache !== null) {
       return this.installedPackagesCache;
     }
 
@@ -166,7 +179,11 @@ export class PackageDiscoveryService {
       }
 
       packages.sort((a, b) => a.name.localeCompare(b.name));
-      this.installedPackagesCache = packages;
+      if (this.cacheManager) {
+        await this.cacheManager.set('package-discovery:installed', packages);
+      } else {
+        this.installedPackagesCache = packages;
+      }
       return packages;
     } catch (error) {
       console.error('Failed to discover installed packages:', error);
@@ -206,9 +223,18 @@ export class PackageDiscoveryService {
   }
 
   async discoverPackages(workspaceSrcPath: string): Promise<PackageInfo[]> {
-    const cached = this.cache.get(workspaceSrcPath);
-    if (cached) {
-      return cached;
+    const cacheKey = `${PackageDiscoveryService.CACHE_PREFIX}${workspaceSrcPath}`;
+
+    if (this.cacheManager) {
+      const cached = await this.cacheManager.get<PackageInfo[]>(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    } else {
+      const cached = this.cache.get(workspaceSrcPath);
+      if (cached) {
+        return cached;
+      }
     }
 
     if (!fs.existsSync(workspaceSrcPath)) {
@@ -228,12 +254,25 @@ export class PackageDiscoveryService {
     }
 
     packages.sort((a, b) => a.name.localeCompare(b.name));
-    this.cache.set(workspaceSrcPath, packages);
+    if (this.cacheManager) {
+      await this.cacheManager.set(
+        cacheKey,
+        packages,
+        [vscode.Uri.file(workspaceSrcPath)]
+      );
+    } else {
+      this.cache.set(workspaceSrcPath, packages);
+    }
     return packages;
   }
 
   clearCache(): void {
-    this.cache.clear();
+    if (this.cacheManager) {
+      this.cacheManager.clearByPrefix(PackageDiscoveryService.CACHE_PREFIX);
+    } else {
+      this.cache.clear();
+      this.installedPackagesCache = null;
+    }
   }
 
   private async findPackageXmlFiles(srcPath: string): Promise<string[]> {

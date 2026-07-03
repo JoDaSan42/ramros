@@ -16,10 +16,16 @@ interface CacheStats {
   evictions: number;
 }
 
+export interface CacheManagerOptions {
+  ttl?: number;
+  maxCacheSize?: number;
+  onFileChange?: (path: string) => void;
+}
+
 export class CacheManager implements vscode.Disposable {
   private readonly memoryCache = new Map<CacheKey, CacheEntry<unknown>>();
-  private readonly DEFAULT_TTL = 5 * 60 * 1000;
-  private readonly MAX_CACHE_SIZE = 1000;
+  public DEFAULT_TTL: number;
+  public MAX_CACHE_SIZE: number;
   
   private stats: CacheStats = {
     size: 0,
@@ -31,9 +37,23 @@ export class CacheManager implements vscode.Disposable {
   private watcher?: vscode.FileSystemWatcher;
   private readonly disposables: vscode.Disposable[] = [];
   
-  constructor(private readonly onFileChange?: (path: string) => void) {
+  constructor(options?: CacheManagerOptions) {
+    let configTtl = 300;
+    let configMaxEntries = 1000;
+    try {
+      const config = vscode.workspace.getConfiguration('ramros.cache');
+      configTtl = config.get<number>('ttlSeconds', 300);
+      configMaxEntries = config.get<number>('maxEntries', 1000);
+    } catch {
+      // VSCode API not available (e.g., in unit tests)
+    }
+    this.DEFAULT_TTL = options?.ttl ?? configTtl * 1000;
+    this.MAX_CACHE_SIZE = options?.maxCacheSize ?? configMaxEntries;
+    this.onFileChange = options?.onFileChange;
     this.setupFileSystemWatcher();
   }
+  
+  private onFileChange?: (path: string) => void;
   
   async get<T>(key: CacheKey): Promise<T | null> {
     const entry = this.memoryCache.get(key);
@@ -51,13 +71,17 @@ export class CacheManager implements vscode.Disposable {
       return null;
     }
     
+    // LRU: re-insert to move to end (most recently used)
+    this.memoryCache.delete(key);
+    this.memoryCache.set(key, entry);
+    
     this.stats.hits++;
     this.updateStats();
     return entry.data as T;
   }
   
   async set<T>(key: CacheKey, data: T, dependencies: vscode.Uri[] = []): Promise<void> {
-    if (this.memoryCache.size >= this.MAX_CACHE_SIZE) {
+    if (this.memoryCache.size >= this.MAX_CACHE_SIZE && !this.memoryCache.has(key)) {
       const oldestKey = this.memoryCache.keys().next().value;
       if (oldestKey) {
         this.memoryCache.delete(oldestKey);
@@ -69,7 +93,7 @@ export class CacheManager implements vscode.Disposable {
       data,
       timestamp: Date.now(),
       ttl: this.DEFAULT_TTL,
-      dependencies: dependencies.map(uri => uri.fsPath)
+      dependencies: dependencies.map(uri => uri.fsPath.replace(/\\/g, '/'))
     });
     
     this.updateStats();
@@ -81,8 +105,9 @@ export class CacheManager implements vscode.Disposable {
     
     for (const [key, entry] of this.memoryCache.entries()) {
       const matchesDependency = entry.dependencies.some(dep => 
-        dep === normalizedPath || dep.startsWith(normalizedPath + '/') ||
-        normalizedPath.includes(dep)
+        dep === normalizedPath ||
+        dep.startsWith(normalizedPath + '/') ||
+        normalizedPath.startsWith(dep + '/')
       );
       
       if (matchesDependency) {
@@ -94,6 +119,15 @@ export class CacheManager implements vscode.Disposable {
     if (invalidatedCount > 0 && this.onFileChange) {
       this.onFileChange(`Invalidated ${invalidatedCount} cache entries`);
     }
+  }
+  
+  clearByPrefix(prefix: string): void {
+    for (const key of [...this.memoryCache.keys()]) {
+      if (key.startsWith(prefix)) {
+        this.memoryCache.delete(key);
+      }
+    }
+    this.updateStats();
   }
   
   clear(): void {

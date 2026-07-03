@@ -72,17 +72,20 @@ export async function activate(context: vscode.ExtensionContext) {
   
   const rosEnvironmentService = new RosEnvironmentService();
   
-  cacheManager = new CacheManager((message) => {
-    console.log(`[Cache] ${message}`);
+  cacheManager = new CacheManager({
+    onFileChange: (message) => {
+      console.log(`[Cache] ${message}`);
+    }
   });
   
-  const packageDiscovery = new PackageDiscoveryService();
+  const packageDiscovery = new PackageDiscoveryService(cacheManager);
   const workspaceDetector = new WorkspaceDetector(
     () => rosEnvironmentService.detectInstallations(),
-    packageDiscovery
+    packageDiscovery,
+    cacheManager
   );
   
-  const duplicateDetector = new DuplicatePackageDetector();
+  const duplicateDetector = new DuplicatePackageDetector(cacheManager);
   
   terminalManager = new TerminalManager();
   

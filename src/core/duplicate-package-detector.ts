@@ -1,6 +1,8 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import * as vscode from 'vscode';
 import { WorkspaceInfo } from './workspace-detector';
+import { CacheManager } from '../cache/cache-manager';
 
 export interface PackageInfo {
   name: string;
@@ -19,9 +21,27 @@ export interface PackageConflict {
 
 export class DuplicatePackageDetector {
   private readonly packageCache = new Map<string, PackageInfo[]>();
+  private readonly cacheManager?: CacheManager;
+  private static readonly CACHE_PREFIX = 'duplicate-detector:';
+
+  constructor(cacheManager?: CacheManager) {
+    this.cacheManager = cacheManager;
+  }
   
   async scanWorkspace(workspace: WorkspaceInfo): Promise<PackageInfo[]> {
-    const cacheKey = `packages:${workspace.id}`;
+    const cacheKey = `${DuplicatePackageDetector.CACHE_PREFIX}${workspace.id}`;
+    
+    if (this.cacheManager) {
+      const cached = await this.cacheManager.get<PackageInfo[]>(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    } else {
+      const cached = this.packageCache.get(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    }
     
     if (!workspace.srcPath) {
       return [];
@@ -54,7 +74,15 @@ export class DuplicatePackageDetector {
       });
     }
     
-    this.packageCache.set(cacheKey, packages);
+    if (this.cacheManager) {
+      await this.cacheManager.set(
+        cacheKey,
+        packages,
+        [vscode.Uri.file(srcPath)]
+      );
+    } else {
+      this.packageCache.set(cacheKey, packages);
+    }
     return packages;
   }
   
@@ -100,7 +128,16 @@ export class DuplicatePackageDetector {
   }
   
   async isPackageNameUnique(name: string, workspaceId: string): Promise<boolean> {
-    const cacheKey = `packages:${workspaceId}`;
+    const cacheKey = `${DuplicatePackageDetector.CACHE_PREFIX}${workspaceId}`;
+    
+    if (this.cacheManager) {
+      const packages = await this.cacheManager.get<PackageInfo[]>(cacheKey);
+      if (!packages) {
+        return true;
+      }
+      return !packages.some(p => p.name === name);
+    }
+    
     const packages = this.packageCache.get(cacheKey);
     
     if (!packages) {
@@ -156,6 +193,10 @@ export class DuplicatePackageDetector {
   }
   
   clearCache(): void {
-    this.packageCache.clear();
+    if (this.cacheManager) {
+      this.cacheManager.clearByPrefix(DuplicatePackageDetector.CACHE_PREFIX);
+    } else {
+      this.packageCache.clear();
+    }
   }
 }

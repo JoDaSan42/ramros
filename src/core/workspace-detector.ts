@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { RosDistribution } from './ros-environment';
 import { PackageDiscoveryService, PackageInfo } from './package-discovery';
+import { CacheManager } from '../cache/cache-manager';
 
 export interface WorkspaceInfo {
   id: string;
@@ -23,9 +24,10 @@ export class WorkspaceDetector {
 
   constructor(
     private readonly getRosDistributions: () => Promise<RosDistribution[]>,
-    packageDiscovery?: PackageDiscoveryService
+    packageDiscovery?: PackageDiscoveryService,
+    cacheManager?: CacheManager
   ) {
-    this.packageDiscovery = packageDiscovery || new PackageDiscoveryService();
+    this.packageDiscovery = packageDiscovery || new PackageDiscoveryService(cacheManager);
   }
   
   async detectWorkspaces(forceRefresh: boolean = true): Promise<WorkspaceInfo[]> {

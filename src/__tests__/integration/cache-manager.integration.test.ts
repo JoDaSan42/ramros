@@ -7,7 +7,7 @@ describe('CacheManager Integration Tests', () => {
 
   beforeEach(() => {
     onFileChangeMock = jest.fn();
-    cacheManager = new CacheManager(onFileChangeMock);
+    cacheManager = new CacheManager({ onFileChange: onFileChangeMock });
   });
 
   afterEach(() => {
@@ -92,7 +92,7 @@ describe('CacheManager Integration Tests', () => {
   describe('LRU Eviction', () => {
     it('FIFO eviction at max size', async () => {
       // Create a cache manager with small max size
-      const smallCache = new CacheManager(onFileChangeMock);
+      const smallCache = new CacheManager({ onFileChange: onFileChangeMock });
       (smallCache as any).MAX_CACHE_SIZE = 3;
 
       await smallCache.set('first', 'value1');
@@ -109,6 +109,33 @@ describe('CacheManager Integration Tests', () => {
 
       expect(first).toBeNull(); // Oldest, evicted
       expect(second).toBe('value2');
+      expect(third).toBe('value3');
+      expect(fourth).toBe('value4');
+
+      smallCache.dispose();
+    });
+
+    it('LRU reordering on get prevents eviction of recently accessed', async () => {
+      const smallCache = new CacheManager({ onFileChange: onFileChangeMock });
+      (smallCache as any).MAX_CACHE_SIZE = 3;
+
+      await smallCache.set('first', 'value1');
+      await smallCache.set('second', 'value2');
+      await smallCache.set('third', 'value3');
+
+      // Access 'first' to make it most-recently-used
+      await smallCache.get('first');
+
+      // Add fourth entry - should evict 'second' (now least recently used)
+      await smallCache.set('fourth', 'value4');
+
+      const first = await smallCache.get('first');
+      const second = await smallCache.get('second');
+      const third = await smallCache.get('third');
+      const fourth = await smallCache.get('fourth');
+
+      expect(first).toBe('value1'); // Was accessed, not evicted
+      expect(second).toBeNull();    // LRU evicted
       expect(third).toBe('value3');
       expect(fourth).toBe('value4');
 
