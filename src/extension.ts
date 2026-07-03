@@ -300,8 +300,17 @@ export async function activate(context: vscode.ExtensionContext) {
         value: template === 'interface' ? 'Interface package for ROS2 messages, services, and actions' : 'A ROS2 package'
       }) || '';
       
-      const authorName = 'ramros';
-      const authorEmail = 'ramros@test.com';
+      const authorName = await vscode.window.showInputBox({
+        prompt: 'Enter author name',
+        placeHolder: 'Your Name',
+        value: ''
+      }) || '';
+
+      const authorEmail = await vscode.window.showInputBox({
+        prompt: 'Enter author email',
+        placeHolder: 'your.email@example.com',
+        value: ''
+      }) || '';
       
       const license = await vscode.window.showQuickPick(
         ['Apache-2.0', 'MIT', 'BSD-2-Clause', 'BSD-3-Clause', 'GPL-3.0'],
