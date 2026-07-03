@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
 import { RosEnvironmentService } from '../core/ros-environment';
+import { BuildFilePatcher } from './build-file-patcher';
 
 interface InterfaceDefinition {
   type: 'message' | 'service' | 'action';
@@ -765,35 +766,10 @@ if __name__ == '__main__':
     dependencies: string[]
   ): void {
     const cmakePath = path.join(packagePath, 'CMakeLists.txt');
-    let cmakeContent = fs.readFileSync(cmakePath, 'utf-8');
-    
     for (const dep of dependencies) {
-      const findPackagePattern = new RegExp(`find_package\\(${dep} REQUIRED\\)`, 'i');
-      if (!findPackagePattern.test(cmakeContent)) {
-        const findPackageLine = `find_package(${dep} REQUIRED)`;
-        cmakeContent = cmakeContent.replace(
-          /(find_package\(ament_cmake REQUIRED\))/,
-          `$1\n${findPackageLine}`
-        );
-      }
+      BuildFilePatcher.addCmakeDependency(cmakePath, dep);
     }
-    
-    const executablePattern = new RegExp(`add_executable\\(${nodeName}`, 'i');
-    if (!executablePattern.test(cmakeContent)) {
-      const executableBlock = `\nadd_executable(${nodeName} src/${nodeName}.cpp)\nament_target_dependencies(${nodeName} ${dependencies.join(' ')})\n\ninstall(TARGETS ${nodeName}\n  DESTINATION lib/\${PROJECT_NAME})\n`;
-      
-      const installPattern = /install\s*\(\s*DIRECTORIES?/i;
-      if (installPattern.test(cmakeContent)) {
-        cmakeContent = cmakeContent.replace(installPattern, executableBlock + '\ninstall(DIRECTORIES');
-      } else {
-        cmakeContent = cmakeContent.replace(
-          /(ament_package\(\))/,
-          `${executableBlock}\n$1`
-        );
-      }
-    }
-    
-    fs.writeFileSync(cmakePath, cmakeContent);
+    BuildFilePatcher.addCmakeExecutable(cmakePath, nodeName, dependencies);
   }
 
   private updatePythonSetupPy(
@@ -802,42 +778,7 @@ if __name__ == '__main__':
     nodeName: string
   ): void {
     const setupPath = path.join(packagePath, 'setup.py');
-    let setupContent = fs.readFileSync(setupPath, 'utf-8');
-    
-    const entryPointPattern = /console_scripts\s*:\s*\[/i;
-    const newEntryPoint = `'${nodeName} = ${packageName}.${nodeName}:main'`;
-    
-    if (entryPointPattern.test(setupContent)) {
-      const existingEntriesPattern = /console_scripts\s*:\s*\[([^\]]*)\]/i;
-      const match = setupContent.match(existingEntriesPattern);
-      
-      if (match && match[1]) {
-        const existingEntries = match[1].trim();
-        if (existingEntries && !existingEntries.includes(nodeName)) {
-          const updatedEntries = existingEntries.endsWith(',') 
-            ? `${existingEntries}\n            ${newEntryPoint},`
-            : `${existingEntries},\n            ${newEntryPoint},`;
-          
-          setupContent = setupContent.replace(
-            existingEntriesPattern,
-            `console_scripts: [\n            ${updatedEntries}\n        ]`
-          );
-        }
-      }
-    } else {
-      const entryPointsBlock = `entry_points={
-        'console_scripts': [
-            ${newEntryPoint},
-        ],
-    },`;
-      
-      setupContent = setupContent.replace(
-        /zip_safe=True,/,
-        `zip_safe=True,\n    ${entryPointsBlock}`
-      );
-    }
-    
-    fs.writeFileSync(setupPath, setupContent);
+    BuildFilePatcher.addPythonEntryPoint(setupPath, nodeName, packageName);
   }
 
   private addDependenciesToPackageXml(
@@ -845,28 +786,9 @@ if __name__ == '__main__':
     dependencies: string[]
   ): void {
     const packageXmlPath = path.join(packagePath, 'package.xml');
-    let packageXmlContent = fs.readFileSync(packageXmlPath, 'utf-8');
-    
     for (const dep of dependencies) {
-      const dependPattern = new RegExp(`<depend>${dep}</depend>`, 'i');
-      if (!dependPattern.test(packageXmlContent)) {
-        const buildExportPattern = /(<build_export_depend>[^<]+<\/build_export_depend>)/i;
-        if (buildExportPattern.test(packageXmlContent)) {
-          packageXmlContent = packageXmlContent.replace(
-            buildExportPattern,
-            `$1\n  <depend>${dep}</depend>`
-          );
-        } else {
-          const descriptionPattern = /(<description>[^<]*<\/description>)/i;
-          packageXmlContent = packageXmlContent.replace(
-            descriptionPattern,
-            `$1\n  <depend>${dep}</depend>`
-          );
-        }
-      }
+      BuildFilePatcher.addPackageXmlDependency(packageXmlPath, dep);
     }
-    
-    fs.writeFileSync(packageXmlPath, packageXmlContent);
   }
 
   async addInterfaceToPackage(
@@ -904,35 +826,6 @@ if __name__ == '__main__':
     newInterface: InterfaceDefinition
   ): void {
     const cmakePath = path.join(packagePath, 'CMakeLists.txt');
-    let cmakeContent = fs.readFileSync(cmakePath, 'utf-8');
-    
-    const extension = this.getInterfaceExtension(newInterface.type);
-    const newInterfaceFile = `"${newInterface.type === 'message' ? 'msg' : newInterface.type === 'service' ? 'srv' : 'action'}/${newInterface.name}.${extension}"`;
-    
-    const rosidlPattern = /(rosidl_generate_interfaces\(\$\{PROJECT_NAME\})([\s\S]*?)(\))/;
-    const match = cmakeContent.match(rosidlPattern);
-    
-    if (match) {
-      const existingFiles = match[2];
-      if (!existingFiles.includes(newInterface.name)) {
-        const updatedFiles = `${existingFiles.trim()}\n  ${newInterfaceFile}`;
-        cmakeContent = cmakeContent.replace(
-          rosidlPattern,
-          `$1${updatedFiles}$3`
-        );
-      }
-    } else {
-      const rosidlBlock = `rosidl_generate_interfaces(\${PROJECT_NAME}
-  ${newInterfaceFile}
-  DEPENDENCIES builtin_interfaces
-)`;
-      
-      cmakeContent = cmakeContent.replace(
-        /(ament_package\(\))/,
-        `${rosidlBlock}\n\n$1`
-      );
-    }
-    
-    fs.writeFileSync(cmakePath, cmakeContent);
+    BuildFilePatcher.addCmakeInterfaceRegistration(cmakePath, newInterface.type, newInterface.name);
   }
 }
