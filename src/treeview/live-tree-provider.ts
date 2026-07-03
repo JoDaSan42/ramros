@@ -89,35 +89,41 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
       const folderType = element.getFolderType();
       
       if (folderType === 'active-nodes') {
-        const nodes = this.getActiveNodes();
-        return nodes.map(name => {
-          const info = this.getNodeInfo(name);
+        const nodes = await this.getActiveNodes();
+        const items: TreeItemBase[] = [];
+        for (const name of nodes) {
+          const info = await this.getNodeInfo(name);
           if (info) {
-            return new LiveNodeItem(
+            items.push(new LiveNodeItem(
               info.name,
               info.publishedTopics,
               info.subscribedTopics
-            );
+            ));
+          } else {
+            items.push(new LiveNodeItem(name));
           }
-          return new LiveNodeItem(name);
-        });
+        }
+        return items;
       } else if (folderType === 'active-topics') {
-        let topicNames = this.getActiveTopics();
+        let topicNames = await this.getActiveTopics();
         if (this.hideSystemTopics) {
           topicNames = topicNames.filter(name => !this.isSystemTopic(name));
         }
-        return topicNames.map(name => {
-          const info = this.getTopicInfo(name);
+        const items: TreeItemBase[] = [];
+        for (const name of topicNames) {
+          const info = await this.getTopicInfo(name);
           if (info) {
-            return new LiveTopicItem(
+            items.push(new LiveTopicItem(
               info.name,
               info.messageType,
               info.publishers,
               info.subscribers
-            );
+            ));
+          } else {
+            items.push(new LiveTopicItem(name));
           }
-          return new LiveTopicItem(name);
-        });
+        }
+        return items;
       }
     }
 
@@ -128,20 +134,20 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
     return null;
   }
 
-  getActiveNodes(): string[] {
+  async getActiveNodes(): Promise<string[]> {
     return this.cli.getActiveNodes();
   }
 
-  getActiveTopics(): string[] {
+  async getActiveTopics(): Promise<string[]> {
     return this.cli.getActiveTopics();
   }
 
-  getTopicInfo(topicName: string): import('../core/ros2-cli-service').TopicInfo | null {
+  async getTopicInfo(topicName: string): Promise<import('../core/ros2-cli-service').TopicInfo | null> {
     return this.cli.getTopicInfo(topicName);
   }
    
-  getNodeInfo(nodeName: string): import('../core/ros2-cli-service').NodeInfo | null {
-    const info = this.cli.getNodeInfo(nodeName);
+  async getNodeInfo(nodeName: string): Promise<import('../core/ros2-cli-service').NodeInfo | null> {
+    const info = await this.cli.getNodeInfo(nodeName);
     if (!info) {
       return null;
     }

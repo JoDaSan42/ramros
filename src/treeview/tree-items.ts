@@ -631,7 +631,7 @@ export class TopicPublishersItem extends TreeItemBase {
   
   async getChildren(): Promise<TreeItemBase[]> {
     const cli = Ros2CliService.getInstance();
-    const publishers = cli.getTopicPublishers(this.topicName);
+    const publishers = await cli.getTopicPublishers(this.topicName);
     
     return publishers.map(pub => new TopicEndpointItem({
       topicName: this.topicName,
@@ -655,7 +655,7 @@ export class TopicSubscribersItem extends TreeItemBase {
   
   async getChildren(): Promise<TreeItemBase[]> {
     const cli = Ros2CliService.getInstance();
-    const subscribers = cli.getTopicSubscribers(this.topicName);
+    const subscribers = await cli.getTopicSubscribers(this.topicName);
     
     return subscribers.map(sub => new TopicEndpointItem({
       topicName: this.topicName,

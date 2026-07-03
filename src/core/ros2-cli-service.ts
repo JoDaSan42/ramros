@@ -1,4 +1,7 @@
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 export interface TopicInfo {
   name: string;
@@ -28,28 +31,28 @@ export class Ros2CliService {
     return Ros2CliService.instance;
   }
 
-  private executeCommand(command: string): string[] {
+  private async executeCommand(command: string): Promise<string[]> {
     try {
-      const output = execSync(command, { encoding: 'utf-8', timeout: 5000 });
-      return output.split('\n').filter(line => line.trim().length > 0);
+      const { stdout } = await execAsync(command, { encoding: 'utf-8', timeout: 5000 });
+      return stdout.split('\n').filter(line => line.trim().length > 0);
     } catch (error) {
       console.error(`Failed to execute command: ${command}`, error);
       return [];
     }
   }
 
-  getActiveNodes(): string[] {
+  async getActiveNodes(): Promise<string[]> {
     return this.executeCommand('ros2 node list');
   }
 
-  getActiveTopics(): string[] {
+  async getActiveTopics(): Promise<string[]> {
     return this.executeCommand('ros2 topic list');
   }
 
-  getTopicInfo(topicName: string): TopicInfo | null {
+  async getTopicInfo(topicName: string): Promise<TopicInfo | null> {
     try {
-      const output = execSync(`ros2 topic info ${topicName} --verbose`, { encoding: 'utf-8', timeout: 5000 });
-      const lines = output.split('\n');
+      const { stdout } = await execAsync(`ros2 topic info ${topicName} --verbose`, { encoding: 'utf-8', timeout: 5000 });
+      const lines = stdout.split('\n');
 
       let messageType = '';
       const publishers: string[] = [];
@@ -100,19 +103,19 @@ export class Ros2CliService {
     }
   }
 
-  getTopicPublishers(topicName: string): TopicEndpointDetail[] {
+  async getTopicPublishers(topicName: string): Promise<TopicEndpointDetail[]> {
     return this.parseTopicEndpoints(topicName, 'publishers');
   }
 
-  getTopicSubscribers(topicName: string): TopicEndpointDetail[] {
+  async getTopicSubscribers(topicName: string): Promise<TopicEndpointDetail[]> {
     return this.parseTopicEndpoints(topicName, 'subscribers');
   }
 
-  private parseTopicEndpoints(topicName: string, targetSection: 'publishers' | 'subscribers'): TopicEndpointDetail[] {
+  private async parseTopicEndpoints(topicName: string, targetSection: 'publishers' | 'subscribers'): Promise<TopicEndpointDetail[]> {
     const endpoints: TopicEndpointDetail[] = [];
     try {
-      const output = execSync(`ros2 topic info ${topicName} --verbose`, { encoding: 'utf-8', timeout: 5000 });
-      const lines = output.split('\n');
+      const { stdout } = await execAsync(`ros2 topic info ${topicName} --verbose`, { encoding: 'utf-8', timeout: 5000 });
+      const lines = stdout.split('\n');
       let section: 'none' | 'publishers' | 'subscribers' = 'none';
 
       for (const line of lines) {
@@ -137,13 +140,13 @@ export class Ros2CliService {
     return endpoints;
   }
 
-  getNodeInfo(nodeName: string): NodeInfo | null {
+  async getNodeInfo(nodeName: string): Promise<NodeInfo | null> {
     try {
       const publishedTopics: string[] = [];
       const subscribedTopics: string[] = [];
 
-      const output = execSync(`ros2 node info ${nodeName}`, { encoding: 'utf-8', timeout: 5000 });
-      const lines = output.split('\n');
+      const { stdout } = await execAsync(`ros2 node info ${nodeName}`, { encoding: 'utf-8', timeout: 5000 });
+      const lines = stdout.split('\n');
 
       let section: 'none' | 'subscribers' | 'publishers' = 'none';
 
