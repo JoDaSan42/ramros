@@ -34,6 +34,7 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
   
   private async initialize(): Promise<void> {
     await this.loadWorkspaces();
+    this._onDidChangeTreeData.fire(undefined);
   }
   
   async refresh(): Promise<void> {
@@ -82,7 +83,7 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
     this.conflicts = await this.duplicateDetector.detectDuplicates(this.workspaces);
   }
   
-  public stopAutoRefresh(): void {
+   public stopAutoRefresh(): void {
     if (this.autoRefreshInterval) {
       clearInterval(this.autoRefreshInterval);
       this.autoRefreshInterval = undefined;
@@ -91,10 +92,20 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
       clearTimeout(this.refreshDebounceTimer);
       this.refreshDebounceTimer = undefined;
     }
+    this.disposeFileWatchers();
+  }
+
+  private disposeFileWatchers(): void {
     for (const watcher of this.fileWatchers) {
       watcher.dispose();
     }
     this.fileWatchers.length = 0;
+  }
+
+  async onWorkspaceFoldersChanged(): Promise<void> {
+    this.disposeFileWatchers();
+    this.setupFileWatcher();
+    await this.refresh();
   }
    
   private setupFileWatcher(): void {

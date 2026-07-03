@@ -115,6 +115,9 @@ export async function activate(context: vscode.ExtensionContext) {
     terminalManager,
     bagSession,
     liveTreeProvider,
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      void treeProvider.onWorkspaceFoldersChanged();
+    }),
     
     vscode.commands.registerCommand('ramros.refreshWorkspaces', async () => {
       await treeProvider.refresh();
