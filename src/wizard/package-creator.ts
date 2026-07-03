@@ -530,26 +530,6 @@ def generate_launch_description():
     return result;
   }
 
-  private renameNodeFiles(packagePath: string, nodeName: string, extension: string): void {
-    const extensions = ['', '_node'];
-
-    for (const ext of extensions) {
-      const oldName = ext ? `node${extension}` : `${nodeName}${extension}`;
-      const newName = `${nodeName}${ext}${extension}`;
-
-      const dirs = ['src', 'include', path.basename(packagePath)];
-
-      for (const dir of dirs) {
-        const oldPath = path.join(packagePath, dir, oldName);
-        const newPath = path.join(packagePath, dir, newName);
-
-        if (fs.existsSync(oldPath)) {
-          fs.renameSync(oldPath, newPath);
-        }
-      }
-    }
-  }
-
   private toPascalCase(str: string): string {
     return str
       .split(/[-_]/)
@@ -563,15 +543,6 @@ def generate_launch_description():
       return `source ${activeDist.setupBash}`;
     }
     throw new Error('No active ROS2 distribution found. Please ensure ROS2 is installed and ROS_DISTRO is set.');
-  }
-
-  private isRos2Available(): boolean {
-    try {
-      execSync('command -v ros2', { stdio: 'pipe' });
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   async addNodeToPackage(

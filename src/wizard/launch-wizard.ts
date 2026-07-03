@@ -69,7 +69,7 @@ export class LaunchWizard {
 
       // Check and update CMakeLists.txt / setup.py if needed
       if (this.targetPackage) {
-        await this.ensureLaunchFileRegistration(this.targetPackage, fileName);
+        await this.ensureLaunchFileRegistration(this.targetPackage);
       }
 
       // Generate launch file
@@ -420,8 +420,7 @@ export class LaunchWizard {
     return path.join(saveDir, `${fileName}.launch.py`);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  private async ensureLaunchFileRegistration(pkg: PackageInfo, _fileName: string): Promise<void> {
+  private async ensureLaunchFileRegistration(pkg: PackageInfo): Promise<void> {
     const isPython = pkg.buildType === 'ament_python';
     const buildFilePath = isPython 
       ? path.join(pkg.path, 'setup.py')

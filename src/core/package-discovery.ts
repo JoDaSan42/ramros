@@ -107,8 +107,6 @@ export class PackageDiscoveryService {
     }
 
     try {
-      const { execSync } = await import('child_process');
-      
       // Get all installed package names
       const pkgListOutput = execSync('ros2 pkg list', { encoding: 'utf-8' });
       const packageNames = pkgListOutput.split('\n').filter(line => line.trim().length > 0);

@@ -136,14 +136,4 @@ export class WorkspaceDetector {
       warnings: []
     };
   }
-  
-  private async hasPackageXml(uri: vscode.Uri): Promise<boolean> {
-    try {
-      const packageXmlPath = vscode.Uri.joinPath(uri, 'package.xml');
-      await vscode.workspace.fs.stat(packageXmlPath);
-      return true;
-    } catch {
-      return false;
-    }
-  }
 }
