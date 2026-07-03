@@ -92,6 +92,25 @@ export class TerminalManager implements vscode.Disposable {
     
     return terminal;
   }
+
+  async openPackageTerminal(workspace: WorkspaceInfo, packagePath: string): Promise<vscode.Terminal> {
+    const terminalName = `Package: ${path.basename(packagePath)}`;
+    const terminal = vscode.window.createTerminal({ name: terminalName });
+    terminal.show();
+
+    if (workspace.installPath) {
+      const setupBashPath = path.join(workspace.installPath.fsPath, 'setup.bash');
+      if (fs.existsSync(setupBashPath)) {
+        terminal.sendText(`source "${setupBashPath}" && cd "${packagePath}"`);
+      } else {
+        terminal.sendText(`cd "${packagePath}"`);
+      }
+    } else {
+      terminal.sendText(`cd "${packagePath}"`);
+    }
+
+    return terminal;
+  }
   
   async buildWorkspace(workspace: WorkspaceInfo, options?: BuildOptions | string): Promise<vscode.Terminal> {
     const packageName = typeof options === 'string' ? options : options?.packageName;

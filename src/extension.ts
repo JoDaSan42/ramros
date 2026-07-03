@@ -10,8 +10,10 @@ import { RamrosTreeProvider } from './treeview/tree-provider';
 import { ToolsTreeProvider } from './treeview/tools-tree-provider';
 import { LiveTreeProvider } from './treeview/live-tree-provider';
 import { TerminalManager } from './executor/terminal-manager';
+import { BagSessionService } from './executor/bag-session-service';
 import { PackageCreator } from './wizard/package-creator';
 import { PackageFormValidator } from './wizard/package-form-validator';
+import { collectInterfaceDefinition, InterfaceDefinition } from './wizard/interface-collector';
 import { NodeInfo, LaunchFileInfo, PackageDiscoveryService, PackageInfo } from './core/package-discovery';
 import { TreeItemBase, BagPlayItem, BagPlayControlItem, BagLoopItem, BagRecordItem, BagFilesFolderItem } from './treeview/tree-items';
 import { LaunchWizard } from './wizard/launch-wizard';
@@ -22,13 +24,7 @@ let treeProvider: RamrosTreeProvider;
 let toolsTreeProvider: ToolsTreeProvider;
 let liveTreeProvider: LiveTreeProvider;
 let packageCreator: PackageCreator;
-
-// Bag recording/playback state
-let activeRecordingTerminal: vscode.Terminal | null = null;
-let isRecordingPaused: boolean = false;
-let activePlaybackTerminal: vscode.Terminal | null = null;
-let isPlaybackPaused: boolean = false;
-let isPlaybackLooping: boolean = false;
+let bagSession: BagSessionService;
 
 async function pickWorkspace(): Promise<WorkspaceInfo | undefined> {
   const workspaces = treeProvider.getWorkspaces();
@@ -87,9 +83,10 @@ export async function activate(context: vscode.ExtensionContext) {
   
   const duplicateDetector = new DuplicatePackageDetector(cacheManager);
   
-  terminalManager = new TerminalManager();
-  
-  treeProvider = new RamrosTreeProvider(workspaceDetector, duplicateDetector, packageDiscovery);
+   terminalManager = new TerminalManager();
+   bagSession = new BagSessionService();
+   
+   treeProvider = new RamrosTreeProvider(workspaceDetector, duplicateDetector, packageDiscovery);
   toolsTreeProvider = new ToolsTreeProvider();
   liveTreeProvider = new LiveTreeProvider();
   
@@ -116,6 +113,7 @@ export async function activate(context: vscode.ExtensionContext) {
     liveTreeView,
     cacheManager,
     terminalManager,
+    bagSession,
     liveTreeProvider,
     
     vscode.commands.registerCommand('ramros.refreshWorkspaces', async () => {
@@ -370,185 +368,30 @@ export async function activate(context: vscode.ExtensionContext) {
           fs.mkdirSync(srcPath, { recursive: true });
         }
         
-        let interfaces: { type: 'message' | 'service' | 'action'; name: string; definition: string }[] | undefined;
+        let interfaces: InterfaceDefinition[] | undefined;
         
         if (template === 'interface') {
           interfaces = [];
           
-          const validateInterfaceName = (value: string): string | null => {
-            if (!value || value.trim().length === 0) {
-              return 'Name cannot be empty';
-            }
-            if (!/^[A-Z][a-zA-Z0-9_]*$/.test(value)) {
-              return 'Name must start with uppercase letter and contain only letters, numbers, and underscores';
-            }
-            return null;
-          };
-          
-          const validateFieldType = (value: string): string | null => {
-            const validTypes = [
-              'bool', 'byte', 'char',
-              'float32', 'float64',
-              'int8', 'uint8', 'int16', 'uint16', 'int32', 'uint32', 'int64', 'uint64',
-              'string', 'wstring'
-            ];
-            if (!value || value.trim().length === 0) {
-              return 'Type cannot be empty';
-            }
-            if (!validTypes.includes(value.toLowerCase())) {
-              return `Unknown type '${value}'. Valid types: ${validTypes.join(', ')}`;
-            }
-            return null;
-          };
-          
-          const validateFieldName = (value: string): string | null => {
-            if (!value || value.trim().length === 0) {
-              return 'Field name cannot be empty';
-            }
-            if (!/^[a-z][a-zA-Z0-9_]*$/.test(value)) {
-              return 'Field name must start with lowercase letter and contain only letters, numbers, and underscores';
-            }
-            return null;
-          };
-          
-          const collectFields = async (sectionName: string): Promise<string[]> => {
-            const fields: string[] = [];
-            
-            void vscode.window.showInformationMessage(`Adding fields for ${sectionName}`);
-            
-            const addAnotherField = async (): Promise<boolean> => {
-              const fieldType = await vscode.window.showInputBox({
-                prompt: `Enter field type for ${sectionName}`,
-                placeHolder: 'string, int32, float64, etc.',
-                validateInput: validateFieldType
-              });
-              
-              if (!fieldType) {
-                return false;
-              }
-              
-              const fieldName = await vscode.window.showInputBox({
-                prompt: `Enter field name for ${sectionName}`,
-                placeHolder: 'my_field',
-                validateInput: validateFieldName
-              });
-              
-              if (!fieldName) {
-                return false;
-              }
-              
-              fields.push(`${fieldType} ${fieldName}`);
-              void vscode.window.showInformationMessage(`Added field: ${fieldType} ${fieldName}`);
-              
-              const addMoreChoice = await vscode.window.showQuickPick([
-                { label: 'yes', description: 'Add another field' },
-                { label: 'no', description: sectionName === 'request' || sectionName === 'goal' 
-                  ? `Continue to ${sectionName === 'request' ? 'response' : 'feedback'} fields`
-                  : sectionName === 'response' || sectionName === 'feedback'
-                  ? sectionName === 'response' ? 'Finish service' : 'Continue to result fields'
-                  : 'Finish interface' }
-              ], {
-                placeHolder: `Add another field to ${sectionName}?`
-              });
-              
-              return addMoreChoice?.label === 'yes';
-            };
-            
-            let shouldAddMore = true;
-            while (shouldAddMore) {
-              shouldAddMore = await addAnotherField();
-            }
-            
-            return fields;
-          };
-          
-          const buildDefinition = (fields: string[]): string => {
-            return fields.join('\n');
-          };
-          
-          const addInterface = async (): Promise<boolean> => {
-            const interfaceTypePick = await vscode.window.showQuickPick([
-              { label: 'message', description: 'Message (.msg)', detail: 'Data structures for publishing/subscribing' },
-              { label: 'service', description: 'Service (.srv)', detail: 'Request/response communication' },
-              { label: 'action', description: 'Action (.action)', detail: 'Goal-based long-running tasks' }
-            ], {
-              placeHolder: 'Select interface type'
-            });
-            
-            if (!interfaceTypePick) {
-              return false;
-            }
-            
-            const interfaceType = interfaceTypePick.label as 'message' | 'service' | 'action';
-            const extension = interfaceType === 'message' ? '.msg' : interfaceType === 'service' ? '.srv' : '.action';
-            
-            const name = await vscode.window.showInputBox({
-              prompt: `Enter ${interfaceType} name`,
-              placeHolder: `My${interfaceType.charAt(0).toUpperCase() + interfaceType.slice(1)}`,
-              validateInput: validateInterfaceName
-            });
-            
-            if (!name) {
-              return true;
-            }
-            
-            let definition = '';
-            
-            if (interfaceType === 'message') {
-              const msgFields = await collectFields('message');
-              if (msgFields.length === 0) {
-                void vscode.window.showWarningMessage('No fields defined for message');
-                return true;
-              }
-              definition = buildDefinition(msgFields);
-            } else if (interfaceType === 'service') {
-              const reqFields = await collectFields('request');
-              if (reqFields.length === 0) {
-                void vscode.window.showWarningMessage('No fields defined for request');
-                return true;
-              }
-              const respFields = await collectFields('response');
-              if (respFields.length === 0) {
-                void vscode.window.showWarningMessage('No fields defined for response');
-                return true;
-              }
-              definition = `${buildDefinition(reqFields)}\n---\n${buildDefinition(respFields)}`;
-            } else if (interfaceType === 'action') {
-              const goalFields = await collectFields('goal');
-              if (goalFields.length === 0) {
-                void vscode.window.showWarningMessage('No fields defined for goal');
-                return true;
-              }
-              const feedbackFields = await collectFields('feedback');
-              if (feedbackFields.length === 0) {
-                void vscode.window.showWarningMessage('No fields defined for feedback');
-                return true;
-              }
-              const resultFields = await collectFields('result');
-              if (resultFields.length === 0) {
-                void vscode.window.showWarningMessage('No fields defined for result');
-                return true;
-              }
-              definition = `${buildDefinition(goalFields)}\n---\n${buildDefinition(feedbackFields)}\n---\n${buildDefinition(resultFields)}`;
-            }
-            
-            interfaces!.push({ type: interfaceType, name, definition });
-            void vscode.window.showInformationMessage(`Created ${interfaceType} '${name}${extension}'`);
-            
-            const continueChoice = await vscode.window.showQuickPick([
-              { label: 'add_another', description: 'Add another interface' },
-              { label: 'finish', description: 'Finish and create package' }
-            ], {
-              placeHolder: 'What would you like to do next?'
-            });
-            
-            return continueChoice?.label === 'add_another';
-          };
-          
           let shouldContinue = true;
           while (shouldContinue) {
             try {
-              shouldContinue = await addInterface();
+              const result = await collectInterfaceDefinition();
+              if (result) {
+                interfaces.push(result);
+                const ext = result.type === 'message' ? '.msg' : result.type === 'service' ? '.srv' : '.action';
+                void vscode.window.showInformationMessage(`Created ${result.type} '${result.name}${ext}'`);
+                
+                const continueChoice = await vscode.window.showQuickPick([
+                  { label: 'add_another', description: 'Add another interface' },
+                  { label: 'finish', description: 'Finish and create package' }
+                ], {
+                  placeHolder: 'What would you like to do next?'
+                });
+                shouldContinue = continueChoice?.label === 'add_another';
+              } else {
+                shouldContinue = false;
+              }
             } catch (error: unknown) {
               const message = error instanceof Error ? error.message : String(error);
               void vscode.window.showErrorMessage(`Error adding interface: ${message}`);
@@ -753,18 +596,7 @@ export async function activate(context: vscode.ExtensionContext) {
         packagePath = pkg.path;
       }
       
-      const terminal = vscode.window.createTerminal({
-        name: `Package: ${path.basename(packagePath)}`
-      });
-      
-      terminal.show();
-      
-      const setupBashPath = path.join(selectedWorkspace.installPath?.fsPath || '', 'setup.bash');
-      if (fs.existsSync(setupBashPath)) {
-        terminal.sendText(`source "${setupBashPath}" && cd "${packagePath}"`);
-      } else {
-        terminal.sendText(`cd "${packagePath}"`);
-      }
+      await terminalManager.openPackageTerminal(selectedWorkspace, packagePath);
     }),
     
     vscode.commands.registerCommand('ramros.createLaunchFile', async () => {
@@ -870,165 +702,18 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!addType) return;
       
       if (addType.label === 'interface') {
-        const validateInterfaceName = (value: string): string | null => {
-          if (!value || value.trim().length === 0) {
-            return 'Name cannot be empty';
-          }
-          if (!/^[A-Z][a-zA-Z0-9_]*$/.test(value)) {
-            return 'Name must start with uppercase letter and contain only letters, numbers, and underscores';
-          }
-          return null;
-        };
+        const result = await collectInterfaceDefinition();
         
-        const validateFieldType = (value: string): string | null => {
-          const validTypes = [
-            'bool', 'byte', 'char',
-            'float32', 'float64',
-            'int8', 'uint8', 'int16', 'uint16', 'int32', 'uint32', 'int64', 'uint64',
-            'string', 'wstring'
-          ];
-          if (!value || value.trim().length === 0) {
-            return 'Type cannot be empty';
-          }
-          if (!validTypes.includes(value.toLowerCase())) {
-            return `Unknown type '${value}'. Valid types: ${validTypes.join(', ')}`;
-          }
-          return null;
-        };
-        
-        const validateFieldName = (value: string): string | null => {
-          if (!value || value.trim().length === 0) {
-            return 'Field name cannot be empty';
-          }
-          if (!/^[a-z][a-zA-Z0-9_]*$/.test(value)) {
-            return 'Field name must start with lowercase letter and contain only letters, numbers, and underscores';
-          }
-          return null;
-        };
-        
-        const collectFields = async (sectionName: string): Promise<string[]> => {
-          const fields: string[] = [];
-          
-          void vscode.window.showInformationMessage(`Adding fields for ${sectionName}`);
-          
-          const addAnotherField = async (): Promise<boolean> => {
-            const fieldType = await vscode.window.showInputBox({
-              prompt: `Enter field type for ${sectionName}`,
-              placeHolder: 'string, int32, float64, etc.',
-              validateInput: validateFieldType
-            });
-            
-            if (!fieldType) {
-              return false;
-            }
-            
-            const fieldName = await vscode.window.showInputBox({
-              prompt: `Enter field name for ${sectionName}`,
-              placeHolder: 'my_field',
-              validateInput: validateFieldName
-            });
-            
-            if (!fieldName) {
-              return false;
-            }
-            
-            fields.push(`${fieldType} ${fieldName}`);
-            void vscode.window.showInformationMessage(`Added field: ${fieldType} ${fieldName}`);
-            
-            const addMoreChoice = await vscode.window.showQuickPick([
-              { label: 'yes', description: 'Add another field' },
-              { label: 'no', description: sectionName === 'request' || sectionName === 'goal' 
-                ? `Continue to ${sectionName === 'request' ? 'response' : 'feedback'} fields`
-                : sectionName === 'response' || sectionName === 'feedback'
-                ? sectionName === 'response' ? 'Finish service' : 'Continue to result fields'
-                : 'Finish interface' }
-            ], {
-              placeHolder: `Add another field to ${sectionName}?`
-            });
-            
-            return addMoreChoice?.label === 'yes';
-          };
-          
-          let shouldAddMore = true;
-          while (shouldAddMore) {
-            shouldAddMore = await addAnotherField();
-          }
-          
-          return fields;
-        };
-        
-        const buildDefinition = (fields: string[]): string => {
-          return fields.join('\n');
-        };
-        
-        const interfaceTypePick = await vscode.window.showQuickPick([
-          { label: 'message', description: 'Message (.msg)', detail: 'Data structures for publishing/subscribing' },
-          { label: 'service', description: 'Service (.srv)', detail: 'Request/response communication' },
-          { label: 'action', description: 'Action (.action)', detail: 'Goal-based long-running tasks' }
-        ], {
-          placeHolder: 'Select interface type'
-        });
-        
-        if (!interfaceTypePick) return;
-        
-        const interfaceType = interfaceTypePick.label as 'message' | 'service' | 'action';
-        
-        const name = await vscode.window.showInputBox({
-          prompt: `Enter ${interfaceType} name`,
-          placeHolder: `My${interfaceType.charAt(0).toUpperCase() + interfaceType.slice(1)}`,
-          validateInput: validateInterfaceName
-        });
-        
-        if (!name) return;
-        
-        let definition = '';
-        
-        if (interfaceType === 'message') {
-          const msgFields = await collectFields('message');
-          if (msgFields.length === 0) {
-            void vscode.window.showWarningMessage('No fields defined for message');
-            return;
-          }
-          definition = buildDefinition(msgFields);
-        } else if (interfaceType === 'service') {
-          const reqFields = await collectFields('request');
-          if (reqFields.length === 0) {
-            void vscode.window.showWarningMessage('No fields defined for request');
-            return;
-          }
-          const respFields = await collectFields('response');
-          if (respFields.length === 0) {
-            void vscode.window.showWarningMessage('No fields defined for response');
-            return;
-          }
-          definition = `${buildDefinition(reqFields)}\n---\n${buildDefinition(respFields)}`;
-        } else if (interfaceType === 'action') {
-          const goalFields = await collectFields('goal');
-          if (goalFields.length === 0) {
-            void vscode.window.showWarningMessage('No fields defined for goal');
-            return;
-          }
-          const feedbackFields = await collectFields('feedback');
-          if (feedbackFields.length === 0) {
-            void vscode.window.showWarningMessage('No fields defined for feedback');
-            return;
-          }
-          const resultFields = await collectFields('result');
-          if (resultFields.length === 0) {
-            void vscode.window.showWarningMessage('No fields defined for result');
-            return;
-          }
-          definition = `${buildDefinition(goalFields)}\n---\n${buildDefinition(feedbackFields)}\n---\n${buildDefinition(resultFields)}`;
-        }
+        if (!result) return;
         
         try {
           await packageCreator.addInterfaceToPackage(
             selectedPackage.path,
             selectedPackage.name,
-            { type: interfaceType, name, definition }
+            result
           );
           await treeProvider.refresh();
-          void vscode.window.showInformationMessage(`Interface '${name}' added to package '${selectedPackage.name}'`);
+          void vscode.window.showInformationMessage(`Interface '${result.name}' added to package '${selectedPackage.name}'`);
           void vscode.window.showInformationMessage('Build workspace to compile');
         } catch (error: unknown) {
           const message = error instanceof Error ? error.message : 'Unknown error';
@@ -1137,7 +822,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
     
     vscode.commands.registerCommand('ramros.bag.startRecording', async () => {
-      if (activeRecordingTerminal) {
+      if (bagSession.isRecording) {
         void vscode.window.showWarningMessage('Recording is already in progress');
         return;
       }
@@ -1189,11 +874,11 @@ export async function activate(context: vscode.ExtensionContext) {
       // Use script command to enable proper terminal interaction for keyboard controls
       const recordCommand = `script -q -c 'ros2 bag record -o "${outputPath}" ${topicArgs}' /dev/null`;
       
-      activeRecordingTerminal = await terminalManager.executeInNewTerminal(recordCommand, workspace, `Bag Record: ${filename}`);
+      const recordingTerminal = await terminalManager.executeInNewTerminal(recordCommand, workspace, `Bag Record: ${filename}`);
       
       // Update state
+      bagSession.setRecordingTerminal(recordingTerminal);
       BagRecordItem.setRecordingState(true);
-      isRecordingPaused = false;
       BagRecordItem.setPausedState(false);
       
       // Update tree view
@@ -1201,37 +886,38 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
     
     vscode.commands.registerCommand('ramros.bag.pauseResumeRecording', async () => {
-      if (!activeRecordingTerminal) {
+      const recordingTerminal = bagSession.recordingTerminal;
+      if (!recordingTerminal) {
         void vscode.window.showWarningMessage('No active recording');
         return;
       }
       
       // Show the terminal first to ensure it can receive input
-      activeRecordingTerminal.show(true);
+      recordingTerminal.show(true);
       
       // Small delay to ensure terminal is focused
       await new Promise(resolve => setTimeout(resolve, 100));
       
       // Send space key to toggle pause/resume in ros2 bag record
       // Send as raw keystroke (shouldExecute=false means don't add newline)
-      activeRecordingTerminal.sendText(' ', false);
-      isRecordingPaused = !isRecordingPaused;
-      BagRecordItem.setPausedState(isRecordingPaused);
+      recordingTerminal.sendText(' ', false);
+      const isPaused = bagSession.toggleRecordingPause();
+      BagRecordItem.setPausedState(isPaused);
       
       await toolsTreeProvider.refresh();
       
-      const status = isRecordingPaused ? 'paused' : 'resumed';
+      const status = isPaused ? 'paused' : 'resumed';
       void vscode.window.showInformationMessage(`Recording ${status}`);
     }),
     
     vscode.commands.registerCommand('ramros.bag.stopRecording', async () => {
-      if (activeRecordingTerminal) {
-        activeRecordingTerminal.sendText('\x03'); // Ctrl+C
+      const recordingTerminal = bagSession.recordingTerminal;
+      if (recordingTerminal) {
+        recordingTerminal.sendText('\x03'); // Ctrl+C
         
         // Clear terminal reference and state
-        activeRecordingTerminal.dispose();
-        activeRecordingTerminal = null;
-        isRecordingPaused = false;
+        recordingTerminal.dispose();
+        bagSession.setRecordingTerminal(null);
         BagRecordItem.setRecordingState(false);
         BagRecordItem.setPausedState(false);
         
@@ -1268,6 +954,7 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!selectedUris || selectedUris.length === 0) return;
       
       const bagPath = selectedUris[0].fsPath;
+      bagSession.setSelectedBagPath(bagPath);
       BagPlayItem.setSelectedBag(bagPath);
       
       // Get bag info
@@ -1290,7 +977,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
     
     vscode.commands.registerCommand('ramros.bag.playPause', async () => {
-      const bagPath = BagPlayItem.getSelectedBag();
+      const bagPath = bagSession.selectedBagPath ?? BagPlayItem.getSelectedBag();
       
       if (!bagPath) {
         void vscode.window.showWarningMessage('No bag file selected');
@@ -1300,52 +987,54 @@ export async function activate(context: vscode.ExtensionContext) {
       const workspace = await pickWorkspace();
       if (!workspace) return;
       
-      if (activePlaybackTerminal) {
+      const playbackTerminal = bagSession.playbackTerminal;
+      if (playbackTerminal) {
         // Show the terminal first to ensure it can receive input
-        activePlaybackTerminal.show(true);
+        playbackTerminal.show(true);
         
         // Small delay to ensure terminal is focused
         await new Promise(resolve => setTimeout(resolve, 100));
         
         // Toggle pause - send space key to ros2 bag play
-        activePlaybackTerminal.sendText(' ', false);
-        isPlaybackPaused = !isPlaybackPaused;
-        BagPlayControlItem.setPlayingState(true, isPlaybackPaused);
+        playbackTerminal.sendText(' ', false);
+        const isPaused = bagSession.togglePlaybackPause();
+        BagPlayControlItem.setPlayingState(true, isPaused);
         await toolsTreeProvider.refresh();
       } else {
         // Start playback with script wrapper for keyboard control support
-        const loopArg = isPlaybackLooping ? '--loop' : '';
+        const loopArg = bagSession.isPlaybackLooping ? '--loop' : '';
         const playCommand = `script -q -c 'ros2 bag play "${bagPath}" ${loopArg}' /dev/null`;
-        activePlaybackTerminal = await terminalManager.executeInNewTerminal(playCommand, workspace, `Bag Play: ${path.basename(bagPath)}`);
-        isPlaybackPaused = false;
+        const newTerminal = await terminalManager.executeInNewTerminal(playCommand, workspace, `Bag Play: ${path.basename(bagPath)}`);
+        bagSession.setPlaybackTerminal(newTerminal);
         BagPlayControlItem.setPlayingState(true, false);
         await toolsTreeProvider.refresh();
       }
     }),
     
     vscode.commands.registerCommand('ramros.bag.toggleLoop', async () => {
-      isPlaybackLooping = !isPlaybackLooping;
-      BagLoopItem.setLoopingState(isPlaybackLooping);
+      const isLooping = bagSession.togglePlaybackLoop();
+      BagLoopItem.setLoopingState(isLooping);
       
-      void vscode.window.showInformationMessage(`Loop playback ${isPlaybackLooping ? 'enabled' : 'disabled'}`);
+      void vscode.window.showInformationMessage(`Loop playback ${isLooping ? 'enabled' : 'disabled'}`);
       
       // If currently playing, restart with new loop setting
-      if (activePlaybackTerminal) {
+      const playbackTerminal = bagSession.playbackTerminal;
+      if (playbackTerminal) {
         // Stop current playback
-        activePlaybackTerminal.sendText('\x03'); // Ctrl+C
-        activePlaybackTerminal.dispose();
-        activePlaybackTerminal = null;
+        playbackTerminal.sendText('\x03'); // Ctrl+C
+        playbackTerminal.dispose();
+        bagSession.setPlaybackTerminal(null);
         BagPlayControlItem.setPlayingState(false, false);
         
-        const bagPath = BagPlayItem.getSelectedBag();
-        if (bagPath && isPlaybackLooping) {
+        const bagPath = bagSession.selectedBagPath ?? BagPlayItem.getSelectedBag();
+        if (bagPath && isLooping) {
           const workspace = await pickWorkspace();
           if (workspace) {
             setTimeout(async () => {
               const loopArg = '--loop';
               const playCommand = `script -q -c 'ros2 bag play "${bagPath}" ${loopArg}' /dev/null`;
-              activePlaybackTerminal = await terminalManager.executeInNewTerminal(playCommand, workspace, `Bag Play: ${path.basename(bagPath)}`);
-              isPlaybackPaused = false;
+              const newTerminal = await terminalManager.executeInNewTerminal(playCommand, workspace, `Bag Play: ${path.basename(bagPath)}`);
+              bagSession.setPlaybackTerminal(newTerminal);
               BagPlayControlItem.setPlayingState(true, false);
               
               await toolsTreeProvider.refresh();
@@ -1358,11 +1047,11 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
     
     vscode.commands.registerCommand('ramros.bag.stop', async () => {
-      if (activePlaybackTerminal) {
-        activePlaybackTerminal.sendText('\x03'); // Ctrl+C
-        activePlaybackTerminal.dispose();
-        activePlaybackTerminal = null;
-        isPlaybackPaused = false;
+      const playbackTerminal = bagSession.playbackTerminal;
+      if (playbackTerminal) {
+        playbackTerminal.sendText('\x03'); // Ctrl+C
+        playbackTerminal.dispose();
+        bagSession.setPlaybackTerminal(null);
         BagPlayControlItem.setPlayingState(false, false);
         
         // Reset instances to clear the controls from the tree
@@ -1376,10 +1065,11 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
     
     vscode.commands.registerCommand('ramros.bag.stopRecording', async () => {
-      if (activeRecordingTerminal) {
-        activeRecordingTerminal.sendText('\x03'); // Ctrl+C
-        activeRecordingTerminal = null;
-        isRecordingPaused = false;
+      const recordingTerminal = bagSession.recordingTerminal;
+      if (recordingTerminal) {
+        recordingTerminal.sendText('\x03'); // Ctrl+C
+        recordingTerminal.dispose();
+        bagSession.setRecordingTerminal(null);
         BagRecordItem.setRecordingState(false);
         BagRecordItem.setPausedState(false);
         
