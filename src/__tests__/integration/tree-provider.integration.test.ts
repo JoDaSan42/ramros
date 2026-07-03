@@ -10,6 +10,7 @@ describe('RamrosTreeProvider Integration Tests', () => {
   let treeProvider: RamrosTreeProvider;
   let workspaceDetector: WorkspaceDetector;
   let duplicateDetector: DuplicatePackageDetector;
+  const providersToCleanUp: RamrosTreeProvider[] = [];
 
   const mockGetDistributions = async () => {
     const service = new RosEnvironmentService();
@@ -20,9 +21,14 @@ describe('RamrosTreeProvider Integration Tests', () => {
     workspaceDetector = new WorkspaceDetector(mockGetDistributions);
     duplicateDetector = new DuplicatePackageDetector();
     treeProvider = new RamrosTreeProvider(workspaceDetector, duplicateDetector);
+    providersToCleanUp.push(treeProvider);
   });
 
   afterEach(() => {
+    for (const provider of providersToCleanUp) {
+      provider.stopAutoRefresh();
+    }
+    providersToCleanUp.length = 0;
     duplicateDetector.clearCache();
   });
 
@@ -70,6 +76,7 @@ describe('RamrosTreeProvider Integration Tests', () => {
         new WorkspaceDetector(mockGetDistributions),
         freshDuplicateDetector
       );
+      providersToCleanUp.push(freshTreeProvider);
 
       const workspaces = freshTreeProvider.getWorkspaces();
       const conflicts = freshTreeProvider.getConflicts();
