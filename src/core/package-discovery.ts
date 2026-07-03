@@ -887,7 +887,7 @@ export class PackageDiscoveryService {
       return launchFiles;
     }
 
-    const files = fs.readdirSync(launchDir).filter(f => f.endsWith('.py'));
+    const files = fs.readdirSync(launchDir).filter(f => f.endsWith('.py') || f.endsWith('.launch.py') || f.endsWith('.launch.xml'));
 
     for (const file of files) {
       launchFiles.push({
