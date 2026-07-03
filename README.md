@@ -241,6 +241,11 @@ src/
 └── extension.ts             # Main entry point
 ```
 
+## Planned Improvements
+1. Improve launch file creation - faster discovery of installed packages
+2. Improve live view - more performant automatic reload
+3. Bag file investigation (open in rqt_bag)
+
 ## Contributing
 
 1. Fork the repository
