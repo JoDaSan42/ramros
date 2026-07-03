@@ -1,4 +1,10 @@
 import { LaunchGenerator, LaunchFileConfig } from '../../wizard/launch-generator';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { execSync } from 'child_process';
+
+jest.mock('child_process');
 
 describe('LaunchGenerator', () => {
   let generator: LaunchGenerator;
@@ -168,6 +174,71 @@ describe('LaunchGenerator', () => {
       expect(closingParenIdx).toBeGreaterThan(-1);
       const lastArgLine = lines[closingParenIdx - 1];
       expect(lastArgLine.trim()).not.toMatch(/,$/);
+    });
+  });
+
+  describe('validate', () => {
+    it('returns true when ros2 launch --check succeeds', async () => {
+      (execSync as jest.Mock).mockReturnValueOnce('');
+      const result = await generator.validate('/path/to/launch.py');
+      expect(result).toBe(true);
+      expect(execSync).toHaveBeenCalledWith(
+        expect.stringContaining('ros2 launch --check'),
+        expect.objectContaining({ stdio: 'pipe', encoding: 'utf-8' })
+      );
+    });
+
+    it('returns false when ros2 launch --check fails', async () => {
+      (execSync as jest.Mock).mockImplementationOnce(() => {
+        throw new Error('Validation failed');
+      });
+      const result = await generator.validate('/path/to/bad_launch.py');
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('writeToFile', () => {
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'launch-gen-test-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('writes content to existing directory', async () => {
+      const filePath = path.join(tmpDir, 'test.launch.py');
+      await generator.writeToFile('print("hello")', filePath);
+      expect(fs.readFileSync(filePath, 'utf-8')).toBe('print("hello")');
+    });
+
+    it('creates directory if it does not exist', async () => {
+      const filePath = path.join(tmpDir, 'subdir', 'nested', 'test.launch.py');
+      await generator.writeToFile('print("hello")', filePath);
+      expect(fs.existsSync(filePath)).toBe(true);
+      expect(fs.readFileSync(filePath, 'utf-8')).toBe('print("hello")');
+    });
+  });
+
+  describe('createVariableName (via generate)', () => {
+    it('creates snake_case variable from package and executable names', () => {
+      const config: LaunchFileConfig = {
+        fileName: 'test',
+        nodes: [{ packageName: 'my-package', executableName: 'my-node' }],
+      };
+      const result = generator.generate(config);
+      expect(result).toContain('my_package_my_node_node');
+    });
+
+    it('truncates long package names to first two words', () => {
+      const config: LaunchFileConfig = {
+        fileName: 'test',
+        nodes: [{ packageName: 'very_long_package_name', executableName: 'node' }],
+      };
+      const result = generator.generate(config);
+      expect(result).toContain('very_long_node_node');
     });
   });
 });
