@@ -1,19 +1,6 @@
 import * as vscode from 'vscode';
 import { TreeItemBase, LiveFolderItem, LiveNodeItem, LiveTopicItem } from './tree-items';
-import { execSync } from 'child_process';
-
-interface TopicInfo {
-  name: string;
-  messageType: string;
-  publishers: string[];
-  subscribers: string[];
-}
-
-interface NodeInfo {
-  name: string;
-  publishedTopics: string[];
-  subscribedTopics: string[];
-}
+import { Ros2CliService } from '../core/ros2-cli-service';
 
 export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   private _onDidChangeTreeData: vscode.EventEmitter<TreeItemBase | undefined | null | void> = new vscode.EventEmitter();
@@ -23,6 +10,7 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   private refreshRate: number;
   private autoRefreshEnabled: boolean = true;
   private hideSystemTopics: boolean;
+  private readonly cli = Ros2CliService.getInstance();
 
   private readonly SYSTEM_TOPICS = ['/parameter_events', '/rosout'];
 
@@ -140,126 +128,33 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
     return null;
   }
 
-  private executeCommand(command: string): string[] {
-    try {
-      const output = execSync(command, { encoding: 'utf-8', timeout: 5000 });
-      return output.split('\n').filter(line => line.trim().length > 0);
-    } catch (error) {
-      console.error(`Failed to execute command: ${command}`, error);
-      return [];
-    }
-  }
-
   getActiveNodes(): string[] {
-    return this.executeCommand('ros2 node list');
+    return this.cli.getActiveNodes();
   }
 
   getActiveTopics(): string[] {
-    return this.executeCommand('ros2 topic list');
+    return this.cli.getActiveTopics();
   }
 
-  getTopicInfo(topicName: string): TopicInfo | null {
-    try {
-      const output = execSync(`ros2 topic info ${topicName} --verbose`, { encoding: 'utf-8', timeout: 5000 });
-      const lines = output.split('\n');
-      
-      let messageType = '';
-      const publishers: string[] = [];
-      const subscribers: string[] = [];
-      
-      let section: 'none' | 'publishers' | 'subscribers' = 'none';
-      
-      for (const line of lines) {
-        const trimmedLine = line.trim();
-        
-        if (trimmedLine.startsWith('Type:')) {
-          const match = trimmedLine.match(/Type:\s+(.+)/);
-          if (match && match[1]) {
-            messageType = match[1].trim();
-          }
-        } else if (trimmedLine.startsWith('Publisher count:')) {
-          section = 'publishers';
-          continue;
-        } else if (trimmedLine.startsWith('Subscription count:')) {
-          section = 'subscribers';
-          continue;
-        } else if (trimmedLine.startsWith('Node name:') && section === 'publishers') {
-          const nodeName = trimmedLine.replace('Node name:', '').trim();
-          if (nodeName) {
-            publishers.push(nodeName);
-          }
-        } else if (trimmedLine.startsWith('Node name:') && section === 'subscribers') {
-          const nodeName = trimmedLine.replace('Node name:', '').trim();
-          if (nodeName) {
-            subscribers.push(nodeName);
-          }
-        } else if (trimmedLine.startsWith('Endpoint type:')) {
-          continue;
-        } else if (trimmedLine === '') {
-          continue;
-        }
-      }
-      
-      return {
-        name: topicName,
-        messageType,
-        publishers,
-        subscribers
-      };
-    } catch (error) {
-      console.error(`Failed to get info for topic ${topicName}`, error);
-      return null;
-    }
+  getTopicInfo(topicName: string): import('../core/ros2-cli-service').TopicInfo | null {
+    return this.cli.getTopicInfo(topicName);
   }
-  
-  getNodeInfo(nodeName: string): NodeInfo | null {
-    try {
-      let publishedTopics: string[] = [];
-      let subscribedTopics: string[] = [];
-      
-      const output = execSync(`ros2 node info ${nodeName}`, { encoding: 'utf-8', timeout: 5000 });
-      const lines = output.split('\n');
-      
-      let section: 'none' | 'subscribers' | 'publishers' = 'none';
-      
-      for (const line of lines) {
-        const trimmedLine = line.trim();
-        
-        if (trimmedLine === 'Subscribers:') {
-          section = 'subscribers';
-          continue;
-        } else if (trimmedLine === 'Publishers:') {
-          section = 'publishers';
-          continue;
-        } else if (trimmedLine === 'Service Servers:' || trimmedLine === 'Service Clients:' || trimmedLine === 'Action Servers:' || trimmedLine === 'Action Clients:') {
-          section = 'none';
-          continue;
-        } else if (section !== 'none' && trimmedLine.startsWith('/')) {
-          const topicName = trimmedLine.split(':')[0].trim();
-          if (topicName) {
-            if (section === 'publishers') {
-              publishedTopics.push(topicName);
-            } else if (section === 'subscribers') {
-              subscribedTopics.push(topicName);
-            }
-          }
-        }
-      }
-      
-      if (this.hideSystemTopics) {
-        publishedTopics = publishedTopics.filter(name => !this.isSystemTopic(name));
-        subscribedTopics = subscribedTopics.filter(name => !this.isSystemTopic(name));
-      }
-      
-      return {
-        name: nodeName,
-        publishedTopics,
-        subscribedTopics
-      };
-    } catch (error) {
-      console.error(`Failed to get info for node ${nodeName}`, error);
+   
+  getNodeInfo(nodeName: string): import('../core/ros2-cli-service').NodeInfo | null {
+    const info = this.cli.getNodeInfo(nodeName);
+    if (!info) {
       return null;
     }
+
+    if (this.hideSystemTopics) {
+      return {
+        ...info,
+        publishedTopics: info.publishedTopics.filter(name => !this.isSystemTopic(name)),
+        subscribedTopics: info.subscribedTopics.filter(name => !this.isSystemTopic(name)),
+      };
+    }
+
+    return info;
   }
 
   dispose(): void {

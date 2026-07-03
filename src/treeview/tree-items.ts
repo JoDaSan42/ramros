@@ -3,7 +3,7 @@ import * as path from 'path';
 import { WorkspaceInfo } from '../core/workspace-detector';
 import { PackageConflict } from '../core/duplicate-package-detector';
 import { PackageInfo, NodeInfo, InterfaceInfo, LaunchFileInfo, ParameterInfo, TopicEndpointInfo } from '../core/package-discovery';
-import { execSync } from 'child_process';
+import { Ros2CliService } from '../core/ros2-cli-service';
 
 export abstract class TreeItemBase extends vscode.TreeItem {
   abstract getChildren(): Promise<TreeItemBase[]>;
@@ -630,38 +630,15 @@ export class TopicPublishersItem extends TreeItemBase {
   }
   
   async getChildren(): Promise<TreeItemBase[]> {
-    const publishers: TopicEndpointInfo[] = [];
-    try {
-      const output = execSync(`ros2 topic info ${this.topicName} --verbose`, { encoding: 'utf-8', timeout: 5000 });
-      const lines = output.split('\n');
-      let section: 'none' | 'publishers' | 'subscribers' = 'none';
-      
-      for (const line of lines) {
-        const trimmedLine = line.trim();
-        
-        if (trimmedLine.startsWith('Publisher count:')) {
-          section = 'publishers';
-          continue;
-        } else if (trimmedLine.startsWith('Subscription count:')) {
-          section = 'subscribers';
-          continue;
-        } else if (section === 'publishers' && trimmedLine.startsWith('Node name:')) {
-          const nodeName = trimmedLine.replace('Node name:', '').trim();
-          if (nodeName) {
-            publishers.push({
-              topicName: this.topicName,
-              messageType: '',
-              nodeName: nodeName,
-              nodeNamespace: ''
-            });
-          }
-        }
-      }
-    } catch (error) {
-      console.error(`Failed to get publishers for ${this.topicName}`, error);
-    }
+    const cli = Ros2CliService.getInstance();
+    const publishers = cli.getTopicPublishers(this.topicName);
     
-    return publishers.map(pub => new TopicEndpointItem(pub, 'publisher'));
+    return publishers.map(pub => new TopicEndpointItem({
+      topicName: this.topicName,
+      messageType: '',
+      nodeName: pub.nodeName,
+      nodeNamespace: pub.nodeNamespace,
+    }, 'publisher'));
   }
 }
 
@@ -677,38 +654,15 @@ export class TopicSubscribersItem extends TreeItemBase {
   }
   
   async getChildren(): Promise<TreeItemBase[]> {
-    const subscribers: TopicEndpointInfo[] = [];
-    try {
-      const output = execSync(`ros2 topic info ${this.topicName} --verbose`, { encoding: 'utf-8', timeout: 5000 });
-      const lines = output.split('\n');
-      let section: 'none' | 'publishers' | 'subscribers' = 'none';
-      
-      for (const line of lines) {
-        const trimmedLine = line.trim();
-        
-        if (trimmedLine.startsWith('Publisher count:')) {
-          section = 'publishers';
-          continue;
-        } else if (trimmedLine.startsWith('Subscription count:')) {
-          section = 'subscribers';
-          continue;
-        } else if (section === 'subscribers' && trimmedLine.startsWith('Node name:')) {
-          const nodeName = trimmedLine.replace('Node name:', '').trim();
-          if (nodeName) {
-            subscribers.push({
-              topicName: this.topicName,
-              messageType: '',
-              nodeName: nodeName,
-              nodeNamespace: ''
-            });
-          }
-        }
-      }
-    } catch (error) {
-      console.error(`Failed to get subscribers for ${this.topicName}`, error);
-    }
+    const cli = Ros2CliService.getInstance();
+    const subscribers = cli.getTopicSubscribers(this.topicName);
     
-    return subscribers.map(sub => new TopicEndpointItem(sub, 'subscriber'));
+    return subscribers.map(sub => new TopicEndpointItem({
+      topicName: this.topicName,
+      messageType: '',
+      nodeName: sub.nodeName,
+      nodeNamespace: sub.nodeNamespace,
+    }, 'subscriber'));
   }
 }
 
