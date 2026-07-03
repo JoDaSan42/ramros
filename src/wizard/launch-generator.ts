@@ -84,10 +84,20 @@ export class LaunchGenerator {
         lines.push(`        namespace='${nodeConfig.namespace}',`);
       }
       
+      // Merge user parameters and use_sim_time into a single parameters dict
+      // to avoid emitting duplicate parameters=[...] keys (Python SyntaxError)
+      const allParams: Array<{ name: string; value: unknown }> = [];
       if (nodeConfig.parameters && nodeConfig.parameters.length > 0) {
+        allParams.push(...nodeConfig.parameters);
+      }
+      if (nodeConfig.useSimTime !== undefined) {
+        allParams.push({ name: 'use_sim_time', value: nodeConfig.useSimTime });
+      }
+      
+      if (allParams.length > 0) {
         lines.push('        parameters=[{');
         const paramLines: string[] = [];
-        for (const param of nodeConfig.parameters) {
+        for (const param of allParams) {
           const valueStr = this.formatParameterValue(param.value);
           paramLines.push(`'${param.name}': ${valueStr},`);
         }
@@ -107,12 +117,9 @@ export class LaunchGenerator {
         lines.push(`        output='${nodeConfig.output}',`);
       }
       
-      if (nodeConfig.useSimTime !== undefined) {
-        lines.push(`        parameters=[{'use_sim_time': ${nodeConfig.useSimTime}}],`);
-      }
-      
-      // Remove trailing comma and close
-      lines[lines.length - 1] = lines[lines.length - 1].replace(/,$/, '');
+      // Remove trailing comma from the last argument line before closing
+      const lastLineIdx = lines.length - 1;
+      lines[lastLineIdx] = lines[lastLineIdx].replace(/,\s*$/, '');
       lines.push('    )');
       lines.push('');
     }
