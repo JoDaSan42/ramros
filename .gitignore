@@ -31,6 +31,12 @@ test-fixtures/*/build/
 test-fixtures/*/log/
 test-fixtures/**/install/*
 !test-fixtures/**/install/setup.bash
+test-fixtures/workspace-valid/src/e2e_*
+test-fixtures/workspace-valid/src/cpp_base_pkg_*
+test-fixtures/workspace-valid/src/py_base_pkg_*
+test-fixtures/workspace-valid/src/interface_base_pkg_*
+test-fixtures/workspace-valid/src/deps_pkg_*
+test-fixtures/workspace-valid/src/test_refresh_package
 
 # Extension packages
 *.vsix
