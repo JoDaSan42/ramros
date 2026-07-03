@@ -596,8 +596,19 @@ export class LaunchWizard {
     );
 
     if (runChoice === 'Run now') {
-      // This would need to be implemented separately or passed as callback
-      void vscode.window.showInformationMessage('To run the launch file, use the Run command or ros2 launch from terminal');
+      const packageName = this.targetPackage?.name || '';
+      if (packageName) {
+        const installPath = path.join(this.workspacePath, 'install');
+        const setupBash = path.join(installPath, 'setup.bash');
+        const terminal = vscode.window.createTerminal(`Launch: ${fileName}`);
+        terminal.show();
+        const fs = await import('fs');
+        if (fs.existsSync(setupBash)) {
+          terminal.sendText(`source "${setupBash}" && ros2 launch ${packageName} ${fileName}.launch.py`);
+        } else {
+          terminal.sendText(`ros2 launch ${packageName} ${fileName}.launch.py`);
+        }
+      }
     }
   }
 }
