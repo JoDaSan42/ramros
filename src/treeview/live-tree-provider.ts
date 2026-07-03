@@ -12,7 +12,7 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   private hideSystemTopics: boolean;
   private readonly cli = Ros2CliService.getInstance();
 
-  private readonly SYSTEM_TOPICS = ['/parameter_events', '/rosout'];
+  private readonly SYSTEM_TOPICS = ['/parameter_events', '/rosout', '/clock'];
 
   constructor() {
     const config = vscode.workspace.getConfiguration('ramros.liveView');
