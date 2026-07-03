@@ -1,0 +1,7 @@
+geometry_msgs/PoseStamped pose
+---
+duration elapsed_time
+float64 distance_traveled
+---
+bool success
+string error_message

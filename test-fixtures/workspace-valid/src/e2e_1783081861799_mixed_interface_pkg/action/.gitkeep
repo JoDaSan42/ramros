@@ -1,0 +1,7 @@
+# Add your action definitions here
+# Example:
+# string goal
+# ---
+# float32 progress
+# ---
+# bool result

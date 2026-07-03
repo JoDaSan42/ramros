@@ -669,13 +669,59 @@ export async function activate(context: vscode.ExtensionContext) {
       await terminalManager.executeInNewTerminal(runCommand, selectedWorkspace, `Launch: ${launchFileToRun.name}`);
     }),
     
-    vscode.commands.registerCommand('ramros.addNodeToPackage', async (treeItem?: TreeItemBase) => {
+    vscode.commands.registerCommand('ramros.addNodeToPackage', async (arg?: TreeItemBase | Record<string, unknown>) => {
       const workspaces = treeProvider.getWorkspaces();
       if (workspaces.length === 0) {
         void vscode.window.showWarningMessage('No ROS2 workspaces found');
         return;
       }
-      
+
+      // Programmatic path: handle options object for e2e tests / automation
+      if (arg && typeof arg === 'object' && !('getPackageInfo' in arg) && 'packageName' in arg) {
+        const opts = arg as {
+          packageName: string;
+          nodeType: 'node' | 'interface';
+          language?: 'cpp' | 'python';
+          nodeName?: string;
+          template?: boolean;
+          dependencies?: string[];
+          interfaceType?: 'message' | 'service' | 'action';
+          interfaceName?: string;
+          definition?: string;
+        };
+
+        const pkg = workspaces.flatMap(w => w.packages || []).find(p => p.name === opts.packageName);
+        if (!pkg) {
+          void vscode.window.showErrorMessage(`Package '${opts.packageName}' not found`);
+          return;
+        }
+
+        try {
+          if (opts.nodeType === 'interface') {
+            await packageCreator.addInterfaceToPackage(pkg.path, pkg.name, {
+              type: opts.interfaceType as 'message' | 'service' | 'action',
+              name: opts.interfaceName!,
+              definition: opts.definition!,
+            });
+          } else {
+            await packageCreator.addNodeToPackage(pkg.path, pkg.name, {
+              nodeType: opts.language as 'cpp' | 'python',
+              nodeName: opts.nodeName!,
+              includeTemplateNode: opts.template ?? true,
+              dependencies: opts.dependencies ?? [],
+            });
+          }
+          await treeProvider.refresh();
+          void vscode.window.showInformationMessage(`Added to package '${pkg.name}'`);
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          void vscode.window.showErrorMessage(`Failed to add: ${message}`);
+        }
+        return;
+      }
+
+      const treeItem = arg as TreeItemBase | undefined;
+
       let selectedPackage: PackageInfo | undefined;
       
       if (treeItem && 'getPackageInfo' in treeItem && typeof treeItem.getPackageInfo === 'function') {
