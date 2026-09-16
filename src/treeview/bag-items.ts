@@ -359,41 +359,45 @@ export class BagLoopItem extends TreeItemBase {
 }
 
 export class BagInfoItem extends TreeItemBase {
-  private infoText: string = 'No bag file selected';
-  private bagFilePath: string | null = null;
-  
   constructor() {
     super('Bag Info', vscode.TreeItemCollapsibleState.Collapsed);
     this.iconPath = new vscode.ThemeIcon('info');
     this.contextValue = 'bagInfo';
     this.tooltip = 'Information about the selected bag file';
+    this.updateFromSession();
   }
   
   setInfo(info: string, bagPath: string): void {
-    this.bagFilePath = bagPath;
-    this.infoText = info;
-    this.description = path.basename(bagPath);
+    BagSessionService.getInstance().setBagInfo(info, bagPath);
+    this.updateFromSession();
   }
   
   clearInfo(): void {
-    this.bagFilePath = null;
-    this.infoText = 'No bag file selected';
-    this.description = '';
+    BagSessionService.getInstance().clearBagInfo();
+    this.updateFromSession();
+  }
+  
+  private updateFromSession(): void {
+    const session = BagSessionService.getInstance();
+    this.description = session.bagInfoPath ? path.basename(session.bagInfoPath) : '';
   }
   
   async getChildren(): Promise<TreeItemBase[]> {
-    if (!this.bagFilePath) {
+    const session = BagSessionService.getInstance();
+    
+    if (!session.bagInfoPath) {
       return [new BagInfoLineItem('No bag file selected')];
     }
     
     // First item is always the bag file path
     const children: BagInfoLineItem[] = [
-      new BagInfoLineItem(`📦 ${this.bagFilePath}`, true)
+      new BagInfoLineItem(`📦 ${session.bagInfoPath}`, true)
     ];
     
     // Then add parsed info lines
-    if (this.infoText && this.infoText !== 'No bag file selected') {
-      const lines = this.infoText.split('\n').filter(line => line.trim().length > 0);
+    const infoText = session.bagInfoText;
+    if (infoText && infoText !== 'No bag file selected') {
+      const lines = infoText.split('\n').filter(line => line.trim().length > 0);
       for (const line of lines) {
         children.push(new BagInfoLineItem(line));
       }

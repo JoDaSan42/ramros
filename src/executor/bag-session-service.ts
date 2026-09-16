@@ -16,6 +16,8 @@ export class BagSessionService implements vscode.Disposable {
   private _playbackPaused = false;
   private _playbackLooping = false;
   private _selectedBagPath: string | null = null;
+  private _bagInfoText = 'No bag file selected';
+  private _bagInfoPath: string | null = null;
 
   get recordingTerminal(): vscode.Terminal | null {
     return this._recordingTerminal;
@@ -92,6 +94,24 @@ export class BagSessionService implements vscode.Disposable {
 
   setSelectedBagPath(bagPath: string | null): void {
     this._selectedBagPath = bagPath;
+  }
+
+  get bagInfoText(): string {
+    return this._bagInfoText;
+  }
+
+  get bagInfoPath(): string | null {
+    return this._bagInfoPath;
+  }
+
+  setBagInfo(info: string, bagPath: string): void {
+    this._bagInfoText = info;
+    this._bagInfoPath = bagPath;
+  }
+
+  clearBagInfo(): void {
+    this._bagInfoText = 'No bag file selected';
+    this._bagInfoPath = null;
   }
 
   dispose(): void {

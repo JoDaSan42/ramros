@@ -1,5 +1,5 @@
 import { ToolsTreeProvider } from '../../treeview/tools-tree-provider';
-import { BagFilesFolderItem, BagRecordItem } from '../../treeview/bag-items';
+import { BagFilesFolderItem, BagInfoItem, BagRecordItem } from '../../treeview/bag-items';
 import { BagSessionService } from '../../executor/bag-session-service';
 
 describe('ToolsTreeProvider Integration Tests', () => {
@@ -8,12 +8,16 @@ describe('ToolsTreeProvider Integration Tests', () => {
   beforeEach(() => {
     BagFilesFolderItem.resetInstances();
     BagSessionService.getInstance().setRecordingTerminal(null);
+    BagSessionService.getInstance().clearBagInfo();
+    BagSessionService.getInstance().setSelectedBagPath(null);
     provider = new ToolsTreeProvider();
   });
 
   afterEach(() => {
     BagFilesFolderItem.resetInstances();
     BagSessionService.getInstance().setRecordingTerminal(null);
+    BagSessionService.getInstance().clearBagInfo();
+    BagSessionService.getInstance().setSelectedBagPath(null);
     jest.restoreAllMocks();
   });
 
@@ -80,6 +84,36 @@ describe('ToolsTreeProvider Integration Tests', () => {
     it('resolves even when no info item exists', async () => {
       BagFilesFolderItem.resetInstances();
       await expect(provider.setBagInfo('info', '/tmp/bag.db3')).resolves.toBeUndefined();
+    });
+
+    it('keeps bag info after control items are reset (e.g. stop playback)', async () => {
+      await provider.setBagInfo('topic: /chatter', '/tmp/bag.db3');
+
+      // bag.stop calls resetInstances(), which used to wipe the info.
+      BagFilesFolderItem.resetInstances();
+
+      const folder = new BagFilesFolderItem();
+      const children = await folder.getChildren();
+      const infoItem = children.find(
+        c => c.contextValue === 'bagInfo'
+      ) as BagInfoItem;
+
+      expect(infoItem).toBeDefined();
+      expect(infoItem.description).toBe('bag.db3');
+
+      const lines = await infoItem.getChildren();
+      const labels = lines.map(l => l.label);
+      expect(labels.some(l => String(l).includes('/tmp/bag.db3'))).toBe(true);
+      expect(labels.some(l => String(l).includes('topic: /chatter'))).toBe(true);
+    });
+
+    it('survives a full resetInstances cycle and re-render', async () => {
+      await provider.setBagInfo('info line', '/tmp/other.db3');
+      BagFilesFolderItem.resetInstances();
+
+      // A brand new BagInfoItem should still read from the session.
+      const freshInfo = new BagInfoItem();
+      expect(freshInfo.description).toBe('other.db3');
     });
   });
 
