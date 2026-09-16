@@ -1,63 +1,5 @@
 import * as fs from 'fs';
 
-export type ParameterValue = boolean | number | string | ParameterValue[];
-
-export class ParameterCoercer {
-  static inferType(defaultValue: string | undefined): string {
-    if (!defaultValue) return 'unspecified';
-    const trimmed = defaultValue.trim();
-    if (trimmed === 'true' || trimmed === 'false') return 'bool';
-    if (/^-?\d+$/.test(trimmed)) return 'int';
-    if (/^-?\d+\.\d+$/.test(trimmed)) return 'double';
-    if (trimmed.startsWith("'") || trimmed.startsWith('"')) return 'string';
-    if (trimmed.startsWith('[')) return 'array';
-    return 'string';
-  }
-
-  static parse(value: string, type?: string): ParameterValue {
-    const lowerType = type?.toLowerCase();
-    if (lowerType === 'bool' || lowerType === 'boolean') {
-      return value.toLowerCase() === 'true';
-    }
-    if (lowerType === 'int' || lowerType === 'integer') {
-      const parsed = parseInt(value, 10);
-      return isNaN(parsed) ? value : parsed;
-    }
-    if (lowerType === 'float' || lowerType === 'double') {
-      const parsed = parseFloat(value);
-      return isNaN(parsed) ? value : parsed;
-    }
-    if (lowerType === 'array' || lowerType === 'list' || value.startsWith('[')) {
-      try {
-        return JSON.parse(value) as ParameterValue;
-      } catch {
-        return value.split(',').map(s => s.trim());
-      }
-    }
-    return value;
-  }
-
-  static formatPython(value: ParameterValue): string {
-    if (typeof value === 'boolean') {
-      return value ? 'True' : 'False';
-    }
-    if (typeof value === 'number') {
-      return value.toString();
-    }
-    if (typeof value === 'string') {
-      if (/^-?\d+(\.\d+)?$/.test(value)) {
-        return value;
-      }
-      return `'${value.replace(/'/g, "\\'")}'`;
-    }
-    if (Array.isArray(value)) {
-      const items = value.map(v => ParameterCoercer.formatPython(v)).join(', ');
-      return `[${items}]`;
-    }
-    return `'${String(value).replace(/'/g, "\\'")}'`;
-  }
-}
-
 export class BuildFilePatcher {
   static readWithBackup(filePath: string): { content: string; backup: string } {
     const content = fs.readFileSync(filePath, 'utf-8');
@@ -122,8 +64,15 @@ export class BuildFilePatcher {
     if (!fs.existsSync(setupPyPath)) return;
     const { content, backup } = this.readWithBackup(setupPyPath);
 
+    const updated = this.addPythonEntryPointToContent(content, nodeName, packageName);
+    if (updated !== content) {
+      this.writeWithRollback(setupPyPath, updated, backup);
+    }
+  }
+
+  static addPythonEntryPointToContent(content: string, nodeName: string, packageName: string): string {
     const newEntry = `'${nodeName} = ${packageName}.${nodeName}:main'`;
-    if (content.includes(newEntry)) return;
+    if (content.includes(newEntry)) return content;
 
     let updated = content;
     const consoleScriptsRegex = /console_scripts\s*:\s*\[/i;
@@ -137,15 +86,31 @@ export class BuildFilePatcher {
       });
     } else {
       const entryPointsBlock = `    entry_points={\n        'console_scripts': [\n            ${newEntry},\n        ],\n    },`;
-      const zipSafeRegex = /zip_safe=True,/;
-      if (zipSafeRegex.test(content)) {
-        updated = content.replace(zipSafeRegex, `zip_safe=True,\n${entryPointsBlock}`);
-      }
+      updated = this.insertPythonEntryPointsBlock(content, entryPointsBlock);
     }
 
-    if (updated !== content) {
-      this.writeWithRollback(setupPyPath, updated, backup);
+    return updated;
+  }
+
+  private static insertPythonEntryPointsBlock(content: string, entryPointsBlock: string): string {
+    // Prefer anchoring after zip_safe, but fall back to the closing paren of
+    // setuptools.setup(...) so setup.py variants without zip_safe still work.
+    const zipSafeRegex = /(\bzip_safe\s*=\s*(?:True|False)\s*,)/;
+    if (zipSafeRegex.test(content)) {
+      return content.replace(zipSafeRegex, `$1\n${entryPointsBlock}`);
     }
+
+    const setupCallRegex = /(?:setuptools\.)?setup\s*\([\s\S]*?\)\s*$/m;
+    if (setupCallRegex.test(content)) {
+      return content.replace(setupCallRegex, (match) => {
+        const closingParenIdx = match.lastIndexOf(')');
+        if (closingParenIdx === -1) return match;
+        const indent = '    ';
+        return `${match.slice(0, closingParenIdx)}${indent}${entryPointsBlock}\n)`;
+      });
+    }
+
+    return content;
   }
 
   static addPackageXmlDependency(packageXmlPath: string, dependency: string): void {
@@ -204,5 +169,55 @@ export class BuildFilePatcher {
     if (updated !== content) {
       this.writeWithRollback(cmakePath, updated, backup);
     }
+  }
+
+  static addLaunchInstallToSetupPy(content: string, packageName: string): string {
+    const genericInstallEntry = `('share/${packageName}/launch', glob('launch/*.launch.py'))`;
+    const hasGenericInstall = content.includes(genericInstallEntry) ||
+      (content.includes(`'share/${packageName}/launch'`) && content.includes('glob') && content.includes('launch/*.launch.py'));
+    if (hasGenericInstall) return content;
+
+    const hasGlobImport = /from\s+glob\s+import\s+glob|import\s+glob/.test(content);
+    const dataFilesPattern = /data_files\s*=\s*\[/gs;
+
+    let updated: string;
+    if (!dataFilesPattern.test(content)) {
+      const setupPyPattern = /(?:setuptools\.)?setup\s*\([^)]*\)/gs;
+      const match = setupPyPattern.exec(content);
+      if (!match) return content;
+      const insertPos = match.index + match[0].lastIndexOf(')');
+      updated =
+        content.substring(0, insertPos) +
+        ',\n    data_files=[\n        ' + genericInstallEntry + ',\n    ]' +
+        content.substring(insertPos);
+    } else {
+      updated = content.replace(
+        /data_files\s*=\s*\[/,
+        'data_files=[\n        ' + genericInstallEntry + ','
+      );
+    }
+
+    if (!hasGlobImport) {
+      const firstNewline = updated.indexOf('\n');
+      updated = updated.substring(0, firstNewline + 1) + 'from glob import glob\n' + updated.substring(firstNewline + 1);
+    }
+
+    return updated;
+  }
+
+  static addLaunchInstallToCMakeLists(content: string, packageName: string): string {
+    const hasLaunchInstall = /install\s*\(\s*DIRECTORY\s+launch/gi.test(content) ||
+      /install\s*\(\s*FILES.*launch/gi.test(content);
+    if (hasLaunchInstall) return content;
+
+    const lines = content.split('\n');
+    const installIndex = lines.findIndex(line => /^install\s*\(/i.test(line.trim()));
+
+    if (installIndex !== -1) {
+      lines.splice(installIndex + 1, 0, '', '# Install launch files', `install(DIRECTORY launch DESTINATION share/${packageName})`);
+      return lines.join('\n');
+    }
+
+    return content + `\n\n# Install launch files\ninstall(DIRECTORY launch DESTINATION share/${packageName})\n`;
   }
 }

@@ -2,7 +2,7 @@ import { LaunchGenerator, LaunchFileConfig } from '../../wizard/launch-generator
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
 
 jest.mock('child_process');
 
@@ -179,18 +179,21 @@ describe('LaunchGenerator', () => {
 
   describe('validate', () => {
     it('returns true when ros2 launch --check succeeds', async () => {
-      (execSync as jest.Mock).mockReturnValueOnce('');
+      (exec as unknown as jest.Mock).mockImplementationOnce((_cmd, _opts, cb) => {
+        cb(null, '', '');
+      });
       const result = await generator.validate('/path/to/launch.py');
       expect(result).toBe(true);
-      expect(execSync).toHaveBeenCalledWith(
+      expect(exec).toHaveBeenCalledWith(
         expect.stringContaining('ros2 launch --check'),
-        expect.objectContaining({ stdio: 'pipe', encoding: 'utf-8' })
+        expect.objectContaining({ encoding: 'utf-8' }),
+        expect.any(Function)
       );
     });
 
     it('returns false when ros2 launch --check fails', async () => {
-      (execSync as jest.Mock).mockImplementationOnce(() => {
-        throw new Error('Validation failed');
+      (exec as unknown as jest.Mock).mockImplementationOnce((_cmd, _opts, cb) => {
+        cb(new Error('Validation failed'), '', '');
       });
       const result = await generator.validate('/path/to/bad_launch.py');
       expect(result).toBe(false);

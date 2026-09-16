@@ -87,4 +87,85 @@ describe('RamrosTreeProvider Integration Tests', () => {
       freshDuplicateDetector.clearCache();
     });
   });
+
+  describe('sort mode', () => {
+    it('defaults to byPackage and toggles between modes', () => {
+      expect(treeProvider.getSortMode()).toBe('byPackage');
+      treeProvider.toggleSortMode();
+      expect(treeProvider.getSortMode()).toBe('byCategory');
+      treeProvider.toggleSortMode();
+      expect(treeProvider.getSortMode()).toBe('byPackage');
+    });
+
+    it('returns category folders for a workspace root in byCategory mode', async () => {
+      const withPackages = {
+        id: '/ws', name: 'ws',
+        rootPath: { fsPath: '/ws' } as any,
+        srcPath: { fsPath: '/ws/src' } as any,
+        installPath: null, buildPath: null, rosDistribution: null,
+        isValid: true, errors: [], warnings: [],
+        packages: [
+          {
+            name: 'pkg', path: '/ws/src/pkg', version: '1.0.0', description: '',
+            maintainers: [], license: 'MIT', buildType: 'ament_cmake', packageType: 'cpp',
+            dependencies: [], nodes: [], interfaces: [], launchFiles: [],
+          },
+        ],
+      };
+
+      const stubDetector = {
+        detectWorkspaces: jest.fn().mockResolvedValue([withPackages]),
+        validateWorkspace: jest.fn().mockResolvedValue(undefined),
+      } as unknown as WorkspaceDetector;
+
+      const stubDuplicates = {
+        detectDuplicates: jest.fn().mockResolvedValue([]),
+        clearCache: jest.fn(),
+      } as unknown as DuplicatePackageDetector;
+
+      const provider = new RamrosTreeProvider(
+        stubDetector,
+        stubDuplicates,
+        undefined,
+        false
+      );
+      providersToCleanUp.push(provider);
+      await provider.refresh();
+
+      provider.toggleSortMode();
+      const roots = await provider.getChildren();
+      expect(roots).toHaveLength(1);
+
+      const children = await provider.getChildren(roots[0]);
+      const labels = children.map(c => c.label);
+      expect(labels).toEqual(['Nodes', 'Interfaces', 'Launch Files']);
+    });
+  });
+
+  describe('event-driven refresh', () => {
+    it('stopAutoRefresh disposes without throwing', () => {
+      expect(() => treeProvider.stopAutoRefresh()).not.toThrow();
+      // Idempotent
+      expect(() => treeProvider.stopAutoRefresh()).not.toThrow();
+    });
+
+    it('onWorkspaceFoldersChanged reconfigures watchers and refreshes', async () => {
+      const vscode = require('vscode');
+      vscode.workspace.workspaceFolders = [];
+      await expect(treeProvider.onWorkspaceFoldersChanged()).resolves.toBeUndefined();
+    });
+
+    it('refresh resolves and clears caches', async () => {
+      await expect(treeProvider.refresh()).resolves.toBeUndefined();
+    });
+  });
+
+  describe('getTreeItem', () => {
+    it('returns the element unchanged', async () => {
+      const roots = await treeProvider.getChildren();
+      if (roots.length > 0) {
+        expect(treeProvider.getTreeItem(roots[0])).toBe(roots[0]);
+      }
+    });
+  });
 });

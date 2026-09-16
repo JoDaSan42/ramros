@@ -1,8 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { RosEnvironmentService } from '../core/ros-environment';
 import { BuildFilePatcher } from './build-file-patcher';
+
+const execAsync = promisify(exec);
 
 interface InterfaceDefinition {
   type: 'message' | 'service' | 'action';
@@ -37,16 +40,16 @@ export class PackageCreator {
 
   constructor(extensionPath?: string, rosEnvironment?: RosEnvironmentService) {
     this.rosEnvironment = rosEnvironment || new RosEnvironmentService();
-    if (extensionPath && fs.existsSync(path.join(extensionPath, 'test-fixtures', 'packages'))) {
-      this.templateDir = path.join(extensionPath, 'test-fixtures', 'packages');
-    } else if (fs.existsSync(path.join(process.cwd(), 'test-fixtures', 'packages'))) {
-      this.templateDir = path.join(process.cwd(), 'test-fixtures', 'packages');
+    if (extensionPath && fs.existsSync(path.join(extensionPath, 'resources', 'templates', 'packages'))) {
+      this.templateDir = path.join(extensionPath, 'resources', 'templates', 'packages');
+    } else if (fs.existsSync(path.join(process.cwd(), 'resources', 'templates', 'packages'))) {
+      this.templateDir = path.join(process.cwd(), 'resources', 'templates', 'packages');
     } else {
-      this.templateDir = path.join(__dirname, '..', '..', '..', 'test-fixtures', 'packages');
+      this.templateDir = path.join(__dirname, '..', '..', 'resources', 'templates', 'packages');
     }
 
     if (!fs.existsSync(this.templateDir)) {
-      throw new Error('Template directory not found. Please ensure test-fixtures/packages exists.');
+      throw new Error('Template directory not found. Please ensure resources/templates/packages exists.');
     }
   }
 
@@ -102,7 +105,7 @@ export class PackageCreator {
 
     try {
       const setupCmd = await this.getRosSetupCommand();
-      execSync(`${setupCmd} && ros2 ${args.join(' ')}`, { stdio: 'pipe', shell: '/bin/bash' });
+      await execAsync(`${setupCmd} && ros2 ${args.join(' ')}`, { shell: '/bin/bash' });
       
       if (config.nodeName && (config.template === 'minimal-python' || config.template === 'minimal-cpp' || config.template === 'standard')) {
         const includeNode = config.includeTemplateNode ?? true;

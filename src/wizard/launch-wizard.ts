@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { PackageInfo, NodeInfo, InstalledPackageInfo, LaunchFileInfo, PackageDiscoveryService } from '../core/package-discovery';
 import { LaunchGenerator, LaunchNodeConfig, LaunchFileConfig } from './launch-generator';
-import { ParameterCoercer, ParameterValue } from './build-file-patcher';
+import { BuildFilePatcher } from './build-file-patcher';
+import { ParameterCoercer, ParameterValue } from '../core/parameter-coercer';
 
 export interface SelectedNodeForLaunch {
   node: NodeInfo;
@@ -413,95 +414,12 @@ export class LaunchWizard {
 
     const document = await vscode.workspace.openTextDocument(buildFilePath);
     const content = document.getText();
-    
-    let needsUpdate = false;
-    let updatedContent = content;
 
-    if (isPython) {
-      // Check setup.py for generic launch directory installation
-      const genericInstallEntry = `('share/${pkg.name}/launch', glob('launch/*.launch.py'))`;
-      const hasGenericInstall = content.includes(genericInstallEntry) || 
-                                content.includes(`'share/${pkg.name}/launch'`) && content.includes('glob') && content.includes('launch/*.launch.py');
-      
-      if (!hasGenericInstall) {
-        const dataFilesPattern = /data_files\s*=\s*\[/gs;
-        const hasDataFiles = dataFilesPattern.test(content);
-        
-        if (!hasDataFiles) {
-          // Need to add data_files section with glob import
-          const setupPyPattern = /setuptools\.setup\([^)]+\)/gs;
-          const match = setupPyPattern.exec(content);
-          
-          if (match) {
-            // Check if glob is already imported
-            const hasGlobImport = /from\s+glob\s+import\s+glob|import\s+glob/.test(content);
-            const globImport = hasGlobImport ? '' : 'from glob import glob\n';
-            
-            // Add data_files with glob before closing parenthesis
-            const insertPos = match.index + match[0].lastIndexOf(')');
-            updatedContent = 
-              content.substring(0, insertPos) + 
-              ',\n    data_files=[\n        ' + genericInstallEntry + ',\n    ]' +
-              content.substring(insertPos);
-            
-            // Add glob import at the top if not present
-            if (!hasGlobImport) {
-              const firstNewline = content.indexOf('\n');
-              updatedContent = content.substring(0, firstNewline + 1) + globImport + content.substring(firstNewline + 1);
-            }
-            
-            needsUpdate = true;
-          }
-        } else if (!hasGenericInstall) {
-          // data_files exists but not with glob - replace all launch-specific entries with glob pattern
-          const dataFilesMatch = content.match(/data_files\s*=\s*\[(.*?)\]/gs);
-          if (dataFilesMatch) {
-            // Check if glob is already imported
-            const hasGlobImport = /from\s+glob\s+import\s+glob|import\s+glob/.test(content);
-            
-            // Remove any existing launch file entries and replace with glob
-            updatedContent = content.replace(
-              /data_files\s*=\s*\[/,
-              'data_files=[\n        ' + genericInstallEntry + ','
-            );
-            
-            // Add glob import at the top if not present
-            if (!hasGlobImport) {
-              const firstNewline = content.indexOf('\n');
-              updatedContent = content.substring(0, firstNewline + 1) + 'from glob import glob\n' + content.substring(firstNewline + 1);
-            }
-            
-            needsUpdate = true;
-          }
-        }
-      }
-    } else {
-      // Check CMakeLists.txt for install(DIRECTORY launch ...) or install(FILES ...)
-      const hasLaunchInstall = /install\s*\(\s*DIRECTORY\s+launch/gi.test(content) ||
-                               /install\s*\(\s*FILES.*launch/gi.test(content);
+    const updatedContent = isPython
+      ? BuildFilePatcher.addLaunchInstallToSetupPy(content, pkg.name)
+      : BuildFilePatcher.addLaunchInstallToCMakeLists(content, pkg.name);
 
-      if (!hasLaunchInstall) {
-        // Find the install section or end of file
-        const lines = content.split('\n');
-        const installIndex = lines.findIndex(line => /^install\s*\(/i.test(line.trim()));
-        
-        if (installIndex !== -1) {
-          // Add after existing install command
-          const newLines = [
-            '',
-            '# Install launch files',
-            `install(DIRECTORY launch DESTINATION share/${pkg.name})`,
-          ];
-          lines.splice(installIndex + 1, 0, ...newLines);
-          updatedContent = lines.join('\n');
-          needsUpdate = true;
-        } else {
-          // Add at end of file
-          updatedContent = content + `\n\n# Install launch files\ninstall(DIRECTORY launch DESTINATION share/${pkg.name})\n`;
-          needsUpdate = true;
-        }
-      }
-    }
+    const needsUpdate = updatedContent !== content;
 
     if (needsUpdate) {
       const choice = await vscode.window.showInformationMessage(
@@ -558,6 +476,17 @@ export class LaunchWizard {
     // Open the file
     const document = await vscode.workspace.openTextDocument(uri);
     await vscode.window.showTextDocument(document, { preview: false });
+
+    // Best-effort validation: only when a ROS environment is active, so an
+    // unbuilt/unconfigured machine does not produce a misleading warning.
+    if (process.env.ROS_DISTRO) {
+      const isValid = await generator.validate(savePath);
+      if (!isValid) {
+        void vscode.window.showWarningMessage(
+          `Generated launch file could not be validated. Build the workspace and verify '${fileName}.launch.py'.`
+        );
+      }
+    }
 
     let message = `Launch file created: ${fileName}.launch.py`;
     if (this.targetPackage) {

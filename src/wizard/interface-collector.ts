@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { PackageFormValidator } from './package-form-validator';
 
 export type InterfaceType = 'message' | 'service' | 'action';
 
@@ -8,41 +9,18 @@ export interface InterfaceDefinition {
   definition: string;
 }
 
-const VALID_FIELD_TYPES = [
-  'bool', 'byte', 'char',
-  'float32', 'float64',
-  'int8', 'uint8', 'int16', 'uint16', 'int32', 'uint32', 'int64', 'uint64',
-  'string', 'wstring',
-];
+const validator = new PackageFormValidator();
 
 export function validateInterfaceName(value: string): string | null {
-  if (!value || value.trim().length === 0) {
-    return 'Name cannot be empty';
-  }
-  if (!/^[A-Z][a-zA-Z0-9_]*$/.test(value)) {
-    return 'Name must start with uppercase letter and contain only letters, numbers, and underscores';
-  }
-  return null;
+  return validator.validateInterfaceName(value);
 }
 
 export function validateFieldType(value: string): string | null {
-  if (!value || value.trim().length === 0) {
-    return 'Type cannot be empty';
-  }
-  if (!VALID_FIELD_TYPES.includes(value.toLowerCase())) {
-    return `Unknown type '${value}'. Valid types: ${VALID_FIELD_TYPES.join(', ')}`;
-  }
-  return null;
+  return validator.validateFieldType(value);
 }
 
 export function validateFieldName(value: string): string | null {
-  if (!value || value.trim().length === 0) {
-    return 'Field name cannot be empty';
-  }
-  if (!/^[a-z][a-zA-Z0-9_]*$/.test(value)) {
-    return 'Field name must start with lowercase letter and contain only letters, numbers, and underscores';
-  }
-  return null;
+  return validator.validateFieldName(value);
 }
 
 export function buildDefinition(fields: string[]): string {

@@ -111,6 +111,51 @@ describe('PackageFormValidator', () => {
     });
   });
 
+  describe('validateNodeNameInput', () => {
+    it('should return null for valid names', () => {
+      expect(validator.validateNodeNameInput('my_node')).toBeNull();
+    });
+
+    it('should reject empty and invalid names', () => {
+      expect(validator.validateNodeNameInput('')).not.toBeNull();
+      expect(validator.validateNodeNameInput('MyNode')).not.toBeNull();
+    });
+  });
+
+  describe('validateInterfaceName', () => {
+    it('should accept PascalCase names', () => {
+      expect(validator.validateInterfaceName('MyMessage')).toBeNull();
+    });
+
+    it('should reject lowercase and empty names', () => {
+      expect(validator.validateInterfaceName('myMessage')).not.toBeNull();
+      expect(validator.validateInterfaceName('')).not.toBeNull();
+    });
+  });
+
+  describe('validateFieldName', () => {
+    it('should accept snake_case names', () => {
+      expect(validator.validateFieldName('my_field')).toBeNull();
+    });
+
+    it('should reject names starting with uppercase', () => {
+      expect(validator.validateFieldName('MyField')).not.toBeNull();
+    });
+  });
+
+  describe('validateFieldType', () => {
+    it('should accept known ROS2 primitive types', () => {
+      expect(validator.validateFieldType('string')).toBeNull();
+      expect(validator.validateFieldType('float64')).toBeNull();
+      expect(validator.validateFieldType('BOOL')).toBeNull();
+    });
+
+    it('should reject unknown types', () => {
+      expect(validator.validateFieldType('not_a_type')).not.toBeNull();
+      expect(validator.validateFieldType('')).not.toBeNull();
+    });
+  });
+
   describe('validateFullForm', () => {
     it('should validate all fields together', () => {
       const result = validator.validateFullForm(

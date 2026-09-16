@@ -1,4 +1,4 @@
-import { ParameterCoercer } from '../../wizard/build-file-patcher';
+import { ParameterCoercer } from '../../core/parameter-coercer';
 
 describe('ParameterCoercer', () => {
   describe('inferType', () => {

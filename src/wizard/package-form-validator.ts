@@ -4,9 +4,18 @@ export interface ValidationResult {
   warnings: string[];
 }
 
+export const VALID_INTERFACE_FIELD_TYPES = [
+  'bool', 'byte', 'char',
+  'float32', 'float64',
+  'int8', 'uint8', 'int16', 'uint16', 'int32', 'uint32', 'int64', 'uint64',
+  'string', 'wstring',
+];
+
 export class PackageFormValidator {
   private readonly packageNameRegex = /^[a-z][a-z0-9_-]*$/;
   private readonly nodeNameRegex = /^[a-z][a-z0-9_]*$/;
+  private readonly interfaceNameRegex = /^[A-Z][a-zA-Z0-9_]*$/;
+  private readonly fieldNameRegex = /^[a-z][a-zA-Z0-9_]*$/;
   private readonly emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   private readonly reservedNames = ['src', 'build', 'install', 'launch', 'test', 'msg', 'srv', 'action'];
 
@@ -103,6 +112,36 @@ export class PackageFormValidator {
     }
     if (!this.nodeNameRegex.test(name)) {
       return 'Node name must start with a lowercase letter and contain only lowercase letters, numbers, and underscores';
+    }
+    return null;
+  }
+
+  validateInterfaceName(value: string): string | null {
+    if (!value || value.trim().length === 0) {
+      return 'Name cannot be empty';
+    }
+    if (!this.interfaceNameRegex.test(value)) {
+      return 'Name must start with uppercase letter and contain only letters, numbers, and underscores';
+    }
+    return null;
+  }
+
+  validateFieldName(value: string): string | null {
+    if (!value || value.trim().length === 0) {
+      return 'Field name cannot be empty';
+    }
+    if (!this.fieldNameRegex.test(value)) {
+      return 'Field name must start with lowercase letter and contain only letters, numbers, and underscores';
+    }
+    return null;
+  }
+
+  validateFieldType(value: string): string | null {
+    if (!value || value.trim().length === 0) {
+      return 'Type cannot be empty';
+    }
+    if (!VALID_INTERFACE_FIELD_TYPES.includes(value.toLowerCase())) {
+      return `Unknown type '${value}'. Valid types: ${VALID_INTERFACE_FIELD_TYPES.join(', ')}`;
     }
     return null;
   }

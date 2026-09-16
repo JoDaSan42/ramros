@@ -1,6 +1,15 @@
 import * as vscode from 'vscode';
 
 export class BagSessionService implements vscode.Disposable {
+  private static instance: BagSessionService | undefined;
+
+  static getInstance(): BagSessionService {
+    if (!BagSessionService.instance) {
+      BagSessionService.instance = new BagSessionService();
+    }
+    return BagSessionService.instance;
+  }
+
   private _recordingTerminal: vscode.Terminal | null = null;
   private _recordingPaused = false;
   private _playbackTerminal: vscode.Terminal | null = null;
@@ -32,6 +41,10 @@ export class BagSessionService implements vscode.Disposable {
     return this._recordingPaused;
   }
 
+  setRecordingPaused(paused: boolean): void {
+    this._recordingPaused = paused;
+  }
+
   get playbackTerminal(): vscode.Terminal | null {
     return this._playbackTerminal;
   }
@@ -58,6 +71,10 @@ export class BagSessionService implements vscode.Disposable {
   togglePlaybackPause(): boolean {
     this._playbackPaused = !this._playbackPaused;
     return this._playbackPaused;
+  }
+
+  setPlaybackPaused(paused: boolean): void {
+    this._playbackPaused = paused;
   }
 
   togglePlaybackLoop(): boolean {

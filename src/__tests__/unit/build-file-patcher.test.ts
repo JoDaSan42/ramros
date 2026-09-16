@@ -234,4 +234,61 @@ describe('BuildFilePatcher', () => {
       expect(content).toContain('"action/MyAction.action"');
     });
   });
+
+  describe('addLaunchInstallToSetupPy', () => {
+    it('adds data_files and glob import when absent', () => {
+      const content = 'from setuptools import setup\n\nsetup(\n    name="pkg",\n)\n';
+      const updated = BuildFilePatcher.addLaunchInstallToSetupPy(content, 'my_pkg');
+      expect(updated).toContain("('share/my_pkg/launch', glob('launch/*.launch.py'))");
+      expect(updated).toContain('from glob import glob');
+    });
+
+    it('adds glob install to existing data_files', () => {
+      const content = "from setuptools import setup\n\nsetup(\n    data_files=[\n        ('share/pkg', ['package.xml']),\n    ],\n)\n";
+      const updated = BuildFilePatcher.addLaunchInstallToSetupPy(content, 'my_pkg');
+      expect(updated).toContain("('share/my_pkg/launch', glob('launch/*.launch.py'))");
+    });
+
+    it('is idempotent when generic install already present', () => {
+      const content = "from glob import glob\nsetup(data_files=[\n        ('share/my_pkg/launch', glob('launch/*.launch.py')),\n    ],)\n";
+      const updated = BuildFilePatcher.addLaunchInstallToSetupPy(content, 'my_pkg');
+      expect(updated).toBe(content);
+    });
+  });
+
+  describe('addLaunchInstallToCMakeLists', () => {
+    it('adds install(DIRECTORY launch ...) after existing install command', () => {
+      const content = 'install(TARGETS my_node\n  DESTINATION lib/${PROJECT_NAME})\n\nament_package()\n';
+      const updated = BuildFilePatcher.addLaunchInstallToCMakeLists(content, 'my_pkg');
+      expect(updated).toContain('install(DIRECTORY launch DESTINATION share/my_pkg)');
+    });
+
+    it('appends install block when no install command exists', () => {
+      const content = 'ament_package()\n';
+      const updated = BuildFilePatcher.addLaunchInstallToCMakeLists(content, 'my_pkg');
+      expect(updated).toContain('install(DIRECTORY launch DESTINATION share/my_pkg)');
+      expect(updated).toContain('ament_package()');
+    });
+
+    it('is idempotent when launch install already present', () => {
+      const content = 'install(DIRECTORY launch DESTINATION share/my_pkg)\nament_package()\n';
+      const updated = BuildFilePatcher.addLaunchInstallToCMakeLists(content, 'my_pkg');
+      expect(updated).toBe(content);
+    });
+  });
+
+  describe('addPythonEntryPointToContent', () => {
+    it('falls back to setuptools.setup closing paren without zip_safe', () => {
+      const content = 'from setuptools import setup\n\nsetup(\n    name="pkg",\n)\n';
+      const updated = BuildFilePatcher.addPythonEntryPointToContent(content, 'my_node', 'my_pkg');
+      expect(updated).toContain("'my_node = my_pkg.my_node:main'");
+      expect(updated).toContain('console_scripts');
+    });
+
+    it('supports zip_safe=False variant', () => {
+      const content = 'setup(\n    zip_safe=False,\n)\n';
+      const updated = BuildFilePatcher.addPythonEntryPointToContent(content, 'my_node', 'my_pkg');
+      expect(updated).toContain("'my_node = my_pkg.my_node:main'");
+    });
+  });
 });

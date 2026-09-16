@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { TreeItemBase, LiveFolderItem, LiveNodeItem, LiveTopicItem } from './tree-items';
+import { TreeItemBase } from './base-tree-item';
+import { LiveFolderItem, LiveNodeItem, LiveTopicItem } from './live-items';
 import { Ros2CliService } from '../core/ros2-cli-service';
 
 export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {

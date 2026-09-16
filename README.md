@@ -172,7 +172,10 @@ Access commands from tree view context menu or command palette (`Ctrl+Shift+P`):
 | Command | Description | Context |
 |---------|-------------|---------|
 | `RAMROS: Create New Package` | Launch package creation wizard | Workspace root, package folder |
+| `RAMROS: Add Node/Interface to Package` | Add a node or interface to an existing package | Package, nodes/interfaces folder |
+| `RAMROS: Create Launch File` | Launch the launch-file creation wizard | Workspace root, package, launch folder |
 | `RAMROS: Refresh All Workspaces` | Reload workspace detection | View title |
+| `RAMROS: Toggle Tree View Mode` | Switch between grouped-by-package and grouped-by-category | View title |
 | `RAMROS: Source Workspace` | Open terminal with sourced ROS environment | Workspace root |
 | `RAMROS: Build Workspace` | Run `colcon build` in workspace | Workspace root |
 | `RAMROS: Build Package` | Build specific package | Package |
@@ -180,12 +183,17 @@ Access commands from tree view context menu or command palette (`Ctrl+Shift+P`):
 | `RAMROS: Debug Node` | Start debug session for node | Node |
 | `RAMROS: Open in Terminal` | Open new terminal in package directory | Package |
 | `RAMROS: Run Launch File` | Execute launch file via `ros2 launch` | Launch file |
+| `RAMROS: Launch RVIZ2` | Launch `rviz2` in a sourced terminal | ROS2 Tools |
+| `RAMROS: Launch rqt_graph` | Launch `rqt_graph` in a sourced terminal | ROS2 Tools |
 | `RAMROS: Bag: Start Recording` | Begin bag recording | Bag Files folder |
-| `RAMROS: Bag: Select File` | Select bag file for playback | Bag Files folder |
+| `RAMROS: Bag: Pause/Resume Recording` | Pause or resume the active recording | During recording |
+| `RAMROS: Bag: Stop Recording` | Stop the active recording | During recording |
+| `RAMROS: Bag: Select File` | Select bag file for playback and show info | Bag Files folder |
 | `RAMROS: Bag: Play/Pause` | Toggle playback | Selected bag |
 | `RAMROS: Bag: Stop` | Stop playback and close terminal | During playback |
 | `RAMROS: Bag: Toggle Loop` | Enable/disable loop mode | During playback |
-| `RAMROS: Bag: View Info` | Show bag file information | Selected bag |
+| `RAMROS: Live: Refresh` | Refresh the ROS2 Live view | Live view title |
+| `RAMROS: Live: Settings` | Open ROS2 Live view settings | Live view title |
 
 ### 🎯 Additional Capabilities
 
@@ -210,9 +218,12 @@ Access commands from tree view context menu or command palette (`Ctrl+Shift+P`):
 
 #### Configuration
 No configuration required for basic usage. Optional settings:
-- Live view refresh rate (1-60 seconds)
-- Hide/show system topics in live view
-- Cache duration settings
+- `ramros.liveView.refreshRate` — Live view refresh rate (1-60 seconds)
+- `ramros.liveView.hideSystemTopics` — Hide/show system topics in live view
+- `ramros.cache.ttlSeconds` — Cache time-to-live (1-3600 seconds)
+- `ramros.cache.maxEntries` — Maximum cache entries before LRU eviction (1-10000)
+- `ramros.launchGenerator.defaultLocation` — Default location for generated launch files
+- `ramros.launchGenerator.customPath` — Custom launch-file path (uses `{workspace}` / `{package}` placeholders)
 
 ## Requirements
 
@@ -228,14 +239,16 @@ src/
 │   ├── workspace-detector.ts  # Workspace discovery & validation
 │   ├── package-discovery.ts   # Package/node/interface static analysis
 │   ├── duplicate-package-detector.ts # Conflict detection
+│   ├── parameter-coercer.ts   # Parameter type inference/parsing/formatting
 │   └── ros2-cli-service.ts    # Async wrapper for ros2 CLI commands
 ├── cache/                     # Caching layer
 │   └── cache-manager.ts       # TTL + LRU cache with FS invalidation
 ├── executor/                  # Command execution
 │   ├── terminal-manager.ts    # Terminal management
-│   └── bag-session-service.ts # Bag recording/playback state
+│   └── bag-session-service.ts # Bag recording/playback state (singleton)
 ├── wizard/                    # Package & launch file creation
 │   ├── package-creator.ts     # Package/node/interface creation
+│   ├── package-wizard.ts      # Interactive create/add-package UI flows
 │   ├── package-form-validator.ts # Name/email validation
 │   ├── launch-wizard.ts       # Interactive launch file wizard
 │   ├── launch-generator.ts    # Launch file generation
@@ -245,7 +258,12 @@ src/
 │   ├── tree-provider.ts       # Main workspace tree provider
 │   ├── tools-tree-provider.ts # ROS2 tools tree provider
 │   ├── live-tree-provider.ts  # Live ROS2 topic/node monitor
-│   └── tree-items.ts          # Tree item classes
+│   ├── base-tree-item.ts      # Shared TreeItemBase
+│   ├── bag-items.ts           # Bag record/playback tree items
+│   ├── live-items.ts          # Live ROS2 tree items
+│   ├── workspace-items.ts     # Workspace/package/node tree items
+│   ├── conflict-items.ts      # Package conflict tree items
+│   └── category-items.ts      # Category-grouped tree items
 └── extension.ts               # Main entry point
 ```
 

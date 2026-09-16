@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { RosEnvironmentService } from './core/ros-environment';
 import { WorkspaceDetector, WorkspaceInfo } from './core/workspace-detector';
 import { DuplicatePackageDetector } from './core/duplicate-package-detector';
@@ -12,11 +13,11 @@ import { LiveTreeProvider } from './treeview/live-tree-provider';
 import { TerminalManager } from './executor/terminal-manager';
 import { BagSessionService } from './executor/bag-session-service';
 import { PackageCreator } from './wizard/package-creator';
-import { PackageFormValidator } from './wizard/package-form-validator';
-import { collectInterfaceDefinition, InterfaceDefinition } from './wizard/interface-collector';
 import { NodeInfo, LaunchFileInfo, PackageDiscoveryService, PackageInfo } from './core/package-discovery';
-import { TreeItemBase, BagPlayItem, BagPlayControlItem, BagLoopItem, BagRecordItem, BagFilesFolderItem } from './treeview/tree-items';
+import { TreeItemBase } from './treeview/base-tree-item';
+import { BagPlayItem, BagPlayControlItem, BagLoopItem, BagRecordItem, BagFilesFolderItem } from './treeview/bag-items';
 import { LaunchWizard } from './wizard/launch-wizard';
+import { runCreatePackageWizard, runAddToPackageWizard } from './wizard/package-wizard';
 
 let cacheManager: CacheManager;
 let terminalManager: TerminalManager;
@@ -25,6 +26,8 @@ let toolsTreeProvider: ToolsTreeProvider;
 let liveTreeProvider: LiveTreeProvider;
 let packageCreator: PackageCreator;
 let bagSession: BagSessionService;
+
+const execAsync = promisify(exec);
 
 async function pickWorkspace(): Promise<WorkspaceInfo | undefined> {
   const workspaces = treeProvider.getWorkspaces();
@@ -48,10 +51,10 @@ async function pickWorkspace(): Promise<WorkspaceInfo | undefined> {
   return workspaces.find(w => w.name === selected);
 }
 
-function executeCommandAndGetOutput(command: string): string[] {
+async function executeCommandAndGetOutput(command: string): Promise<string[]> {
   try {
-    const output = execSync(command, { encoding: 'utf-8' });
-    return output.split('\n').filter(line => line.trim().length > 0);
+    const { stdout } = await execAsync(command, { encoding: 'utf-8' });
+    return stdout.split('\n').filter(line => line.trim().length > 0);
   } catch (error) {
     console.error(`Failed to execute command: ${command}`, error);
     return [];
@@ -59,7 +62,7 @@ function executeCommandAndGetOutput(command: string): string[] {
 }
 
 async function discoverTopics(): Promise<string[]> {
-  const topics = executeCommandAndGetOutput('ros2 topic list');
+  const topics = await executeCommandAndGetOutput('ros2 topic list');
   return topics;
 }
 
@@ -84,7 +87,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const duplicateDetector = new DuplicatePackageDetector(cacheManager);
   
    terminalManager = new TerminalManager();
-   bagSession = new BagSessionService();
+   bagSession = BagSessionService.getInstance();
    
    treeProvider = new RamrosTreeProvider(workspaceDetector, duplicateDetector, packageDiscovery);
   toolsTreeProvider = new ToolsTreeProvider();
@@ -247,194 +250,11 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
       
-      const validator = new PackageFormValidator();
-      const workspaceRoot = await vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      
-      if (!workspaceRoot) {
-        void vscode.window.showErrorMessage('Please open a folder in VSCode first');
-        return;
-      }
-      
-      const packageName = await vscode.window.showInputBox({
-        prompt: 'Enter package name',
-        placeHolder: 'my_package',
-        validateInput: (value) => {
-          const existingPackages = treeProvider.getWorkspaces().flatMap(w => w.name);
-          const result = validator.validatePackageName(value || '', existingPackages);
-          return result.isValid ? null : result.errors.join(', ');
-        }
+      await runCreatePackageWizard({
+        packageCreator,
+        getWorkspaces: () => treeProvider.getWorkspaces(),
+        refresh: () => treeProvider.refresh(),
       });
-      
-      if (!packageName) return;
-      
-      const packageTypePick = await vscode.window.showQuickPick(
-        [
-          { label: 'python', description: 'Python package with minimal node', detail: 'Creates ament_python package' },
-          { label: 'cpp', description: 'C++ package with minimal node', detail: 'Creates ament_cmake package' },
-          { label: 'cpp-python', description: 'Package with both C++ and Python nodes', detail: 'Creates ament_cmake package' },
-          { label: 'interface', description: 'Interface package for messages, services, or actions', detail: 'Creates interface package' }
-        ],
-        { placeHolder: 'Select package type' }
-      );
-      
-      if (!packageTypePick) return;
-      const packageType = packageTypePick.label;
-      
-      let template: 'empty' | 'minimal-cpp' | 'minimal-python' | 'standard' | 'interface';
-      switch (packageType) {
-        case 'python':
-          template = 'minimal-python';
-          break;
-        case 'cpp':
-          template = 'minimal-cpp';
-          break;
-        case 'cpp-python':
-          template = 'standard';
-          break;
-        case 'interface':
-          template = 'interface';
-          break;
-        default:
-          template = 'minimal-python';
-      }
-      
-      const description = await vscode.window.showInputBox({
-        prompt: 'Enter package description',
-        value: template === 'interface' ? 'Interface package for ROS2 messages, services, and actions' : 'A ROS2 package'
-      }) || '';
-      
-      const authorName = await vscode.window.showInputBox({
-        prompt: 'Enter author name',
-        placeHolder: 'Your Name',
-        value: ''
-      }) || '';
-
-      const authorEmail = await vscode.window.showInputBox({
-        prompt: 'Enter author email',
-        placeHolder: 'your.email@example.com',
-        value: ''
-      }) || '';
-      
-      const license = await vscode.window.showQuickPick(
-        ['Apache-2.0', 'MIT', 'BSD-2-Clause', 'BSD-3-Clause', 'GPL-3.0'],
-        { placeHolder: 'Select license' }
-      ) || 'Apache-2.0';
-      
-      let buildType: 'ament_cmake' | 'ament_python' | 'cmake' = 'ament_cmake';
-      if (packageType === 'python') {
-        buildType = 'ament_python';
-      } else if (packageType === 'cpp' || packageType === 'cpp-python') {
-        buildType = 'ament_cmake';
-      } else if (packageType === 'interface') {
-        buildType = 'ament_cmake';
-      }
-      
-      let nodeName: string | undefined;
-      let includeTemplateNode: boolean | undefined;
-      
-      if (packageType !== 'interface') {
-        nodeName = await vscode.window.showInputBox({
-          prompt: 'Enter node name',
-          value: packageName
-        });
-        
-        if (packageType === 'python' || packageType === 'cpp' || packageType === 'cpp-python') {
-          const includeNodeChoice = await vscode.window.showQuickPick(
-            [
-              { label: 'yes', description: 'Create package with template node implementation' },
-              { label: 'no', description: 'Create empty package without node' }
-            ],
-            { placeHolder: 'Include template node implementation?' }
-          );
-          includeTemplateNode = includeNodeChoice?.label === 'yes';
-        }
-      }
-      
-      let defaultDeps: string[] = [];
-      if (packageType === 'cpp' || packageType === 'cpp-python' || packageType === 'standard') {
-        defaultDeps = ['rclcpp', 'std_msgs'];
-      } else if (packageType === 'python') {
-        defaultDeps = ['rclpy', 'std_msgs'];
-      }
-      
-      const depsInput = await vscode.window.showInputBox({
-        prompt: 'Enter additional dependencies (comma-separated)',
-        placeHolder: template === 'interface' ? 'std_msgs, geometry_msgs' : defaultDeps.join(', '),
-        value: defaultDeps.join(', ')
-      });
-      
-      const dependencies = depsInput && depsInput.trim().length > 0
-        ? depsInput.split(',').map((d: string) => d.trim()).filter((d: string) => d.length > 0)
-        : defaultDeps;
-      
-      try {
-        const workspaces = treeProvider.getWorkspaces();
-        if (workspaces.length === 0) {
-          throw new Error('No workspace found. Please open a folder in VSCode first.');
-        }
-        
-        const targetWorkspace = workspaces[0];
-        const srcPath = path.join(targetWorkspace.rootPath.fsPath, 'src');
-        
-        if (!fs.existsSync(srcPath)) {
-          fs.mkdirSync(srcPath, { recursive: true });
-        }
-        
-        let interfaces: InterfaceDefinition[] | undefined;
-        
-        if (template === 'interface') {
-          interfaces = [];
-          
-          let shouldContinue = true;
-          while (shouldContinue) {
-            try {
-              const result = await collectInterfaceDefinition();
-              if (result) {
-                interfaces.push(result);
-                const ext = result.type === 'message' ? '.msg' : result.type === 'service' ? '.srv' : '.action';
-                void vscode.window.showInformationMessage(`Created ${result.type} '${result.name}${ext}'`);
-                
-                const continueChoice = await vscode.window.showQuickPick([
-                  { label: 'add_another', description: 'Add another interface' },
-                  { label: 'finish', description: 'Finish and create package' }
-                ], {
-                  placeHolder: 'What would you like to do next?'
-                });
-                shouldContinue = continueChoice?.label === 'add_another';
-              } else {
-                shouldContinue = false;
-              }
-            } catch (error: unknown) {
-              const message = error instanceof Error ? error.message : String(error);
-              void vscode.window.showErrorMessage(`Error adding interface: ${message}`);
-              break;
-            }
-          }
-          
-          if (interfaces.length === 0) {
-            void vscode.window.showWarningMessage('No interfaces defined. Creating empty interface package.');
-          }
-        }
-        
-        await packageCreator.createPackage(targetWorkspace.rootPath.fsPath, {
-          packageName,
-          description,
-          authorName,
-          authorEmail,
-          license,
-          buildType,
-          template: template as 'empty' | 'minimal-cpp' | 'minimal-python' | 'standard' | 'interface',
-          nodeName,
-          dependencies,
-          interfaces,
-          includeTemplateNode,
-        });
-        await treeProvider.refresh();
-        void vscode.window.showInformationMessage(`Package '${packageName}' created successfully!`);
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        void vscode.window.showErrorMessage(`Failed to create package: ${message}`);
-      }
     }),
     
     vscode.commands.registerCommand('ramros.buildPackage', async (treeItem?: TreeItemBase) => {
@@ -750,114 +570,10 @@ export async function activate(context: vscode.ExtensionContext) {
       
       if (!selectedPackage) return;
       
-      const addType = await vscode.window.showQuickPick([
-        { label: 'node', description: 'Add a new node (C++ or Python)' },
-        { label: 'interface', description: 'Add a new interface (msg/srv/action)' }
-      ], {
-        placeHolder: 'What would you like to add?'
+      await runAddToPackageWizard(selectedPackage, {
+        packageCreator,
+        refresh: () => treeProvider.refresh(),
       });
-      
-      if (!addType) return;
-      
-      if (addType.label === 'interface') {
-        const result = await collectInterfaceDefinition();
-        
-        if (!result) return;
-        
-        try {
-          await packageCreator.addInterfaceToPackage(
-            selectedPackage.path,
-            selectedPackage.name,
-            result
-          );
-          await treeProvider.refresh();
-          void vscode.window.showInformationMessage(`Interface '${result.name}' added to package '${selectedPackage.name}'`);
-          void vscode.window.showInformationMessage('Build workspace to compile');
-        } catch (error: unknown) {
-          const message = error instanceof Error ? error.message : 'Unknown error';
-          void vscode.window.showErrorMessage(`Failed to add interface: ${message}`);
-        }
-        
-        return;
-      }
-      
-      const isCppPackage = selectedPackage.packageType === 'cpp' || selectedPackage.packageType === 'mixed';
-      const isPythonPackage = selectedPackage.packageType === 'python' || selectedPackage.packageType === 'mixed';
-      const validator = new PackageFormValidator();
-      
-      let languageChoices: { label: string; description: string }[] = [];
-      if (isCppPackage && isPythonPackage) {
-        languageChoices = [
-          { label: 'cpp', description: 'C++ node' },
-          { label: 'python', description: 'Python node' }
-        ];
-      } else if (isCppPackage) {
-        languageChoices = [{ label: 'cpp', description: 'C++ node' }];
-      } else if (isPythonPackage) {
-        languageChoices = [{ label: 'python', description: 'Python node' }];
-      }
-      
-      if (languageChoices.length === 0) {
-        void vscode.window.showErrorMessage('Package type not recognized');
-        return;
-      }
-      
-      const languagePick = languageChoices.length === 1 
-        ? languageChoices[0]
-        : await vscode.window.showQuickPick(languageChoices, {
-            placeHolder: 'Select node language'
-          });
-      
-      if (!languagePick) return;
-      
-      const nodeName = await vscode.window.showInputBox({
-        prompt: 'Enter node name',
-        placeHolder: 'my_node',
-        validateInput: (value) => validator.validateNodeNameInput(value)
-      });
-      
-      if (!nodeName) return;
-      
-      const includeTemplate = await vscode.window.showQuickPick([
-        { label: 'yes', description: 'Create node with template implementation' },
-        { label: 'no', description: 'Create empty node file' }
-      ], {
-        placeHolder: 'Include template node implementation?'
-      });
-      
-      const useTemplate = includeTemplate?.label === 'yes';
-      
-      let defaultDeps: string[] = [];
-      if (languagePick.label === 'cpp') {
-        defaultDeps = ['rclcpp', 'std_msgs'];
-      } else {
-        defaultDeps = ['rclpy', 'std_msgs'];
-      }
-      
-      const depsInput = await vscode.window.showInputBox({
-        prompt: 'Enter additional dependencies (comma-separated)',
-        placeHolder: defaultDeps.join(', '),
-        value: defaultDeps.join(', ')
-      });
-      
-      const dependencies = depsInput && depsInput.trim().length > 0
-        ? depsInput.split(',').map((d: string) => d.trim()).filter((d: string) => d.length > 0)
-        : defaultDeps;
-      
-      try {
-        await packageCreator.addNodeToPackage(selectedPackage.path, selectedPackage.name, {
-          nodeType: languagePick.label as 'cpp' | 'python',
-          nodeName,
-          includeTemplateNode: useTemplate,
-          dependencies
-        });
-        await treeProvider.refresh();
-        void vscode.window.showInformationMessage(`Node '${nodeName}' added to package '${selectedPackage.name}'`);
-        void vscode.window.showInformationMessage('Build workspace to compile');
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        void vscode.window.showErrorMessage(`Failed to add node: ${message}`);
-      }
     }),
     
     vscode.commands.registerCommand('ramros.launchTool.rviz2', async () => {
@@ -944,10 +660,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       
       // Show the terminal first to ensure it can receive input
-      recordingTerminal.show(true);
-      
-      // Small delay to ensure terminal is focused
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await terminalManager.focusAndWait(recordingTerminal);
       
       // Send space key to toggle pause/resume in ros2 bag record
       // Send as raw keystroke (shouldExecute=false means don't add newline)
@@ -1010,7 +723,7 @@ export async function activate(context: vscode.ExtensionContext) {
       
       // Get bag info
       try {
-        const bagInfoOutput = execSync(`ros2 bag info "${bagPath}"`, { encoding: 'utf-8' });
+        const { stdout: bagInfoOutput } = await execAsync(`ros2 bag info "${bagPath}"`, { encoding: 'utf-8' });
         
         // Filter out "closing." lines from the output
         const filteredOutput = bagInfoOutput.split('\n').filter(line => !line.includes('closing.')).join('\n');
@@ -1041,10 +754,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const playbackTerminal = bagSession.playbackTerminal;
       if (playbackTerminal) {
         // Show the terminal first to ensure it can receive input
-        playbackTerminal.show(true);
-        
-        // Small delay to ensure terminal is focused
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await terminalManager.focusAndWait(playbackTerminal);
         
         // Toggle pause - send space key to ros2 bag play
         playbackTerminal.sendText(' ', false);
@@ -1081,15 +791,14 @@ export async function activate(context: vscode.ExtensionContext) {
         if (bagPath && isLooping) {
           const workspace = await pickWorkspace();
           if (workspace) {
-            setTimeout(async () => {
-              const loopArg = '--loop';
-              const playCommand = `script -q -c 'ros2 bag play "${bagPath}" ${loopArg}' /dev/null`;
-              const newTerminal = await terminalManager.executeInNewTerminal(playCommand, workspace, `Bag Play: ${path.basename(bagPath)}`);
-              bagSession.setPlaybackTerminal(newTerminal);
-              BagPlayControlItem.setPlayingState(true, false);
-              
-              await toolsTreeProvider.refresh();
-            }, 500);
+            await terminalManager.waitForRestart();
+            const loopArg = '--loop';
+            const playCommand = `script -q -c 'ros2 bag play "${bagPath}" ${loopArg}' /dev/null`;
+            const newTerminal = await terminalManager.executeInNewTerminal(playCommand, workspace, `Bag Play: ${path.basename(bagPath)}`);
+            bagSession.setPlaybackTerminal(newTerminal);
+            BagPlayControlItem.setPlayingState(true, false);
+
+            await toolsTreeProvider.refresh();
           }
         }
       }

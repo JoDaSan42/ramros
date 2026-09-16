@@ -2,7 +2,10 @@ import * as vscode from 'vscode';
 import { WorkspaceInfo, WorkspaceDetector } from '../core/workspace-detector';
 import { DuplicatePackageDetector, PackageConflict } from '../core/duplicate-package-detector';
 import { PackageDiscoveryService } from '../core/package-discovery';
-import { TreeItemBase, WorkspaceRootItem, ConflictsItem, CategoryNodesFolderItem, CategoryInterfacesFolderItem, CategoryLaunchFilesFolderItem } from './tree-items';
+import { TreeItemBase } from './base-tree-item';
+import { WorkspaceRootItem } from './workspace-items';
+import { ConflictsItem } from './conflict-items';
+import { CategoryNodesFolderItem, CategoryInterfacesFolderItem, CategoryLaunchFilesFolderItem } from './category-items';
 
 export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   private _onDidChangeTreeData: vscode.EventEmitter<TreeItemBase | undefined | null | void> = new vscode.EventEmitter();
@@ -12,7 +15,9 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
   private conflicts: PackageConflict[] = [];
   private packageDiscovery: PackageDiscoveryService;
   private autoRefreshInterval: NodeJS.Timeout | undefined;
-  private readonly AUTO_REFRESH_MS = 3000;
+  // Fallback poll only: primary refresh is driven by file-system events.
+  // 0 (or negative) disables the fallback entirely.
+  private readonly FALLBACK_REFRESH_MS = 30000;
   private readonly fileWatchers: vscode.FileSystemWatcher[] = [];
   private refreshDebounceTimer: NodeJS.Timeout | undefined;
   private readonly DEBOUNCE_MS = 300;
@@ -44,9 +49,12 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
   }
   
   private startAutoRefresh(): void {
+    if (this.FALLBACK_REFRESH_MS <= 0) {
+      return;
+    }
     this.autoRefreshInterval = setInterval(() => {
       void this.loadWorkspacesSilent();
-    }, this.AUTO_REFRESH_MS);
+    }, this.FALLBACK_REFRESH_MS);
   }
   
   private async loadWorkspacesSilent(): Promise<void> {
@@ -111,24 +119,38 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
   private setupFileWatcher(): void {
     const workspaceFolders = vscode.workspace.workspaceFolders || [];
     if (workspaceFolders.length === 0) return;
-    
+
+    const patterns = [
+      'src/**/package.xml',
+      'src/**/CMakeLists.txt',
+      'src/**/setup.py',
+      'src/**/*.msg',
+      'src/**/*.srv',
+      'src/**/*.action',
+      'src/**/*.launch.py',
+      'src/**/*.launch.xml',
+    ];
+
+    const debouncedRefresh = (): void => {
+      if (this.refreshDebounceTimer) {
+        clearTimeout(this.refreshDebounceTimer);
+      }
+      this.refreshDebounceTimer = setTimeout(() => {
+        void this.refresh();
+      }, this.DEBOUNCE_MS);
+    };
+
     for (const folder of workspaceFolders) {
-      const srcPattern = new vscode.RelativePattern(folder, 'src/**/package.xml');
-      const watcher = vscode.workspace.createFileSystemWatcher(srcPattern);
-      this.fileWatchers.push(watcher);
-      
-      const debouncedRefresh = (): void => {
-        if (this.refreshDebounceTimer) {
-          clearTimeout(this.refreshDebounceTimer);
-        }
-        this.refreshDebounceTimer = setTimeout(() => {
-          void this.refresh();
-        }, this.DEBOUNCE_MS);
-      };
-      
-      watcher.onDidCreate(debouncedRefresh);
-      watcher.onDidDelete(debouncedRefresh);
-      watcher.onDidChange(debouncedRefresh);
+      for (const pattern of patterns) {
+        const watcher = vscode.workspace.createFileSystemWatcher(
+          new vscode.RelativePattern(folder, pattern)
+        );
+        this.fileWatchers.push(watcher);
+
+        watcher.onDidCreate(debouncedRefresh);
+        watcher.onDidDelete(debouncedRefresh);
+        watcher.onDidChange(debouncedRefresh);
+      }
     }
   }
   

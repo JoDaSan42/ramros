@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { TreeItemBase, ToolsFolderItem, BagRecordItem, BagFilesFolderItem } from './tree-items';
+import { TreeItemBase } from './base-tree-item';
+import { ToolsFolderItem, BagRecordItem, BagFilesFolderItem } from './bag-items';
 
 export class ToolsTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   private _onDidChangeTreeData: vscode.EventEmitter<TreeItemBase | undefined | null | void> = new vscode.EventEmitter();

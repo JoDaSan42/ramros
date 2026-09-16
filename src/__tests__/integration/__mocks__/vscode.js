@@ -11,7 +11,12 @@ module.exports = {
       dispose: jest.fn()
     }),
     getWorkspaceFolder: jest.fn().mockReturnValue(null),
-    updateWorkspaceFolders: jest.fn()
+    updateWorkspaceFolders: jest.fn(),
+    getConfiguration: jest.fn().mockReturnValue({
+      get: jest.fn((_key, defaultValue) => defaultValue)
+    }),
+    onDidChangeConfiguration: jest.fn().mockReturnValue({ dispose: jest.fn() }),
+    onDidChangeWorkspaceFolders: jest.fn().mockReturnValue({ dispose: jest.fn() })
   },
   window: {
     createTerminal: jest.fn((options) => {
@@ -26,10 +31,26 @@ module.exports = {
     }),
     showWarningMessage: jest.fn(),
     showInformationMessage: jest.fn(),
-    showQuickPick: jest.fn()
+    showErrorMessage: jest.fn(),
+    showQuickPick: jest.fn(),
+    showInputBox: jest.fn(),
+    showOpenDialog: jest.fn(),
+    withProgress: jest.fn(),
+    createTreeView: jest.fn()
   },
+  commands: {
+    registerCommand: jest.fn(),
+    executeCommand: jest.fn()
+  },
+  debug: {
+    startDebugging: jest.fn()
+  },
+  ProgressLocation: { Notification: 15 },
   TreeItem: class TreeItem {
-    constructor(_label, _collapsibleState) {}
+    constructor(label, collapsibleState) {
+      this.label = label;
+      this.collapsibleState = collapsibleState;
+    }
   },
   TreeItemCollapsibleState: {
     None: 0,
@@ -49,7 +70,7 @@ module.exports = {
     constructor(_baseUriOrWorkspaceFolder, _path) {}
   },
   Uri: {
-    file: (path) => ({ fsPath: path, path }),
+    file: (p) => ({ fsPath: p, path: p }),
     joinPath: (uri, ...paths) => {
       const path = require('path');
       return { fsPath: path.join(uri.fsPath, ...paths) };
@@ -64,5 +85,6 @@ module.exports = {
   EventEmitter: class EventEmitter {
     event = jest.fn();
     fire = jest.fn();
+    dispose = jest.fn();
   }
 };

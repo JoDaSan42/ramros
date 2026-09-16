@@ -1,13 +1,12 @@
 import * as path from 'path';
 import * as glob from 'glob';
+import Mocha from 'mocha';
 
 export function run(): Promise<void> {
   const testsRoot = path.resolve(__dirname);
   
   return new Promise((c, e) => {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const Mocha = require('mocha');
       const mocha = new Mocha({
         ui: 'tdd',
         timeout: 60000,

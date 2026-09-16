@@ -1,8 +1,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import * as vscode from 'vscode';
 import { CacheManager } from '../cache/cache-manager';
+import { ParameterCoercer } from './parameter-coercer';
+
+const execAsync = promisify(exec);
 
 export interface PackageInfo {
   name: string;
@@ -108,11 +112,11 @@ export class PackageDiscoveryService {
 
     try {
       // Get all installed package names
-      const pkgListOutput = execSync('ros2 pkg list', { encoding: 'utf-8' });
+      const { stdout: pkgListOutput } = await execAsync('ros2 pkg list', { encoding: 'utf-8' });
       const packageNames = pkgListOutput.split('\n').filter(line => line.trim().length > 0);
 
       // Get all executables with their package names
-      const executablesOutput = execSync('ros2 pkg executables', { encoding: 'utf-8' });
+      const { stdout: executablesOutput } = await execAsync('ros2 pkg executables', { encoding: 'utf-8' });
       const executableLines = executablesOutput.split('\n').filter(line => line.trim().length > 0);
       
       // Map: packageName -> [executable1, executable2, ...]
@@ -136,7 +140,8 @@ export class PackageDiscoveryService {
       for (const pkgName of packageNames) {
         try {
           // Try to get package path via ros2 pkg prefix
-          const prefixOutput = execSync(`ros2 pkg prefix ${pkgName}`, { encoding: 'utf-8' }).trim();
+          const { stdout: prefixStdout } = await execAsync(`ros2 pkg prefix ${pkgName}`, { encoding: 'utf-8' });
+          const prefixOutput = prefixStdout.trim();
           
           const installPath = prefixOutput;
           const sharePath = path.join(installPath, 'share', pkgName);
@@ -145,11 +150,12 @@ export class PackageDiscoveryService {
           const executables = packageExecutables.get(pkgName) || [];
           
           for (const exe of executables) {
+            const exePath = path.join(installPath, 'lib', pkgName, exe);
             nodes.push({
               name: exe,
-              path: path.join(installPath, 'lib', pkgName, exe),
+              path: exePath,
               packageName: pkgName,
-              language: this.detectExecutableLanguage(path.join(installPath, 'lib', pkgName, exe)),
+              language: await this.detectExecutableLanguage(exePath),
               isExecutable: true,
               parameters: [], // No parameter extraction for installed packages in Phase 1
             });
@@ -189,13 +195,13 @@ export class PackageDiscoveryService {
     }
   }
 
-  private detectExecutableLanguage(executablePath: string): 'cpp' | 'python' {
+  private async detectExecutableLanguage(executablePath: string): Promise<'cpp' | 'python'> {
     if (!fs.existsSync(executablePath)) {
       return 'cpp';
     }
 
     try {
-      const fileOutput = execSync(`file "${executablePath}"`, { encoding: 'utf-8' });
+      const { stdout: fileOutput } = await execAsync(`file "${executablePath}"`, { encoding: 'utf-8' });
       
       if (fileOutput.includes('Python') || fileOutput.includes('script')) {
         return 'python';
@@ -209,7 +215,7 @@ export class PackageDiscoveryService {
         return 'python';
       }
 
-      const firstLine = fs.readFileSync(executablePath, 'utf-8').split('\n')[0];
+      const firstLine = (await fs.promises.readFile(executablePath, 'utf-8')).split('\n')[0];
       if (firstLine.includes('python')) {
         return 'python';
       }
@@ -352,9 +358,21 @@ export class PackageDiscoveryService {
   }
 
   private extractXmlTag(content: string, tagName: string): string | null {
-    const regex = new RegExp(`<${tagName}[^>]*>([^<]*)</${tagName}>`, 'i');
-    const match = content.match(regex);
-    return match ? match[1].trim() : null;
+    // Strip XML comments so tag-like content inside them is ignored.
+    const withoutComments = content.replace(/<!--[\s\S]*?-->/g, '');
+    const regex = new RegExp(`<${tagName}(?:\\s[^>]*)?>([\\s\\S]*?)</${tagName}>`, 'i');
+    const match = withoutComments.match(regex);
+    if (!match) return null;
+
+    let value = match[1];
+    // Unwrap CDATA sections.
+    const cdataMatch = value.match(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/);
+    if (cdataMatch) {
+      value = cdataMatch[1];
+    }
+    // Strip any nested tags, then trim.
+    value = value.replace(/<[^>]*>/g, '').trim();
+    return value.length > 0 ? value : null;
   }
 
   private extractMaintainers(content: string): Array<{ name: string; email: string }> {
@@ -566,17 +584,6 @@ export class PackageDiscoveryService {
     return null;
   }
 
-  private inferParamType(defaultValue: string | undefined): string {
-    if (!defaultValue) return 'unspecified';
-    const trimmed = defaultValue.trim();
-    if (trimmed === 'true' || trimmed === 'false') return 'bool';
-    if (/^-?\d+$/.test(trimmed)) return 'int';
-    if (/^-?\d+\.\d+$/.test(trimmed)) return 'double';
-    if (trimmed.startsWith("'") || trimmed.startsWith('"')) return 'string';
-    if (trimmed.startsWith('[')) return 'list';
-    return 'string';
-  }
-
   private async analyzeCppNode(filePath: string): Promise<Partial<NodeInfo>> {
     if (!fs.existsSync(filePath)) {
       return {};
@@ -614,7 +621,7 @@ export class PackageDiscoveryService {
       
       if (rawDefault) {
         defaultValue = rawDefault.replace(/^["']|["']$/g, '');
-        paramType = this.inferParamType(rawDefault);
+        paramType = ParameterCoercer.inferType(rawDefault);
       }
       
       parameters.push({
@@ -733,7 +740,7 @@ export class PackageDiscoveryService {
         if (defaultValue.startsWith("'") || defaultValue.startsWith('"')) {
           defaultValue = defaultValue.slice(1, -1);
         }
-        paramType = this.inferParamType(rawDefault);
+        paramType = ParameterCoercer.inferType(rawDefault);
       }
       
       parameters.push({

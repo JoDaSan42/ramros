@@ -1,7 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
-import { ParameterCoercer, ParameterValue } from './build-file-patcher';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import { ParameterCoercer, ParameterValue } from '../core/parameter-coercer';
+
+const execAsync = promisify(exec);
 
 export interface LaunchArgumentConfig {
   name: string;
@@ -146,8 +149,7 @@ export class LaunchGenerator {
 
   async validate(filePath: string): Promise<boolean> {
     try {
-      execSync(`ros2 launch --check ${filePath}`, { 
-        stdio: 'pipe',
+      await execAsync(`ros2 launch --check ${filePath}`, {
         encoding: 'utf-8'
       });
       return true;

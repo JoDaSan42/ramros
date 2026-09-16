@@ -9,8 +9,27 @@ export interface BuildOptions {
   packageName?: string;
 }
 
+// Terminal focus/restart is asynchronous in VSCode; these short settles let the
+// integrated terminal acquire input focus (for raw keystrokes) or finish
+// tearing down before a replacement is spawned.
+const TERMINAL_FOCUS_SETTLE_MS = 100;
+const TERMINAL_RESTART_SETTLE_MS = 500;
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export class TerminalManager implements vscode.Disposable {
   private readonly terminals = new Map<string, vscode.Terminal>();
+
+  async focusAndWait(terminal: vscode.Terminal): Promise<void> {
+    terminal.show(true);
+    await delay(TERMINAL_FOCUS_SETTLE_MS);
+  }
+
+  waitForRestart(): Promise<void> {
+    return delay(TERMINAL_RESTART_SETTLE_MS);
+  }
   
   async sourceWorkspace(workspace: WorkspaceInfo): Promise<void> {
     if (!workspace.installPath) {
