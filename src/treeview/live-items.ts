@@ -103,12 +103,17 @@ export class NodeSubscribedTopicsItem extends TreeItemBase {
 }
 
 export class TopicReferenceItem extends TreeItemBase {
-  constructor(topicName: string, type: 'publisher' | 'subscriber') {
+  constructor(private readonly topicName: string, type: 'publisher' | 'subscriber') {
     super(topicName, vscode.TreeItemCollapsibleState.None);
     this.iconPath = new vscode.ThemeIcon(
       type === 'publisher' ? 'arrow-up' : 'arrow-down',
       type === 'publisher' ? new vscode.ThemeColor('charts.green') : new vscode.ThemeColor('charts.blue')
     );
+    this.contextValue = 'topicReference';
+  }
+  
+  getTopicName(): string {
+    return this.topicName;
   }
   
   async getChildren(): Promise<TreeItemBase[]> {

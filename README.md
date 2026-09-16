@@ -194,6 +194,8 @@ Access commands from tree view context menu or command palette (`Ctrl+Shift+P`):
 | `RAMROS: Bag: Toggle Loop` | Enable/disable loop mode | During playback |
 | `RAMROS: Live: Refresh` | Refresh the ROS2 Live view | Live view title |
 | `RAMROS: Live: Settings` | Open ROS2 Live view settings | Live view title |
+| `RAMROS: Live: Echo Topic` | Run `ros2 topic echo` for the selected topic | Live topic |
+| `RAMROS: Live: Measure Topic Frequency` | Run `ros2 topic hz` for the selected topic | Live topic |
 
 ### 🎯 Additional Capabilities
 

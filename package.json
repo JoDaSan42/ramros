@@ -159,6 +159,16 @@
         "icon": "$(gear)"
       },
       {
+        "command": "ramros.live.echoTopic",
+        "title": "Echo Topic",
+        "icon": "$(megaphone)"
+      },
+      {
+        "command": "ramros.live.hzTopic",
+        "title": "Measure Topic Frequency",
+        "icon": "$(pulse)"
+      },
+      {
         "command": "ramros.createLaunchFile",
         "title": "Create Launch File",
         "icon": "$(rocket)"
@@ -185,6 +195,11 @@
           "command": "ramros.live.refresh",
           "when": "view == ramrosLive",
           "group": "navigation@2"
+        },
+        {
+          "command": "ramros.launchTool.rqt_graph",
+          "when": "view == ramrosLive",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -363,6 +378,24 @@
           "command": "ramros.bag.stopRecording",
           "when": "view == ramrosTools && viewItem == bagStopRecording",
           "group": "inline@1"
+        },
+        {
+          "command": "ramros.live.echoTopic",
+          "when": "view == ramrosLive && viewItem == liveTopic",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.live.hzTopic",
+          "when": "view == ramrosLive && viewItem == liveTopic",
+          "group": "inline@2"
+        },
+        {
+          "command": "ramros.live.echoTopic",
+          "when": "view == ramrosLive && viewItem == topicReference"
+        },
+        {
+          "command": "ramros.live.hzTopic",
+          "when": "view == ramrosLive && viewItem == topicReference"
         }
       ]
     },

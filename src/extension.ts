@@ -51,6 +51,25 @@ async function pickWorkspace(): Promise<WorkspaceInfo | undefined> {
   return workspaces.find(w => w.name === selected);
 }
 
+function resolveTopicName(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {
+  const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
+  if (item && 'getTopicName' in item && typeof (item as { getTopicName?: unknown }).getTopicName === 'function') {
+    return (item as unknown as { getTopicName: () => string }).getTopicName();
+  }
+  return undefined;
+}
+
+async function pickTopic(): Promise<string | undefined> {
+  const topics = await executeCommandAndGetOutput('ros2 topic list');
+  if (topics.length === 0) {
+    void vscode.window.showWarningMessage('No ROS2 topics available');
+    return undefined;
+  }
+  return vscode.window.showQuickPick(topics, {
+    placeHolder: 'Select a topic'
+  });
+}
+
 async function executeCommandAndGetOutput(command: string): Promise<string[]> {
   try {
     const { stdout } = await execAsync(command, { encoding: 'utf-8' });
@@ -704,6 +723,26 @@ export async function activate(context: vscode.ExtensionContext) {
     
     vscode.commands.registerCommand('ramros.live.settings', async () => {
       liveTreeProvider.openSettings();
+    }),
+    
+    vscode.commands.registerCommand('ramros.live.echoTopic', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
+      const topicName = resolveTopicName(treeItem) ?? await pickTopic();
+      if (!topicName) return;
+      
+      const workspace = await pickWorkspace();
+      if (!workspace) return;
+      
+      await terminalManager.executeInNewTerminal(`ros2 topic echo "${topicName}"`, workspace, `Echo: ${topicName}`);
+    }),
+    
+    vscode.commands.registerCommand('ramros.live.hzTopic', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
+      const topicName = resolveTopicName(treeItem) ?? await pickTopic();
+      if (!topicName) return;
+      
+      const workspace = await pickWorkspace();
+      if (!workspace) return;
+      
+      await terminalManager.executeInNewTerminal(`ros2 topic hz "${topicName}"`, workspace, `Hz: ${topicName}`);
     }),
     
     vscode.commands.registerCommand('ramros.bag.selectFile', async () => {
