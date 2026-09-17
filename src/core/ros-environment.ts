@@ -9,7 +9,7 @@ export interface RosDistribution {
   isActive: boolean;
 }
 
-const SUPPORTED_DISTROS = ['humble', 'jazzy', 'rolling', 'iron', 'galactic', 'foxy'];
+const SUPPORTED_DISTROS = ['humble', 'jazzy', 'lyrical', 'rolling', 'iron', 'galactic', 'foxy'];
 
 export class RosEnvironmentService {
   private readonly rosRoot = '/opt/ros';

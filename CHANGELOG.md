@@ -5,7 +5,10 @@ All notable changes to RAMROS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.0] - 2026-09-17
+
+### Added
+- **ROS2 Lyrical Support**: Installation detection now recognizes ROS2 Lyrical installations
 
 ### Planned
 - Launch configuration management for ROS2 nodes
@@ -84,4 +87,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date       | Status   |
 |---------|------------|----------|
+| 1.1.0   | 2026-09-17 | Released |
+| 1.0.0   | 2026-04-14 | Released |
 | 0.1.0   | 2026-03-23 | Released |

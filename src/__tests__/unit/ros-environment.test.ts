@@ -55,7 +55,7 @@ describe('RosEnvironmentService', () => {
     });
     
     it('should detect multiple ROS installations', async () => {
-      const distros = ['humble', 'jazzy'];
+      const distros = ['humble', 'jazzy', 'lyrical'];
       
       for (const distro of distros) {
         const distroPath = path.join(mockRosRoot, distro);
@@ -68,8 +68,39 @@ describe('RosEnvironmentService', () => {
       
       const result = await service.detectInstallations();
       
-      expect(result).toHaveLength(2);
-      expect(result.map(r => r.name)).toEqual(['humble', 'jazzy']);
+      expect(result).toHaveLength(3);
+      expect(result.map(r => r.name)).toEqual(['humble', 'jazzy', 'lyrical']);
+    });
+    
+    it('should detect ROS2 Lyrical installation', async () => {
+      const lyricalPath = path.join(mockRosRoot, 'lyrical');
+      const lyricalSetupBash = path.join(lyricalPath, 'setup.bash');
+      fs.mkdirSync(lyricalPath, { recursive: true });
+      fs.writeFileSync(lyricalSetupBash, '#!/bin/bash\nexport ROS_DISTRO_RELEASE="25.10"');
+      
+      const result = await service.detectInstallations();
+      
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
+        name: 'lyrical',
+        installPath: lyricalPath,
+        setupBash: lyricalSetupBash,
+        isActive: false
+      });
+    });
+    
+    it('should mark active lyrical distribution correctly', async () => {
+      const lyricalPath = path.join(mockRosRoot, 'lyrical');
+      fs.mkdirSync(lyricalPath, { recursive: true });
+      fs.writeFileSync(path.join(lyricalPath, 'setup.bash'), '#!/bin/bash');
+      
+      process.env.ROS_DISTRO = 'lyrical';
+      
+      const result = await service.detectInstallations();
+      
+      expect(result).toHaveLength(1);
+      expect(result[0].name).toBe('lyrical');
+      expect(result[0].isActive).toBe(true);
     });
     
     it('should filter unsupported distributions', async () => {

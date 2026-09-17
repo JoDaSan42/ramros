@@ -19,7 +19,7 @@ A VSCode extension for managing ROS2 workspaces efficiently.
 - Node.js 18+
 - npm 9+
 - TypeScript 5+
-- ROS2 installation (Humble, Jazzy, Rolling, Iron, Galactic, or Foxy)
+- ROS2 installation (Humble, Jazzy, Lyrical, Rolling, Iron, Galactic, or Foxy)
 
 ### Setup
 ```bash
@@ -230,7 +230,7 @@ No configuration required for basic usage. Optional settings:
 ## Requirements
 
 - VSCode 1.85.0 or higher
-- ROS2 installation (Humble, Jazzy, Rolling, Iron, Galactic, or Foxy)
+- ROS2 installation (Humble, Jazzy, Lyrical, Rolling, Iron, Galactic, or Foxy)
 
 ## Architecture
 
