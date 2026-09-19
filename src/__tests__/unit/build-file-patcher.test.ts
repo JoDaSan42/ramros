@@ -133,6 +133,7 @@ describe('BuildFilePatcher', () => {
       const content = fs.readFileSync(setupPath, 'utf-8');
       expect(content).toContain("'my_node = my_pkg.my_node:main'");
       expect(content).toContain('existing = pkg.existing:main');
+      expect(content.match(/entry_points/g)).toHaveLength(1);
     });
 
     it('creates console_scripts block when zip_safe exists', () => {
@@ -289,6 +290,55 @@ describe('BuildFilePatcher', () => {
       const content = 'setup(\n    zip_safe=False,\n)\n';
       const updated = BuildFilePatcher.addPythonEntryPointToContent(content, 'my_node', 'my_pkg');
       expect(updated).toContain("'my_node = my_pkg.my_node:main'");
+    });
+
+    it('appends to an existing quoted console_scripts block without adding a second entry_points', () => {
+      const content = `setup(
+    name='my_pkg',
+    zip_safe=True,
+    entry_points={
+        'console_scripts': [
+            'old_node = my_pkg.old_node:main',
+        ],
+    },
+)
+`;
+      const updated = BuildFilePatcher.addPythonEntryPointToContent(content, 'new_node', 'my_pkg');
+
+      expect(updated).toContain("'old_node = my_pkg.old_node:main'");
+      expect(updated).toContain("'new_node = my_pkg.new_node:main'");
+      expect(updated.match(/entry_points/g)).toHaveLength(1);
+      expect(updated.match(/console_scripts/g)).toHaveLength(1);
+    });
+
+    it('handles an empty existing console_scripts list', () => {
+      const content = `setup(
+    zip_safe=True,
+    entry_points={
+        'console_scripts': [
+        ],
+    },
+)
+`;
+      const updated = BuildFilePatcher.addPythonEntryPointToContent(content, 'new_node', 'my_pkg');
+
+      expect(updated).toContain("'new_node = my_pkg.new_node:main'");
+      expect(updated.match(/entry_points/g)).toHaveLength(1);
+      expect(updated.match(/console_scripts/g)).toHaveLength(1);
+    });
+
+    it('does not duplicate when entry already exists in a quoted block', () => {
+      const content = `setup(
+    zip_safe=True,
+    entry_points={
+        'console_scripts': [
+            'new_node = my_pkg.new_node:main',
+        ],
+    },
+)
+`;
+      const updated = BuildFilePatcher.addPythonEntryPointToContent(content, 'new_node', 'my_pkg');
+      expect(updated).toBe(content);
     });
   });
 });

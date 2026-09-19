@@ -30,7 +30,9 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
     enableAutoRefresh: boolean = true
   ) {
     this.packageDiscovery = packageDiscovery || new PackageDiscoveryService();
-    void this.initialize();
+    void this.initialize().catch(error => {
+      console.error('[RAMROS] Failed to initialize workspace tree', error);
+    });
     if (enableAutoRefresh) {
       this.startAutoRefresh();
       this.setupFileWatcher();

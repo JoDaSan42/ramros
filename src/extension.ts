@@ -4,7 +4,7 @@ import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { RosEnvironmentService } from './core/ros-environment';
-import { WorkspaceDetector, WorkspaceInfo } from './core/workspace-detector';
+import { WorkspaceDetector, WorkspaceInfo, findWorkspaceForPath } from './core/workspace-detector';
 import { DuplicatePackageDetector } from './core/duplicate-package-detector';
 import { CacheManager } from './cache/cache-manager';
 import { RamrosTreeProvider } from './treeview/tree-provider';
@@ -49,6 +49,11 @@ async function pickWorkspace(): Promise<WorkspaceInfo | undefined> {
   if (!selected) return undefined;
   
   return workspaces.find(w => w.name === selected);
+}
+
+async function resolveWorkspaceForPath(fsPath: string): Promise<WorkspaceInfo | undefined> {
+  const workspaces = treeProvider.getWorkspaces();
+  return findWorkspaceForPath(workspaces, fsPath) ?? await pickWorkspace();
 }
 
 function resolveTopicName(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {
@@ -283,13 +288,19 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
       
-      const selectedWorkspace = workspaces[0];
       let packageNameToBuild: string | undefined;
+      let packagePath: string | undefined;
       
       if (treeItem && 'getPackageInfo' in treeItem && typeof treeItem.getPackageInfo === 'function') {
         const packageInfo = treeItem.getPackageInfo();
         packageNameToBuild = packageInfo.name;
+        packagePath = packageInfo.path;
       }
+      
+      const selectedWorkspace = packagePath
+        ? await resolveWorkspaceForPath(packagePath)
+        : await pickWorkspace();
+      if (!selectedWorkspace) return;
       
       const buildType = await vscode.window.showQuickPick(
         [
@@ -320,8 +331,6 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
       
-      const selectedWorkspace = workspaces[0];
-      
       let nodeToRun: NodeInfo | undefined;
       
       if (treeItem && 'getNodeInfo' in treeItem && typeof treeItem.getNodeInfo === 'function') {
@@ -348,6 +357,9 @@ export async function activate(context: vscode.ExtensionContext) {
       
       if (!nodeToRun) return;
       
+      const selectedWorkspace = await resolveWorkspaceForPath(nodeToRun.path);
+      if (!selectedWorkspace) return;
+      
       const setupBashPath = path.join(selectedWorkspace.installPath?.fsPath || '', 'setup.bash');
       
       let runCommand: string;
@@ -366,8 +378,6 @@ export async function activate(context: vscode.ExtensionContext) {
         void vscode.window.showWarningMessage('No ROS2 workspaces found');
         return;
       }
-      
-      const selectedWorkspace = workspaces[0];
       
       let nodeToDebug: NodeInfo | undefined;
       
@@ -395,6 +405,9 @@ export async function activate(context: vscode.ExtensionContext) {
       
       if (!nodeToDebug) return;
       
+      const selectedWorkspace = await resolveWorkspaceForPath(nodeToDebug.path);
+      if (!selectedWorkspace) return;
+      
       const debugConfig = {
         type: nodeToDebug.language === 'cpp' ? 'cppdbg' : 'python',
         request: 'launch',
@@ -419,7 +432,6 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
       
-      const selectedWorkspace = workspaces[0];
       let packagePath: string | undefined;
       
       if (treeItem && 'getPackageInfo' in treeItem && typeof treeItem.getPackageInfo === 'function') {
@@ -447,6 +459,9 @@ export async function activate(context: vscode.ExtensionContext) {
         packagePath = pkg.path;
       }
       
+      const selectedWorkspace = await resolveWorkspaceForPath(packagePath);
+      if (!selectedWorkspace) return;
+      
       await terminalManager.openPackageTerminal(selectedWorkspace, packagePath);
     }),
     
@@ -470,8 +485,6 @@ export async function activate(context: vscode.ExtensionContext) {
         void vscode.window.showWarningMessage('No ROS2 workspaces found');
         return;
       }
-      
-      const selectedWorkspace = workspaces[0];
       
       let launchFileToRun: LaunchFileInfo | undefined;
       
@@ -498,6 +511,9 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       
       if (!launchFileToRun) return;
+      
+      const selectedWorkspace = await resolveWorkspaceForPath(launchFileToRun.path);
+      if (!selectedWorkspace) return;
       
       const setupBashPath = path.join(selectedWorkspace.installPath?.fsPath || '', 'setup.bash');
       
@@ -654,11 +670,12 @@ export async function activate(context: vscode.ExtensionContext) {
         title: `Rosbag Recording: ${filename}`
       });
       
-      if (!selectedTopics) return;
+      if (!selectedTopics || selectedTopics.length === 0) return;
       
-      const topicArgs = selectedTopics.map(t => t.label).join(' ');
-      // Use script command to enable proper terminal interaction for keyboard controls
-      const recordCommand = `script -q -c 'ros2 bag record -o "${outputPath}" ${topicArgs}' /dev/null`;
+      const topicArgs = selectedTopics.map(t => `"${t.label}"`).join(' ');
+      // Topics must be passed to the --topics flag (they are no longer positional),
+      // and `script` provides a TTY so ros2 bag record accepts SPACE for pause/resume.
+      const recordCommand = `script -q -c 'ros2 bag record -o "${outputPath}" --topics ${topicArgs}' /dev/null`;
       
       const recordingTerminal = await terminalManager.executeInNewTerminal(recordCommand, workspace, `Bag Record: ${filename}`);
       
@@ -860,25 +877,6 @@ export async function activate(context: vscode.ExtensionContext) {
         void vscode.window.showInformationMessage('Bag playback stopped');
       } else {
         void vscode.window.showWarningMessage('No active bag playback');
-      }
-    }),
-    
-    vscode.commands.registerCommand('ramros.bag.stopRecording', async () => {
-      const recordingTerminal = bagSession.recordingTerminal;
-      if (recordingTerminal) {
-        recordingTerminal.sendText('\x03'); // Ctrl+C
-        recordingTerminal.dispose();
-        bagSession.setRecordingTerminal(null);
-        BagRecordItem.setRecordingState(false);
-        BagRecordItem.setPausedState(false);
-        
-        // Reset instances to clear the controls from the tree
-        BagFilesFolderItem.resetInstances();
-        
-        await toolsTreeProvider.refresh();
-        void vscode.window.showInformationMessage('Bag recording stopped');
-      } else {
-        void vscode.window.showWarningMessage('No active bag recording');
       }
     })
   );

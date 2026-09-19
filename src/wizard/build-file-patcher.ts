@@ -71,25 +71,31 @@ export class BuildFilePatcher {
   }
 
   static addPythonEntryPointToContent(content: string, nodeName: string, packageName: string): string {
-    const newEntry = `'${nodeName} = ${packageName}.${nodeName}:main'`;
-    if (content.includes(newEntry)) return content;
+    const entryValue = `${nodeName} = ${packageName}.${nodeName}:main`;
+    if (content.includes(entryValue)) return content;
 
-    let updated = content;
-    const consoleScriptsRegex = /console_scripts\s*:\s*\[/i;
+    // `console_scripts` is normally quoted (e.g. 'console_scripts': [ ... ]),
+    // so the quote characters must be accounted for when locating the key.
+    const captureRegex = /(['"])console_scripts\1\s*:\s*\[([\s\S]*?)\]/i;
+    const match = content.match(captureRegex);
 
-    if (consoleScriptsRegex.test(content)) {
-      const captureRegex = /console_scripts\s*:\s*\[([^\]]*)\]/i;
-      updated = content.replace(captureRegex, (_match, entries: string) => {
-        const trimmed = entries.trim();
-        const withComma = trimmed.endsWith(',') ? trimmed : `${trimmed},`;
-        return `console_scripts: [\n            ${withComma}\n            ${newEntry}\n        ]`;
-      });
-    } else {
-      const entryPointsBlock = `    entry_points={\n        'console_scripts': [\n            ${newEntry},\n        ],\n    },`;
-      updated = this.insertPythonEntryPointsBlock(content, entryPointsBlock);
+    if (match) {
+      const quote = match[1];
+      const existing = match[2].trim();
+      const withComma = existing.length === 0
+        ? ''
+        : existing.endsWith(',')
+          ? existing
+          : `${existing},`;
+      const body = withComma.length > 0
+        ? `${withComma}\n            '${entryValue}',`
+        : `'${entryValue}',`;
+      const replacement = `${quote}console_scripts${quote}: [\n            ${body}\n        ]`;
+      return content.replace(captureRegex, replacement);
     }
 
-    return updated;
+    const entryPointsBlock = `    entry_points={\n        'console_scripts': [\n            '${entryValue}',\n        ],\n    },`;
+    return this.insertPythonEntryPointsBlock(content, entryPointsBlock);
   }
 
   private static insertPythonEntryPointsBlock(content: string, entryPointsBlock: string): string {

@@ -19,6 +19,22 @@ export interface WorkspaceInfo {
   packages?: PackageInfo[];
 }
 
+/**
+ * Finds the workspace that contains the given file-system path. This lets
+ * commands act on the workspace owning the selected node/package/launch file
+ * instead of always defaulting to the first workspace.
+ */
+export function findWorkspaceForPath(
+  workspaces: WorkspaceInfo[],
+  fsPath: string
+): WorkspaceInfo | undefined {
+  const normalized = path.resolve(fsPath);
+  return workspaces.find(w => {
+    const root = path.resolve(w.rootPath.fsPath);
+    return normalized === root || normalized.startsWith(root + path.sep);
+  });
+}
+
 export class WorkspaceDetector {
   private packageDiscovery: PackageDiscoveryService;
 

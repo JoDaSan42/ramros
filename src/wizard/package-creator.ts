@@ -270,7 +270,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            '${nodeName} = {package_name}.{nodeName}:main',
+            '${nodeName} = ${config.packageName}.${nodeName}:main',
         ],
     },
 )

@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import { WorkspaceDetector, WorkspaceInfo } from '../../core/workspace-detector';
+import { WorkspaceDetector, WorkspaceInfo, findWorkspaceForPath } from '../../core/workspace-detector';
 import { RosEnvironmentService } from '../../core/ros-environment';
 import * as vscode from 'vscode';
 
@@ -222,6 +222,44 @@ describe('WorkspaceDetector Integration Tests', () => {
       expect(ws.rootPath.fsPath).toBe(validWorkspacePath);
       expect(ws.srcPath?.fsPath).toBe(path.join(validWorkspacePath, 'src'));
       expect(ws.installPath?.fsPath).toBe(path.join(validWorkspacePath, 'install'));
+    });
+  });
+
+  describe('findWorkspaceForPath', () => {
+    const makeWorkspace = (root: string): WorkspaceInfo => ({
+      id: root,
+      name: path.basename(root),
+      rootPath: { fsPath: root } as any,
+      srcPath: { fsPath: path.join(root, 'src') } as any,
+      installPath: { fsPath: path.join(root, 'install') } as any,
+      buildPath: null,
+      rosDistribution: null,
+      isValid: true,
+      errors: [],
+      warnings: []
+    });
+
+    it('returns the workspace owning the path', () => {
+      const ws1 = makeWorkspace('/ws/one');
+      const ws2 = makeWorkspace('/ws/two');
+
+      expect(findWorkspaceForPath([ws1, ws2], '/ws/two/src/pkg/node.py')).toBe(ws2);
+      expect(findWorkspaceForPath([ws1, ws2], '/ws/one/src/pkg/node.py')).toBe(ws1);
+    });
+
+    it('matches the workspace root itself', () => {
+      const ws1 = makeWorkspace('/ws/one');
+      expect(findWorkspaceForPath([ws1], '/ws/one')).toBe(ws1);
+    });
+
+    it('returns undefined for a path outside all workspaces', () => {
+      const ws1 = makeWorkspace('/ws/one');
+      expect(findWorkspaceForPath([ws1], '/elsewhere/node.py')).toBeUndefined();
+    });
+
+    it('does not match a sibling directory sharing a name prefix', () => {
+      const ws1 = makeWorkspace('/ws/one');
+      expect(findWorkspaceForPath([ws1], '/ws/one-extra/node.py')).toBeUndefined();
     });
   });
 });

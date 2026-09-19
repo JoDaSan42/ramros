@@ -5,6 +5,26 @@ All notable changes to RAMROS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-09-19
+
+### Fixed
+- **Extension startup crash**: Removed duplicate `ramros.bag.stopRecording`
+  command registration, which caused `activate()` to throw on launch.
+- **Bag recording command**: Topics are now passed via the `--topics` flag
+  (`ros2 bag record` no longer accepts positional topic arguments).
+- **Add Node entry point**: `setup.py` patching now appends to an existing,
+  quoted `console_scripts` block instead of creating a second, conflicting
+  `entry_points` block.
+- **setup.py template**: Fixed literal `{package_name}.{nodeName}` placeholders
+  that were written unsubstituted.
+- **Run Node / Debug / Build / Open Terminal / Launch**: These commands now
+  resolve the workspace that owns the selected node, package, or launch file
+  instead of always defaulting to the first workspace.
+
+### Changed
+- Workspace tree initialization failures are now caught and logged instead of
+  surfacing as unhandled promise rejections.
+
 ## [1.1.0] - 2026-09-17
 
 ### Added
