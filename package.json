@@ -2,7 +2,7 @@
   "name": "ramros",
   "displayName": "Really Awesome Management of ROS (RAMROS)",
   "description": "VSCode Extension for ROS2 Workspace Management",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "publisher": "ramros-team",
   "license": "MIT",
   "repository": {
@@ -51,6 +51,11 @@
         "command": "ramros.refreshWorkspaces",
         "title": "Refresh All Workspaces",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "ramros.refreshInstalledPackages",
+        "title": "Refresh Installed ROS2 Packages",
+        "icon": "$(package)"
       },
       {
         "command": "ramros.toggleTreeSortMode",
@@ -178,6 +183,11 @@
       "view/title": [
         {
           "command": "ramros.refreshWorkspaces",
+          "when": "view == ramrosExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "ramros.refreshInstalledPackages",
           "when": "view == ramrosExplorer",
           "group": "navigation"
         },
@@ -442,6 +452,13 @@
           "minimum": 1,
           "maximum": 10000,
           "description": "Maximum number of cache entries (LRU eviction when exceeded)"
+        },
+        "ramros.installedPackages.maxAgeHours": {
+          "type": "number",
+          "default": 24,
+          "minimum": 0,
+          "maximum": 8760,
+          "description": "How long a cached scan of installed ROS2 packages is reused before offering to rescan (hours). 0 prompts every time."
         }
       }
     }

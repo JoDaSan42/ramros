@@ -101,7 +101,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   });
   
-  const packageDiscovery = new PackageDiscoveryService(cacheManager);
+  const packageDiscovery = new PackageDiscoveryService(cacheManager, context.globalState);
   const workspaceDetector = new WorkspaceDetector(
     () => rosEnvironmentService.detectInstallations(),
     packageDiscovery,
@@ -149,6 +149,19 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('ramros.refreshWorkspaces', async () => {
       await treeProvider.refresh();
       void vscode.window.showInformationMessage('Workspaces refreshed');
+    }),
+    
+    vscode.commands.registerCommand('ramros.refreshInstalledPackages', async () => {
+      await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: 'Scanning installed ROS2 packages...',
+        cancellable: false
+      }, async () => {
+        const packages = await packageDiscovery.refreshInstalledPackages();
+        void vscode.window.showInformationMessage(
+          `Installed ROS2 packages refreshed (${packages.length} packages)`
+        );
+      });
     }),
     
     vscode.commands.registerCommand('ramros.toggleTreeSortMode', async () => {

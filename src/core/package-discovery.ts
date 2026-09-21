@@ -89,27 +89,119 @@ export interface InstalledPackageInfo extends PackageInfo {
 
 export type PackageInfoWithSource = PackageInfo | InstalledPackageInfo;
 
+export interface InstalledPackagesSnapshot {
+  version: number;
+  scannedAt: number;
+  rosDistro: string | null;
+  packages: InstalledPackageInfo[];
+}
+
+type InstalledPackagesScanner = () => Promise<InstalledPackageInfo[]>;
 
 export class PackageDiscoveryService {
   private cache: Map<string, PackageInfo[]> = new Map();
   private installedPackagesCache: InstalledPackageInfo[] | null = null;
   private readonly cacheManager?: CacheManager;
+  private readonly memento?: vscode.Memento;
+  private readonly installedScanner?: InstalledPackagesScanner;
   private static readonly CACHE_PREFIX = 'package-discovery:';
+  // Intentionally outside CACHE_PREFIX so workspace refreshes (which clear the
+  // prefix) do not evict the expensive installed-package scan.
+  private static readonly INSTALLED_CACHE_KEY = 'installed-packages:snapshot';
+  private static readonly INSTALLED_CACHE_VERSION = 1;
 
-  constructor(cacheManager?: CacheManager) {
+  constructor(
+    cacheManager?: CacheManager,
+    memento?: vscode.Memento,
+    installedScanner?: InstalledPackagesScanner
+  ) {
     this.cacheManager = cacheManager;
+    this.memento = memento;
+    this.installedScanner = installedScanner;
   }
 
-  async discoverInstalledPackages(): Promise<InstalledPackageInfo[]> {
-    if (this.cacheManager) {
-      const cached = await this.cacheManager.get<InstalledPackageInfo[]>('package-discovery:installed');
-      if (cached) {
-        return cached;
+  async discoverInstalledPackages(forceRefresh: boolean = false): Promise<InstalledPackageInfo[]> {
+    if (!forceRefresh) {
+      if (this.installedPackagesCache !== null) {
+        return this.installedPackagesCache;
       }
-    } else if (this.installedPackagesCache !== null) {
-      return this.installedPackagesCache;
+
+      const persisted = this.readPersistedInstalledPackages();
+      if (persisted) {
+        this.installedPackagesCache = persisted;
+        return persisted;
+      }
     }
 
+    try {
+      const scanner = this.installedScanner ?? (() => this.scanInstalledPackages());
+      const packages = await scanner();
+      // An empty result usually means ROS was not sourced in this environment.
+      // Do not cache it, so a later attempt (after sourcing) can retry.
+      if (packages.length > 0) {
+        this.installedPackagesCache = packages;
+        await this.persistInstalledPackages(packages);
+      }
+      return packages;
+    } catch (error) {
+      console.error('Failed to discover installed packages:', error);
+      // Fall back to a previously persisted snapshot so the wizard still works.
+      const persisted = this.readPersistedInstalledPackages();
+      if (persisted) {
+        this.installedPackagesCache = persisted;
+        return persisted;
+      }
+      return [];
+    }
+  }
+
+  private readPersistedInstalledPackages(): InstalledPackageInfo[] | null {
+    if (!this.memento) return null;
+
+    const snapshot = this.memento.get<InstalledPackagesSnapshot>(
+      PackageDiscoveryService.INSTALLED_CACHE_KEY
+    );
+    if (!snapshot || snapshot.version !== PackageDiscoveryService.INSTALLED_CACHE_VERSION) {
+      return null;
+    }
+
+    const currentDistro = process.env.ROS_DISTRO ?? null;
+    if (snapshot.rosDistro !== currentDistro) {
+      return null;
+    }
+
+    return snapshot.packages;
+  }
+
+  private async persistInstalledPackages(packages: InstalledPackageInfo[]): Promise<void> {
+    if (!this.memento) return;
+
+    const snapshot: InstalledPackagesSnapshot = {
+      version: PackageDiscoveryService.INSTALLED_CACHE_VERSION,
+      scannedAt: Date.now(),
+      rosDistro: process.env.ROS_DISTRO ?? null,
+      packages,
+    };
+
+    try {
+      await this.memento.update(PackageDiscoveryService.INSTALLED_CACHE_KEY, snapshot);
+    } catch (error) {
+      console.warn('Failed to persist installed packages:', error);
+    }
+  }
+
+  async refreshInstalledPackages(): Promise<InstalledPackageInfo[]> {
+    return this.discoverInstalledPackages(true);
+  }
+
+  getInstalledPackagesScannedAt(): number | null {
+    const snapshot = this.memento?.get<InstalledPackagesSnapshot>(
+      PackageDiscoveryService.INSTALLED_CACHE_KEY
+    );
+    return snapshot?.scannedAt ?? null;
+  }
+
+  private async scanInstalledPackages(): Promise<InstalledPackageInfo[]> {
     try {
       // Get all installed package names
       const { stdout: pkgListOutput } = await execAsync('ros2 pkg list', { encoding: 'utf-8' });
@@ -183,11 +275,6 @@ export class PackageDiscoveryService {
       }
 
       packages.sort((a, b) => a.name.localeCompare(b.name));
-      if (this.cacheManager) {
-        await this.cacheManager.set('package-discovery:installed', packages);
-      } else {
-        this.installedPackagesCache = packages;
-      }
       return packages;
     } catch (error) {
       console.error('Failed to discover installed packages:', error);
@@ -270,12 +357,17 @@ export class PackageDiscoveryService {
     return packages;
   }
 
+  /**
+   * Clears discovered workspace packages. The installed (system) package
+   * snapshot is intentionally preserved because rescanning it is expensive
+   * (~300 subprocesses); use {@link refreshInstalledPackages} to force a
+   * re-scan on request.
+   */
   clearCache(): void {
     if (this.cacheManager) {
       this.cacheManager.clearByPrefix(PackageDiscoveryService.CACHE_PREFIX);
     } else {
       this.cache.clear();
-      this.installedPackagesCache = null;
     }
   }
 

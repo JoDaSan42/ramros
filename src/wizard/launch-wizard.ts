@@ -28,6 +28,8 @@ export class LaunchWizard {
 
   async run(): Promise<void> {
     try {
+      const forceRefresh = await this.askAboutInstalledPackagesCache();
+
       // Show loading indicator while discovering packages
       await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
@@ -37,8 +39,8 @@ export class LaunchWizard {
         progress.report({ message: 'Scanning workspace packages...' });
         const workspacePackages = await this.packageDiscovery.discoverPackages(this.workspacePath);
         
-        progress.report({ message: 'Scanning installed system packages...' });
-        const installedPackages = await this.packageDiscovery.discoverInstalledPackages();
+        progress.report({ message: 'Loading installed system packages...' });
+        const installedPackages = await this.packageDiscovery.discoverInstalledPackages(forceRefresh);
         
         progress.report({ message: 'Preparing package selector...' });
         
@@ -78,6 +80,55 @@ export class LaunchWizard {
       console.error('Launch wizard error:', error);
       void vscode.window.showErrorMessage(`Failed to create launch file: ${error}`);
     }
+  }
+
+  /**
+   * The installed-package scan is expensive, so it is cached across sessions.
+   * Only prompt for a re-scan once the cached snapshot is older than the
+   * configured threshold; otherwise reuse it silently.
+   */
+  private async askAboutInstalledPackagesCache(): Promise<boolean> {
+    const scannedAt = this.packageDiscovery.getInstalledPackagesScannedAt();
+    if (scannedAt === null) {
+      // No cached data yet: scan once without prompting.
+      return false;
+    }
+
+    const ageMs = Date.now() - scannedAt;
+    const maxAgeMs = this.getInstalledPackagesCacheMaxAgeMs();
+    if (ageMs < maxAgeMs) {
+      return false;
+    }
+
+    const age = this.formatDuration(ageMs);
+    const choice = await vscode.window.showQuickPick([
+      { label: '$(sync) Rescan now', description: 'Scan installed packages again', rescan: true },
+      { label: '$(history) Use cached list', description: `Cached ${age} ago`, rescan: false }
+    ], {
+      placeHolder: 'Installed ROS2 packages were scanned a while ago. Rescan?'
+    });
+
+    // Cancelling falls back to the cached list.
+    return choice?.rescan ?? false;
+  }
+
+  private getInstalledPackagesCacheMaxAgeMs(): number {
+    const config = vscode.workspace.getConfiguration('ramros');
+    const hours = config.get<number>('installedPackages.maxAgeHours', 24);
+    return Math.max(0, hours) * 60 * 60 * 1000;
+  }
+
+  private formatDuration(ms: number): string {
+    const minutes = Math.floor(ms / 60000);
+    if (minutes < 60) {
+      return `${minutes} minute${minutes !== 1 ? 's' : ''}`;
+    }
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) {
+      return `${hours} hour${hours !== 1 ? 's' : ''}`;
+    }
+    const days = Math.floor(hours / 24);
+    return `${days} day${days !== 1 ? 's' : ''}`;
   }
 
   private async iterativePackageAndNodeSelection(

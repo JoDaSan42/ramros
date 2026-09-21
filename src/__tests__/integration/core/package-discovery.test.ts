@@ -1,5 +1,6 @@
 import * as path from 'path';
-import { PackageDiscoveryService, PackageInfo } from '../../../core/package-discovery';
+import * as vscode from 'vscode';
+import { PackageDiscoveryService, PackageInfo, InstalledPackageInfo } from '../../../core/package-discovery';
 
 describe('PackageDiscoveryService', () => {
   const testFixturesPath = path.join(__dirname, '../../../../test-fixtures');
@@ -120,6 +121,125 @@ describe('PackageDiscoveryService', () => {
       const result = await service.parsePackageXml('/nonexistent/package.xml');
       
       expect(result).toBeUndefined();
+    });
+  });
+
+  describe('discoverInstalledPackages caching', () => {
+    const makePackage = (name: string): InstalledPackageInfo => ({
+      name,
+      path: `/opt/ros/test/share/${name}`,
+      installPath: '/opt/ros/test',
+      source: 'installed',
+      version: '',
+      description: '',
+      maintainers: [],
+      license: '',
+      buildType: 'ament_cmake',
+      packageType: 'empty',
+      dependencies: [],
+      nodes: [],
+      interfaces: [],
+      launchFiles: [],
+    });
+
+    const makeMemento = (): vscode.Memento => {
+      const store = new Map<string, unknown>();
+      return {
+        get: (key: string) => store.get(key),
+        update: async (key: string, value: unknown) => {
+          store.set(key, value);
+        },
+        keys: () => [...store.keys()],
+      } as unknown as vscode.Memento;
+    };
+
+    it('scans only once and reuses the in-memory result', async () => {
+      const scanner = jest.fn().mockResolvedValue([makePackage('a')]);
+      const svc = new PackageDiscoveryService(undefined, undefined, scanner);
+
+      await svc.discoverInstalledPackages();
+      await svc.discoverInstalledPackages();
+
+      expect(scanner).toHaveBeenCalledTimes(1);
+    });
+
+    it('persists the scan and reuses it from the memento in a new service', async () => {
+      const memento = makeMemento();
+      const firstScanner = jest.fn().mockResolvedValue([makePackage('a'), makePackage('b')]);
+      const first = new PackageDiscoveryService(undefined, memento, firstScanner);
+      await first.discoverInstalledPackages();
+      expect(firstScanner).toHaveBeenCalledTimes(1);
+
+      // A fresh service (e.g. after a VS Code restart) should not rescan.
+      const secondScanner = jest.fn().mockResolvedValue([makePackage('c')]);
+      const second = new PackageDiscoveryService(undefined, memento, secondScanner);
+      const packages = await second.discoverInstalledPackages();
+
+      expect(secondScanner).not.toHaveBeenCalled();
+      expect(packages.map(p => p.name)).toEqual(['a', 'b']);
+    });
+
+    it('force refresh triggers a rescan and updates the memento', async () => {
+      const scanner = jest.fn()
+        .mockResolvedValueOnce([makePackage('a')])
+        .mockResolvedValueOnce([makePackage('a'), makePackage('b')]);
+      const svc = new PackageDiscoveryService(undefined, makeMemento(), scanner);
+
+      await svc.discoverInstalledPackages();
+      const refreshed = await svc.refreshInstalledPackages();
+
+      expect(scanner).toHaveBeenCalledTimes(2);
+      expect(refreshed.map(p => p.name)).toEqual(['a', 'b']);
+    });
+
+    it('ignores a persisted snapshot for a different ROS distro', async () => {
+      const memento = makeMemento();
+      const original = process.env.ROS_DISTRO;
+      process.env.ROS_DISTRO = 'humble';
+
+      const first = new PackageDiscoveryService(undefined, memento, jest.fn().mockResolvedValue([makePackage('a')]));
+      await first.discoverInstalledPackages();
+
+      process.env.ROS_DISTRO = 'jazzy';
+      const scanner = jest.fn().mockResolvedValue([makePackage('b')]);
+      const second = new PackageDiscoveryService(undefined, memento, scanner);
+      const packages = await second.discoverInstalledPackages();
+
+      expect(scanner).toHaveBeenCalledTimes(1);
+      expect(packages.map(p => p.name)).toEqual(['b']);
+
+      process.env.ROS_DISTRO = original;
+    });
+
+    it('clearCache keeps the installed-package snapshot', async () => {
+      const scanner = jest.fn().mockResolvedValue([makePackage('a')]);
+      const svc = new PackageDiscoveryService(undefined, makeMemento(), scanner);
+
+      await svc.discoverInstalledPackages();
+      svc.clearCache();
+      await svc.discoverInstalledPackages();
+
+      expect(scanner).toHaveBeenCalledTimes(1);
+    });
+
+    it('getInstalledPackagesScannedAt returns null before any scan', () => {
+      const svc = new PackageDiscoveryService(undefined, makeMemento());
+      expect(svc.getInstalledPackagesScannedAt()).toBeNull();
+    });
+
+    it('does not cache an empty scan so it can retry after ROS is sourced', async () => {
+      const memento = makeMemento();
+      const scanner = jest.fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([makePackage('a')]);
+      const svc = new PackageDiscoveryService(undefined, memento, scanner);
+
+      const first = await svc.discoverInstalledPackages();
+      expect(first).toEqual([]);
+
+      const second = await svc.discoverInstalledPackages();
+      expect(scanner).toHaveBeenCalledTimes(2);
+      expect(second.map(p => p.name)).toEqual(['a']);
     });
   });
 });
