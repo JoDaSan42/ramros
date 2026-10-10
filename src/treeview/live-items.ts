@@ -272,26 +272,3 @@ export class TopicEndpointItem extends TreeItemBase {
     return [];
   }
 }
-
-export class TopicFrequencyItem extends TreeItemBase {
-  constructor(topicName: string, frequency?: number) {
-    super('Frequency', vscode.TreeItemCollapsibleState.None);
-    this.iconPath = new vscode.ThemeIcon('pulse');
-    this.description = frequency !== undefined ? `${frequency.toFixed(1)} Hz` : 'measuring...';
-    
-    let color = 'description.foreground';
-    if (frequency !== undefined) {
-      color = frequency > 10 ? 'charts.green' : frequency > 1 ? 'charts.yellow' : 'charts.red';
-    }
-    this.iconPath = new vscode.ThemeIcon('pulse', new vscode.ThemeColor(color));
-    
-    this.tooltip = new vscode.MarkdownString(
-      `**Frequency**\n\nTopic: ${topicName}\n` +
-      `Rate: ${frequency !== undefined ? frequency.toFixed(1) + ' Hz' : 'N/A'}`
-    );
-  }
-  
-  async getChildren(): Promise<TreeItemBase[]> {
-    return [];
-  }
-}

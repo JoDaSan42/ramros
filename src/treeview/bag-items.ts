@@ -304,30 +304,6 @@ export class BagStopItem extends TreeItemBase {
   }
 }
 
-export class BagPauseResumePlaybackItem extends TreeItemBase {
-  constructor() {
-    super('Pause', vscode.TreeItemCollapsibleState.None);
-    this.iconPath = new vscode.ThemeIcon('debug-pause');
-    this.contextValue = 'bagPauseResumePlayback';
-    this.command = { command: 'ramros.bag.playPause', title: 'Pause/Resume Playback' };
-    this.tooltip = 'Pause or resume the current playback';
-  }
-  
-  async getChildren(): Promise<TreeItemBase[]> {
-    return [];
-  }
-  
-  updateToResumeState(): void {
-    this.label = 'Resume';
-    this.iconPath = new vscode.ThemeIcon('play');
-  }
-  
-  updateToPauseState(): void {
-    this.label = 'Pause';
-    this.iconPath = new vscode.ThemeIcon('debug-pause');
-  }
-}
-
 export class BagLoopItem extends TreeItemBase {
   constructor() {
     super('Loop: Off', vscode.TreeItemCollapsibleState.None);
