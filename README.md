@@ -70,10 +70,10 @@ Record and playback ROS2 bag files with a user-friendly interface.
 - Visual feedback in tree view during recording
 
 **Playback:**
-- Select bag files via file dialog or from workspace
+- Select bag files via file dialog or from workspace (searches `.db3`/`.mcap` in workspace folders)
 - Play/pause playback with spacebar
 - Stop playback and close terminal
-- Enable/disable loop mode for continuous playback
+- Enable/disable loop mode for continuous playback (toggles restart playback with the new setting)
 - View detailed bag information (topics, message count, duration)
 
 **Bag Info:**
@@ -117,8 +117,10 @@ Node information extracted via static analysis:
 - **Parameters**: Declared parameters with default values and types
 - **Publishers**: Topic name and message type
 - **Subscriptions**: Topic name and message type
-- **Services**: Service servers and clients
-- **Actions**: Action servers and clients
+- **Services**: Service servers and clients (name and service type)
+- **Actions**: Action servers and clients (name and action type)
+
+Supports both C++ (`create_service`, `create_client`, `rclcpp_action::create_server/client`) and Python (`create_service`, `create_client`, `ActionServer`, `ActionClient`) constructs. Commented-out code is ignored.
 
 > **Note**: Only explicitly declared constructs are detected. Dynamically created topics or parameters may not appear.
 
@@ -130,6 +132,8 @@ Node information extracted via static analysis:
 
 #### Launch File Support
 - Automatic detection of `.launch.py` and `.launch.xml` files
+- Creation wizard generates `.launch.py` or `.launch.xml` (format selection in the wizard)
+- Save location configurable: target package `launch/` folder, workspace root, or a custom path with `{workspace}`/`{package}` placeholders
 - Click to open launch file
 - Run launch files directly from tree view context menu
 
@@ -146,13 +150,15 @@ Interactive wizard for creating new ROS2 packages:
 | `interface` | Custom messages/services/actions | `msg/`, `srv/`, `action/` directories |
 
 **Wizard Steps:**
-1. Enter package name (validates uniqueness and naming rules)
-2. Select template type
+1. Enter package name (validates naming rules and package-name uniqueness across workspaces; cross-workspace duplicates warn)
+2. Select template type (python / cpp / cpp-python / interface)
 3. Add description, author, license
-4. Choose build type (`ament_cmake`, `ament_python`, `cmake`)
-5. Define node name (for non-empty templates)
+4. Build type is derived automatically from the package type (`ament_python` for python, `ament_cmake` otherwise)
+5. Define node name (for node templates) and whether to include the template node implementation
 6. Add dependencies (comma-separated)
 7. For interface packages: define message/service/action fields
+
+> **Note**: The `empty` template is available programmatically (via command options) but not offered in the interactive wizard.
 
 **Interface Package Support:**
 - Create custom message definitions (`.msg`)
@@ -167,7 +173,7 @@ Interactive wizard for creating new ROS2 packages:
 - Real-time validation during package creation
 
 #### Commands & Actions
-Access commands from tree view context menu or command palette (`Ctrl+Shift+P`):
+Access commands from tree view context menu or command palette (`Ctrl+Shift+P`; most commands appear without a `RAMROS:` prefix — only `RAMROS: Toggle Tree View Mode` carries the category):
 
 | Command | Description | Context |
 |---------|-------------|---------|
@@ -175,6 +181,7 @@ Access commands from tree view context menu or command palette (`Ctrl+Shift+P`):
 | `RAMROS: Add Node/Interface to Package` | Add a node or interface to an existing package | Package, nodes/interfaces folder |
 | `RAMROS: Create Launch File` | Launch the launch-file creation wizard | Workspace root, package, launch folder |
 | `RAMROS: Refresh All Workspaces` | Reload workspace detection | View title |
+| `RAMROS: Refresh Installed ROS2 Packages` | Force rescan of installed packages | View title |
 | `RAMROS: Toggle Tree View Mode` | Switch between grouped-by-package and grouped-by-category | View title |
 | `RAMROS: Source Workspace` | Open terminal with sourced ROS environment | Workspace root |
 | `RAMROS: Build Workspace` | Run `colcon build` in workspace | Workspace root |
@@ -222,10 +229,11 @@ Access commands from tree view context menu or command palette (`Ctrl+Shift+P`):
 No configuration required for basic usage. Optional settings:
 - `ramros.liveView.refreshRate` — Live view refresh rate (1-60 seconds)
 - `ramros.liveView.hideSystemTopics` — Hide/show system topics in live view
-- `ramros.cache.ttlSeconds` — Cache time-to-live (1-3600 seconds)
-- `ramros.cache.maxEntries` — Maximum cache entries before LRU eviction (1-10000)
-- `ramros.launchGenerator.defaultLocation` — Default location for generated launch files
-- `ramros.launchGenerator.customPath` — Custom launch-file path (uses `{workspace}` / `{package}` placeholders)
+- `ramros.cache.ttlSeconds` — Cache time-to-live (1-3600 seconds); changes apply live
+- `ramros.cache.maxEntries` — Maximum cache entries before LRU eviction (1-10000); changes apply live
+- `ramros.launchGenerator.defaultLocation` — Default location for generated launch files (`package_launch_folder`, `workspace_root`, `custom`)
+- `ramros.launchGenerator.customPath` — Custom launch-file path (uses `{workspace}` / `{package}` placeholders; `{package}` resolves when a target package is selected)
+- `ramros.installedPackages.maxAgeHours` — How long a cached scan of installed ROS2 packages is reused before offering to rescan (hours; 0 prompts every time)
 
 ## Requirements
 

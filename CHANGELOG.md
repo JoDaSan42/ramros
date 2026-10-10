@@ -5,6 +5,34 @@ All notable changes to RAMROS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Static analysis of service servers/clients and action servers/clients for
+  C++ and Python nodes, with tree view items under each node.
+- Launch file wizard: XML format (`.launch.xml`) generation via format selection.
+- Bag file selection from workspace (in addition to the file dialog).
+- `ramros.launchGenerator.defaultLocation` and `ramros.launchGenerator.customPath`
+  settings are now honored (`{workspace}`/`{package}` placeholders supported).
+- Cache settings (`ramros.cache.ttlSeconds`, `ramros.cache.maxEntries`) reload
+  live without restarting the extension.
+
+### Fixed
+- Bag recording/playback context menus now appear on the Bag Files folder
+  (previously attached to the RVIZ2/rqt_graph items).
+- Toggling loop off during playback restarts playback without loop instead of
+  stopping it entirely.
+- Bag state resets when the user closes the record/play terminal manually
+  (`onDidCloseTerminal` handling).
+- SIGINT (Ctrl+C) now settles before the terminal is disposed so recordings
+  finalize cleanly.
+- Package wizard validates name uniqueness against real packages (previously
+  against workspace names).
+- `createLaunchFile` uses the clicked workspace/package context instead of
+  always the first workspace.
+- Bag info header `resourceUri` no longer contains the emoji prefix.
+- Python nodes in dotted-module layout (`pkg/module.py`) are now discovered.
+
 ## [1.2.1] - 2026-09-21
 
 ### Added
