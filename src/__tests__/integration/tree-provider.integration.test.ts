@@ -1,6 +1,6 @@
 import * as path from 'path';
 import { RamrosTreeProvider } from '../../treeview/tree-provider';
-import { WorkspaceDetector } from '../../core/workspace-detector';
+import { WorkspaceDetector, WorkspaceInfo } from '../../core/workspace-detector';
 import { DuplicatePackageDetector } from '../../core/duplicate-package-detector';
 import { RosEnvironmentService } from '../../core/ros-environment';
 import { NodeItem } from '../../treeview/workspace-items';
@@ -168,6 +168,36 @@ describe('RamrosTreeProvider Integration Tests', () => {
       if (roots.length > 0) {
         expect(treeProvider.getTreeItem(roots[0])).toBe(roots[0]);
       }
+    });
+  });
+
+  describe('resolveWorkspaceForLaunch', () => {
+    it('resolves the workspace from a package tree item', async () => {
+      const { resolveWorkspaceForLaunch } = await import('../../extension');
+      const pkg: PackageInfo = {
+        name: 'pkg', path: '/tmp/ws-a/src/pkg', version: '1.0.0', description: '',
+        maintainers: [], license: 'MIT', buildType: 'ament_cmake', packageType: 'cpp',
+        dependencies: [], nodes: [], interfaces: [], launchFiles: [],
+      };
+      const fakeItem = { getPackageInfo: () => pkg, getChildren: async () => [] } as any;
+      const makeWs = (id: string): WorkspaceInfo => ({
+        id, name: id,
+        rootPath: { fsPath: `/tmp/${id}` } as any,
+        srcPath: { fsPath: `/tmp/${id}/src` } as any,
+        installPath: null, buildPath: null, rosDistribution: null,
+        isValid: true, errors: [], warnings: [], packages: [],
+      });
+      const wsA = makeWs('ws-a');
+      const wsB = makeWs('ws-b');
+      const ws = resolveWorkspaceForLaunch(fakeItem, [wsA, wsB]);
+      expect(ws?.id).toBe('ws-a');
+    });
+
+    it('returns undefined for unrelated items', async () => {
+      const { resolveWorkspaceForLaunch } = await import('../../extension');
+      const unrelated = { getChildren: async () => [] } as any;
+      expect(resolveWorkspaceForLaunch(unrelated, [])).toBeUndefined();
+      expect(resolveWorkspaceForLaunch(undefined, [])).toBeUndefined();
     });
   });
 

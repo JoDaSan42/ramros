@@ -100,6 +100,21 @@ export function __setTreeProviderForTests(provider: RamrosTreeProvider): void {
   treeProvider = provider;
 }
 
+export function resolveWorkspaceForLaunch(
+  arg: TreeItemBase | undefined,
+  workspaces: WorkspaceInfo[]
+): WorkspaceInfo | undefined {
+  if (arg && 'getPackageInfo' in arg && typeof (arg as unknown as Record<string, unknown>).getPackageInfo === 'function') {
+    const pkg = (arg as unknown as { getPackageInfo: () => PackageInfo }).getPackageInfo();
+    return findWorkspaceForPath(workspaces, pkg.path) ?? undefined;
+  }
+  if (arg && 'getWorkspace' in arg && typeof (arg as unknown as Record<string, unknown>).getWorkspace === 'function') {
+    const ws = (arg as unknown as { getWorkspace: () => WorkspaceInfo }).getWorkspace();
+    return workspaces.find(w => w.id === ws.id) ?? undefined;
+  }
+  return undefined;
+}
+
 export async function activate(context: vscode.ExtensionContext) {
   console.log('RAMROS Extension activated');
   
@@ -501,16 +516,18 @@ export async function activate(context: vscode.ExtensionContext) {
       await terminalManager.openPackageTerminal(selectedWorkspace, packagePath);
     }),
     
-    vscode.commands.registerCommand('ramros.createLaunchFile', async () => {
+    vscode.commands.registerCommand('ramros.createLaunchFile', async (arg?: TreeItemBase) => {
       const workspaces = treeProvider.getWorkspaces();
       if (workspaces.length === 0) {
         void vscode.window.showWarningMessage('No ROS2 workspaces found');
         return;
       }
-      
-      const selectedWorkspace = workspaces[0];
+
+      const selectedWorkspace = resolveWorkspaceForLaunch(arg, workspaces) ?? await pickWorkspace();
+      if (!selectedWorkspace) return;
+
       const workspacePath = selectedWorkspace.rootPath.fsPath;
-      
+
       const wizard = new LaunchWizard(workspacePath, packageDiscovery);
       await wizard.run();
     }),
