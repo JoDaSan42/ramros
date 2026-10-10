@@ -3,6 +3,8 @@ import { RamrosTreeProvider } from '../../treeview/tree-provider';
 import { WorkspaceDetector } from '../../core/workspace-detector';
 import { DuplicatePackageDetector } from '../../core/duplicate-package-detector';
 import { RosEnvironmentService } from '../../core/ros-environment';
+import { NodeItem } from '../../treeview/workspace-items';
+import { NodeInfo, PackageInfo } from '../../core/package-discovery';
 
 const FIXTURES_ROOT = path.resolve(__dirname, '../../../test-fixtures');
 
@@ -166,6 +168,38 @@ describe('RamrosTreeProvider Integration Tests', () => {
       if (roots.length > 0) {
         expect(treeProvider.getTreeItem(roots[0])).toBe(roots[0]);
       }
+    });
+  });
+
+  describe('node service and action children', () => {
+    const makeNodeWithServices = (): NodeInfo => ({
+      name: 'my_node',
+      path: '/ws/src/pkg/src/my_node.cpp',
+      packageName: 'pkg',
+      language: 'cpp',
+      isExecutable: true,
+      publishers: [],
+      subscriptions: [],
+      parameters: [],
+      serviceServers: [{ name: '/my_service', serviceType: 'my_ns/srv/MyService' }],
+      serviceClients: [],
+      actionServers: [{ name: '/my_action', actionType: 'my_ns/action/MyAction' }],
+      actionClients: [],
+    });
+
+    it('shows services and actions as node children', async () => {
+      const nodeItem = new NodeItem(makeNodeWithServices());
+      const children = await nodeItem.getChildren();
+      const folderLabels = children.map(c => c.label);
+      expect(folderLabels).toContain('Service Servers');
+      expect(folderLabels).toContain('Action Servers');
+      const srvFolder = children.find(c => c.label === 'Service Servers');
+      const srvChildren = await srvFolder!.getChildren();
+      expect(srvChildren.length).toBe(1);
+      expect(srvChildren[0].description).toContain('my_ns/srv/MyService');
+      const actFolder = children.find(c => c.label === 'Action Servers');
+      const actChildren = await actFolder!.getChildren();
+      expect(actChildren[0].label).toBe('/my_action');
     });
   });
 });

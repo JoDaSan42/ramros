@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { WorkspaceInfo } from '../core/workspace-detector';
-import { PackageInfo, NodeInfo, InterfaceInfo, LaunchFileInfo, ParameterInfo, TopicEndpointInfo } from '../core/package-discovery';
+import { PackageInfo, NodeInfo, InterfaceInfo, LaunchFileInfo, ParameterInfo, TopicEndpointInfo, ServiceInfo, ActionInfo } from '../core/package-discovery';
 import { TreeItemBase } from './base-tree-item';
 
 export class WorkspaceRootItem extends TreeItemBase {
@@ -235,6 +235,8 @@ export class NodeItem extends TreeItemBase {
     const pubCount = this.node.publishers?.length || 0;
     const subCount = this.node.subscriptions?.length || 0;
     const paramCount = this.node.parameters?.length || 0;
+    const srvCount = (this.node.serviceServers?.length || 0) + (this.node.serviceClients?.length || 0);
+    const actCount = (this.node.actionServers?.length || 0) + (this.node.actionClients?.length || 0);
     
     const lines: string[] = [
       `**${this.node.name}**`,
@@ -246,6 +248,8 @@ export class NodeItem extends TreeItemBase {
       `⬆️ Publishers: ${pubCount}`,
       `⬇️ Subscribers: ${subCount}`,
       `⚙️ Parameters: ${paramCount}`,
+      `🛎 Services: ${srvCount}`,
+      `⚡ Actions: ${actCount}`,
     ];
     
     if (this.node.publishers && this.node.publishers.length > 0) {
@@ -269,6 +273,34 @@ export class NodeItem extends TreeItemBase {
       });
     }
     
+    if (this.node.serviceServers && this.node.serviceServers.length > 0) {
+      lines.push('', `**Service Servers:**`);
+      this.node.serviceServers.forEach(s => {
+        lines.push(`- ${s.name} (${s.serviceType})`);
+      });
+    }
+    
+    if (this.node.serviceClients && this.node.serviceClients.length > 0) {
+      lines.push('', `**Service Clients:**`);
+      this.node.serviceClients.forEach(s => {
+        lines.push(`- ${s.name} (${s.serviceType})`);
+      });
+    }
+    
+    if (this.node.actionServers && this.node.actionServers.length > 0) {
+      lines.push('', `**Action Servers:**`);
+      this.node.actionServers.forEach(a => {
+        lines.push(`- ${a.name} (${a.actionType})`);
+      });
+    }
+    
+    if (this.node.actionClients && this.node.actionClients.length > 0) {
+      lines.push('', `**Action Clients:**`);
+      this.node.actionClients.forEach(a => {
+        lines.push(`- ${a.name} (${a.actionType})`);
+      });
+    }
+    
     this.tooltip = new vscode.MarkdownString(lines.join('\n'));
   }
   
@@ -283,6 +315,26 @@ export class NodeItem extends TreeItemBase {
     if (this.node.subscriptions && this.node.subscriptions.length > 0) {
       const subItems = this.node.subscriptions.map(sub => new SubscriberItem(sub));
       children.push(new NodeMetadataFolderItem('Subscribers', subItems, 'arrow-down'));
+    }
+    
+    if (this.node.serviceServers && this.node.serviceServers.length > 0) {
+      const items = this.node.serviceServers.map(s => new ServiceItem(s, 'server'));
+      children.push(new NodeMetadataFolderItem('Service Servers', items, 'arrow-small-right'));
+    }
+    
+    if (this.node.serviceClients && this.node.serviceClients.length > 0) {
+      const items = this.node.serviceClients.map(s => new ServiceItem(s, 'client'));
+      children.push(new NodeMetadataFolderItem('Service Clients', items, 'arrow-small-right'));
+    }
+    
+    if (this.node.actionServers && this.node.actionServers.length > 0) {
+      const items = this.node.actionServers.map(a => new ActionItem(a, 'server'));
+      children.push(new NodeMetadataFolderItem('Action Servers', items, 'debug-rerun'));
+    }
+    
+    if (this.node.actionClients && this.node.actionClients.length > 0) {
+      const items = this.node.actionClients.map(a => new ActionItem(a, 'client'));
+      children.push(new NodeMetadataFolderItem('Action Clients', items, 'debug-rerun'));
     }
     
     if (this.node.parameters && this.node.parameters.length > 0) {
@@ -342,6 +394,54 @@ export class SubscriberItem extends TreeItemBase {
   
   getTopicEndpointInfo(): TopicEndpointInfo {
     return this.subscriber;
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
+export class ServiceItem extends TreeItemBase {
+  constructor(private readonly service: ServiceInfo, kind: 'server' | 'client') {
+    super(service.name, vscode.TreeItemCollapsibleState.None);
+    
+    this.description = `(${service.serviceType})`;
+    this.iconPath = new vscode.ThemeIcon(
+      kind === 'server' ? 'circle-filled' : 'circle-outline',
+      new vscode.ThemeColor('charts.orange')
+    );
+    this.contextValue = 'serviceItem';
+    this.tooltip = new vscode.MarkdownString(
+      `**Service ${kind}**\n\nName: ${service.name}\nType: ${service.serviceType}`
+    );
+  }
+  
+  getServiceInfo(): ServiceInfo {
+    return this.service;
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
+export class ActionItem extends TreeItemBase {
+  constructor(private readonly action: ActionInfo, kind: 'server' | 'client') {
+    super(action.name, vscode.TreeItemCollapsibleState.None);
+    
+    this.description = `(${action.actionType})`;
+    this.iconPath = new vscode.ThemeIcon(
+      kind === 'server' ? 'play-circle' : 'debug-rerun',
+      new vscode.ThemeColor('charts.purple')
+    );
+    this.contextValue = 'actionItem';
+    this.tooltip = new vscode.MarkdownString(
+      `**Action ${kind}**\n\nName: ${action.name}\nType: ${action.actionType}`
+    );
+  }
+  
+  getActionInfo(): ActionInfo {
+    return this.action;
   }
   
   async getChildren(): Promise<TreeItemBase[]> {
