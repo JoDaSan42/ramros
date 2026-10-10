@@ -358,11 +358,11 @@
         },
         {
           "command": "ramros.bag.startRecording",
-          "when": "view == ramrosTools && viewItem == tool"
+          "when": "view == ramrosTools && viewItem == bagFilesFolder"
         },
         {
           "command": "ramros.bag.selectFile",
-          "when": "view == ramrosTools && viewItem == tool"
+          "when": "view == ramrosTools && viewItem == bagFilesFolder"
         },
         {
           "command": "ramros.bag.playPause",

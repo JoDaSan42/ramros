@@ -90,6 +90,16 @@ async function discoverTopics(): Promise<string[]> {
   return topics;
 }
 
+export async function findWorkspaceBags(): Promise<string[]> {
+  const workspaces = treeProvider.getWorkspaces();
+  const uris = await vscode.workspace.findFiles('**/*.{db3,mcap}', '**/{node_modules,build,install,log}/**');
+  return uris.map(u => u.fsPath).filter(p => workspaces.some(w => p.startsWith(w.rootPath.fsPath)));
+}
+
+export function __setTreeProviderForTests(provider: RamrosTreeProvider): void {
+  treeProvider = provider;
+}
+
 export async function activate(context: vscode.ExtensionContext) {
   console.log('RAMROS Extension activated');
   
@@ -776,36 +786,63 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
     
     vscode.commands.registerCommand('ramros.bag.selectFile', async () => {
-      const selectedUris = await vscode.window.showOpenDialog({
-        openLabel: 'Select Bag File',
-        filters: {
-          'ROS2 Bag Files': ['db3', 'mcap']
-        },
-        canSelectMany: false
-      });
-      
-      if (!selectedUris || selectedUris.length === 0) return;
-      
-      const bagPath = selectedUris[0].fsPath;
+      let bagPath: string | undefined;
+
+      interface BagSourcePickItem extends vscode.QuickPickItem {
+        action?: 'browse' | 'workspace';
+      }
+
+      const sourcePick = await vscode.window.showQuickPick<BagSourcePickItem>([
+        { label: '$(file-directory) Browse files…', action: 'browse' },
+        { label: '$(archive) Choose from workspace', action: 'workspace' },
+      ], { placeHolder: 'Select a bag file' });
+
+      if (sourcePick?.action === 'workspace') {
+        const workspaceBags = await findWorkspaceBags();
+        if (workspaceBags.length === 0) {
+          void vscode.window.showWarningMessage('No bag files found in workspace');
+          return;
+        }
+        const picked = await vscode.window.showQuickPick(
+          workspaceBags.map(bag => ({ label: path.basename(bag), description: bag })),
+          { placeHolder: 'Select a bag file from the workspace' }
+        );
+        if (!picked) return;
+        bagPath = picked.description;
+      } else {
+        const selectedUris = await vscode.window.showOpenDialog({
+          openLabel: 'Select Bag File',
+          filters: {
+            'ROS2 Bag Files': ['db3', 'mcap']
+          },
+          canSelectMany: false
+        });
+
+        if (!selectedUris || selectedUris.length === 0) return;
+        bagPath = selectedUris[0].fsPath;
+      }
+
+      if (!bagPath) return;
+
       bagSession.setSelectedBagPath(bagPath);
       BagPlayItem.setSelectedBag(bagPath);
-      
+
       // Get bag info
       try {
         const { stdout: bagInfoOutput } = await execAsync(`ros2 bag info "${bagPath}"`, { encoding: 'utf-8' });
-        
+
         // Filter out "closing." lines from the output
         const filteredOutput = bagInfoOutput.split('\n').filter(line => !line.includes('closing.')).join('\n');
-        
+
         // Update BagInfoItem with bag path and info
         await toolsTreeProvider.setBagInfo(filteredOutput, bagPath);
       } catch (error) {
         void vscode.window.showErrorMessage(`Failed to get bag info: ${error}`);
       }
-      
+
       // Refresh tree to show play controls and bag info
       await toolsTreeProvider.refresh();
-      
+
       void vscode.window.showInformationMessage(`Bag file selected: ${path.basename(bagPath)}`);
     }),
     

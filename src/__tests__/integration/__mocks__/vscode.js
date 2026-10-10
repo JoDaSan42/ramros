@@ -4,6 +4,7 @@ module.exports = {
     fs: {
       stat: jest.fn().mockRejectedValue(new Error('Not implemented'))
     },
+    findFiles: jest.fn().mockResolvedValue([]),
     createFileSystemWatcher: jest.fn().mockReturnValue({
       onDidChange: jest.fn(),
       onDidCreate: jest.fn(),
