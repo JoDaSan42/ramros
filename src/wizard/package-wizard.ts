@@ -7,10 +7,17 @@ import { collectInterfaceDefinition, InterfaceDefinition } from './interface-col
 import { WorkspaceInfo } from '../core/workspace-detector';
 import { PackageInfo } from '../core/package-discovery';
 
+export interface PackageNameValidationResult {
+  isValid: boolean;
+  error?: string;
+  warning?: string;
+}
+
 export interface CreatePackageWizardContext {
   packageCreator: PackageCreator;
   getWorkspaces: () => WorkspaceInfo[];
   refresh: () => Promise<void>;
+  validatePackageName?: (name: string) => Promise<PackageNameValidationResult>;
 }
 
 export interface AddToPackageWizardContext {
@@ -70,10 +77,15 @@ export async function runCreatePackageWizard(context: CreatePackageWizardContext
   const packageName = await vscode.window.showInputBox({
     prompt: 'Enter package name',
     placeHolder: 'my_package',
-    validateInput: (value) => {
-      const existingPackages = getWorkspaces().flatMap(w => w.name);
-      const result = validator.validatePackageName(value || '', existingPackages);
-      return result.isValid ? null : result.errors.join(', ');
+    validateInput: async (value) => {
+      const namingResult = validator.validatePackageName(value || '', []);
+      if (!namingResult.isValid) return namingResult.errors.join(', ');
+      if (context.validatePackageName) {
+        const dup = await context.validatePackageName(value);
+        if (!dup.isValid) return dup.error ?? 'Package name is invalid';
+        if (dup.warning) void vscode.window.showWarningMessage(dup.warning);
+      }
+      return null;
     }
   });
 

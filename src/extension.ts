@@ -306,6 +306,14 @@ export async function activate(context: vscode.ExtensionContext) {
         packageCreator,
         getWorkspaces: () => treeProvider.getWorkspaces(),
         refresh: () => treeProvider.refresh(),
+        validatePackageName: (name) => {
+          const workspaces = treeProvider.getWorkspaces();
+          const targetWorkspace = workspaces[0];
+          if (!targetWorkspace) {
+            return Promise.resolve({ isValid: true });
+          }
+          return duplicateDetector.validateNewPackageName(name, targetWorkspace.id, workspaces);
+        },
       });
     }),
     

@@ -282,4 +282,69 @@ describe('package-wizard', () => {
       expect(showErrorMessage).toHaveBeenCalledWith('Failed to add node: nope');
     });
   });
+
+  describe('package name uniqueness validation', () => {
+    it('blocks the wizard when the name is a duplicate in the same workspace', async () => {
+      const validatePackageName = jest.fn().mockResolvedValue({
+        isValid: false,
+        error: 'Package "dup" already exists in this workspace',
+      });
+      let captured: ((v: string) => Thenable<string | null | undefined>) | undefined;
+      showInputBox.mockImplementationOnce((opts: { validateInput: (v: string) => Thenable<string | null | undefined> }) => {
+        captured = opts.validateInput;
+        return Promise.resolve(undefined);
+      });
+
+      await runCreatePackageWizard({
+        packageCreator,
+        getWorkspaces: () => [makeWorkspace()],
+        refresh,
+        validatePackageName,
+      });
+
+      const result = await captured!('dup');
+      expect(result).toBe('Package "dup" already exists in this workspace');
+      expect(validatePackageName).toHaveBeenCalledWith('dup');
+      expect(packageCreator.createPackage).not.toHaveBeenCalled();
+    });
+
+    it('still applies naming rules and only warns on cross-workspace duplicates', async () => {
+      const validatePackageName = jest.fn().mockResolvedValue({
+        isValid: true,
+        warning: 'exists in another workspace',
+      });
+      let captured: ((v: string) => Thenable<string | null | undefined>) | undefined;
+      showInputBox.mockImplementationOnce((opts: { validateInput: (v: string) => Thenable<string | null | undefined> }) => {
+        captured = opts.validateInput;
+        return Promise.resolve(undefined);
+      });
+
+      await runCreatePackageWizard({
+        packageCreator,
+        getWorkspaces: () => [makeWorkspace()],
+        refresh,
+        validatePackageName,
+      });
+
+      expect(await captured!('UPPER')).toMatch(/lowercase/);
+      expect(await captured!('cross_ws_dup')).toBeNull();
+      expect(showWarningMessage).toHaveBeenCalledWith('exists in another workspace');
+    });
+
+    it('falls back to naming rules only when no validator is provided', async () => {
+      let captured: ((v: string) => Thenable<string | null | undefined>) | undefined;
+      showInputBox.mockImplementationOnce((opts: { validateInput: (v: string) => Thenable<string | null | undefined> }) => {
+        captured = opts.validateInput;
+        return Promise.resolve(undefined);
+      });
+
+      await runCreatePackageWizard({
+        packageCreator,
+        getWorkspaces: () => [makeWorkspace()],
+        refresh,
+      });
+
+      expect(await captured!('my_pkg')).toBeNull();
+    });
+  });
 });
