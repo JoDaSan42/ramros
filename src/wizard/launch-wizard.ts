@@ -20,6 +20,7 @@ export class LaunchWizard {
   private selectedNodes: SelectedNodeForLaunch[] = [];
   private selectedLaunchFiles: SelectedLaunchFile[] = [];
   private targetPackage: PackageInfo | null = null;
+  private format: 'py' | 'xml' = 'py';
 
   constructor(
     private workspacePath: string,
@@ -55,6 +56,17 @@ export class LaunchWizard {
 
       // Ask if launch file should be added to a workspace package
       await this.selectTargetPackage();
+
+      // Ask for the output format (Python or XML)
+      const formatPick = await vscode.window.showQuickPick(
+        [
+          { label: 'Python', description: '.launch.py (default)' },
+          { label: 'XML', description: '.launch.xml' },
+        ],
+        { placeHolder: 'Select launch file format' }
+      );
+      if (!formatPick) return;
+      this.format = formatPick.label === 'XML' ? 'xml' : 'py';
 
       // Get file name
       const fileName = await this.getFileName();
@@ -411,7 +423,7 @@ export class LaunchWizard {
     if (this.targetPackage) {
       // Save in target package's launch folder: /src/<package>/launch/
       const launchDir = path.join(this.targetPackage.path, 'launch');
-      
+
       // Ensure launch directory exists
       try {
         await vscode.workspace.fs.stat(vscode.Uri.file(launchDir));
@@ -431,7 +443,7 @@ export class LaunchWizard {
         );
       }
 
-      return path.join(launchDir, `${fileName}.launch.py`);
+      return path.join(launchDir, `${fileName}${this.getFileExtension()}`);
     }
 
     // Ask user for custom location
@@ -447,7 +459,11 @@ export class LaunchWizard {
     }
 
     const saveDir = folders[0].fsPath;
-    return path.join(saveDir, `${fileName}.launch.py`);
+    return path.join(saveDir, `${fileName}${this.getFileExtension()}`);
+  }
+
+  getFileExtension(): string {
+    return this.format === 'xml' ? '.launch.xml' : '.launch.py';
   }
 
   private async ensureLaunchFileRegistration(pkg: PackageInfo): Promise<void> {
@@ -518,7 +534,9 @@ export class LaunchWizard {
       ]
     };
 
-    const content = generator.generate(config);
+    const content = this.format === 'xml'
+      ? generator.generateXml(config)
+      : generator.generate(config);
 
     // Write file
     const uri = vscode.Uri.file(savePath);
@@ -534,12 +552,12 @@ export class LaunchWizard {
       const isValid = await generator.validate(savePath);
       if (!isValid) {
         void vscode.window.showWarningMessage(
-          `Generated launch file could not be validated. Build the workspace and verify '${fileName}.launch.py'.`
+          `Generated launch file could not be validated. Build the workspace and verify '${fileName}${this.getFileExtension()}'.`
         );
       }
     }
 
-    let message = `Launch file created: ${fileName}.launch.py`;
+    let message = `Launch file created: ${fileName}${this.getFileExtension()}`;
     if (this.targetPackage) {
       message += ` in ${this.targetPackage.name}`;
     }
@@ -557,13 +575,14 @@ export class LaunchWizard {
       if (packageName) {
         const installPath = path.join(this.workspacePath, 'install');
         const setupBash = path.join(installPath, 'setup.bash');
+        const launchFileName = `${fileName}${this.getFileExtension()}`;
         const terminal = vscode.window.createTerminal(`Launch: ${fileName}`);
         terminal.show();
         const fs = await import('fs');
         if (fs.existsSync(setupBash)) {
-          terminal.sendText(`source "${setupBash}" && ros2 launch ${packageName} ${fileName}.launch.py`);
+          terminal.sendText(`source "${setupBash}" && ros2 launch ${packageName} ${launchFileName}`);
         } else {
-          terminal.sendText(`ros2 launch ${packageName} ${fileName}.launch.py`);
+          terminal.sendText(`ros2 launch ${packageName} ${launchFileName}`);
         }
       }
     }

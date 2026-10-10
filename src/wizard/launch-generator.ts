@@ -147,6 +147,86 @@ export class LaunchGenerator {
     return lines.join('\n');
   }
 
+  generateXml(config: LaunchFileConfig): string {
+    const lines: string[] = [];
+    lines.push('<?xml version="1.0" encoding="UTF-8"?>');
+    lines.push('<launch>');
+    
+    if (config.launchArguments && config.launchArguments.length > 0) {
+      for (const arg of config.launchArguments) {
+        const attrs = `name="${this.escapeXml(arg.name)}" default_value="${this.escapeXml(arg.defaultValue)}"` +
+          (arg.description ? ` description="${this.escapeXml(arg.description)}"` : '');
+        lines.push(`  <arg ${attrs}/>`);
+      }
+    }
+    
+    for (const nodeConfig of config.nodes) {
+      const attrs: string[] = [
+        `pkg="${this.escapeXml(nodeConfig.packageName)}"`,
+        `exec="${this.escapeXml(nodeConfig.executableName)}"`,
+      ];
+      if (nodeConfig.nodeName) {
+        attrs.push(`name="${this.escapeXml(nodeConfig.nodeName)}"`);
+      }
+      if (nodeConfig.namespace) {
+        attrs.push(`namespace="${this.escapeXml(nodeConfig.namespace)}"`);
+      }
+      if (nodeConfig.output) {
+        attrs.push(`output="${this.escapeXml(nodeConfig.output)}"`);
+      }
+      
+      const children: string[] = [];
+      const allParams: Array<{ name: string; value: ParameterValue }> = [];
+      if (nodeConfig.parameters && nodeConfig.parameters.length > 0) {
+        allParams.push(...nodeConfig.parameters);
+      }
+      if (nodeConfig.useSimTime !== undefined) {
+        allParams.push({ name: 'use_sim_time', value: nodeConfig.useSimTime });
+      }
+      for (const param of allParams) {
+        children.push(`    <param name="${this.escapeXml(param.name)}" value="${this.escapeXml(this.formatXmlValue(param.value))}"/>`);
+      }
+      if (nodeConfig.remappings && nodeConfig.remappings.length > 0) {
+        for (const remap of nodeConfig.remappings) {
+          children.push(`    <remap from="${this.escapeXml(remap.from)}" to="${this.escapeXml(remap.to)}"/>`);
+        }
+      }
+      
+      if (children.length > 0) {
+        lines.push(`  <node ${attrs.join(' ')}>`);
+        lines.push(...children);
+        lines.push('  </node>');
+      } else {
+        lines.push(`  <node ${attrs.join(' ')}/>`);
+      }
+    }
+    
+    lines.push('</launch>');
+    return lines.join('\n');
+  }
+  
+  private escapeXml(s: string): string {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  }
+  
+  private formatXmlValue(value: ParameterValue): string {
+    if (typeof value === 'boolean') {
+      return value ? 'true' : 'false';
+    }
+    if (typeof value === 'number') {
+      return value.toString();
+    }
+    if (Array.isArray(value)) {
+      return JSON.stringify(value);
+    }
+    return value;
+  }
+
   async validate(filePath: string): Promise<boolean> {
     try {
       await execAsync(`ros2 launch --check ${filePath}`, {

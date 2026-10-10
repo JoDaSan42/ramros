@@ -244,4 +244,56 @@ describe('LaunchGenerator', () => {
       expect(result).toContain('very_long_node_node');
     });
   });
+
+  describe('generateXml', () => {
+    const config: LaunchFileConfig = {
+      fileName: 'demo',
+      nodes: [{
+        packageName: 'my_pkg', executableName: 'my_node', nodeName: 'my_node',
+        parameters: [{ name: 'freq', value: 10.5 }, { name: 'use_sim_time', value: true }],
+      }],
+      launchArguments: [{ name: 'use_sim_time', defaultValue: 'false' }],
+    };
+
+    it('generates well-formed XML with launch root tag', () => {
+      const xml = new LaunchGenerator().generateXml(config);
+      expect(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
+      expect(xml).toContain('<launch');
+      expect(xml).toContain('</launch>');
+      expect(xml).toMatch(/<node\s+pkg="my_pkg"\s+exec="my_node"\s+name="my_node"/);
+      expect(xml).toContain('<param name="freq" value="10.5"/>');
+      expect(xml).toContain('<param name="use_sim_time" value="true"/>');
+      expect(xml).toContain('<arg name="use_sim_time" default_value="false"/>');
+    });
+
+    it('escapes XML special characters in values', () => {
+      const xml = new LaunchGenerator().generateXml({
+        fileName: 'x', nodes: [{ packageName: 'p', executableName: 'e',
+          parameters: [{ name: 'text', value: 'a<b & c' }] },
+        ],
+      });
+      expect(xml).toContain('value="a&lt;b &amp; c"');
+    });
+
+    it('emits string parameter values without Python quotes', () => {
+      const xml = new LaunchGenerator().generateXml({
+        fileName: 'x', nodes: [{ packageName: 'p', executableName: 'e',
+          parameters: [{ name: 'label', value: 'hello' }] }],
+      });
+      expect(xml).toContain('<param name="label" value="hello"/>');
+    });
+
+    it('emits remappings and output attribute', () => {
+      const xml = new LaunchGenerator().generateXml({
+        fileName: 'x',
+        nodes: [{
+          packageName: 'p', executableName: 'e',
+          remappings: [{ from: '/in', to: '/out' }],
+          output: 'screen',
+        }],
+      });
+      expect(xml).toContain('<remap from="/in" to="/out"/>');
+      expect(xml).toContain('output="screen"');
+    });
+  });
 });
