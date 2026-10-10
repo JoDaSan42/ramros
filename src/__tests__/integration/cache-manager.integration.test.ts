@@ -295,4 +295,35 @@ describe('CacheManager Integration Tests', () => {
       expect(elapsed).toBeLessThan(100);
     });
   });
+
+  describe('Configuration reload', () => {
+    it('exposes the initial ttl and maxEntries defaults', () => {
+      expect(cacheManager.getTtlMs()).toBe(300_000);
+      expect(cacheManager.getMaxEntries()).toBe(1000);
+    });
+
+    it('reloads ttl and maxEntries when the configuration changes', () => {
+      const configListener = (vscode.workspace.onDidChangeConfiguration as jest.Mock).mock.calls
+        .map(call => call[0])
+        .filter((listener: (e: unknown) => void) => listener.toString().includes('affectsConfiguration'))
+        .pop();
+
+      expect(configListener).toBeDefined();
+
+      (vscode.workspace.getConfiguration as jest.Mock).mockImplementation((section: string) => ({
+        get: (key: string, defaultValue: unknown) => {
+          if (section === 'ramros.cache') {
+            if (key === 'ttlSeconds') return 60;
+            if (key === 'maxEntries') return 5;
+          }
+          return defaultValue;
+        },
+      }));
+
+      configListener({ affectsConfiguration: (key: string) => key === 'ramros.cache' });
+
+      expect(cacheManager.getTtlMs()).toBe(60_000);
+      expect(cacheManager.getMaxEntries()).toBe(5);
+    });
+  });
 });

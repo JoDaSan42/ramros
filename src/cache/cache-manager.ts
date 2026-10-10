@@ -51,6 +51,31 @@ export class CacheManager implements vscode.Disposable {
     this.MAX_CACHE_SIZE = options?.maxCacheSize ?? configMaxEntries;
     this.onFileChange = options?.onFileChange;
     this.setupFileSystemWatcher();
+    this.disposables.push(
+      vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration('ramros.cache')) {
+          this.reloadConfiguration();
+        }
+      })
+    );
+  }
+
+  private reloadConfiguration(): void {
+    try {
+      const config = vscode.workspace.getConfiguration('ramros.cache');
+      this.DEFAULT_TTL = config.get<number>('ttlSeconds', 300) * 1000;
+      this.MAX_CACHE_SIZE = config.get<number>('maxEntries', 1000);
+    } catch {
+      // VSCode API not available; keep current values
+    }
+  }
+
+  getTtlMs(): number {
+    return this.DEFAULT_TTL;
+  }
+
+  getMaxEntries(): number {
+    return this.MAX_CACHE_SIZE;
   }
   
   private onFileChange?: (path: string) => void;
