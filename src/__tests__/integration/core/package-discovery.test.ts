@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { PackageDiscoveryService, PackageInfo, InstalledPackageInfo } from '../../../core/package-discovery';
+import { PackageDiscoveryService, PackageInfo, InstalledPackageInfo, NodeInfo } from '../../../core/package-discovery';
 
 describe('PackageDiscoveryService', () => {
   const testFixturesPath = path.join(__dirname, '../../../../test-fixtures');
@@ -98,6 +98,32 @@ describe('PackageDiscoveryService', () => {
       
       const node = myPackage?.nodes[0];
       expect(node?.packageName).toBe('my_package');
+    });
+
+    it('should detect services and actions in C++ and Python nodes', async () => {
+      const packages = await service.discoverPackages(testFixturesPath);
+      const pkg = packages.find((p: PackageInfo) => p.name === 'mixed_package_example');
+      expect(pkg).toBeDefined();
+
+      const cppNode = pkg?.nodes.find((n: NodeInfo) => n.language === 'cpp');
+      expect(cppNode?.serviceServers).toBeDefined();
+      expect(cppNode?.serviceServers?.map(s => s.name)).toContain('/my_service');
+      expect(cppNode?.serviceClients?.map(s => s.name)).toContain('/other_service');
+      expect(cppNode?.actionServers?.map(a => a.name)).toContain('/my_action');
+      expect(cppNode?.actionClients?.map(a => a.name)).toContain('/cli_action');
+
+      const pyNode = pkg?.nodes.find((n: NodeInfo) => n.language === 'python');
+      expect(pyNode?.serviceServers?.map(s => s.name)).toContain('/py_service');
+      expect(pyNode?.serviceClients?.map(s => s.name)).toContain('/py_other_service');
+      expect(pyNode?.actionServers?.map(a => a.name)).toContain('/py_action');
+      expect(pyNode?.actionClients?.map(a => a.name)).toContain('/py_cli_action');
+    });
+
+    it('should not detect services from commented-out code', async () => {
+      const packages = await service.discoverPackages(testFixturesPath);
+      const cppNode = packages.find((p: PackageInfo) => p.name === 'mixed_package_example')
+        ?.nodes.find((n: NodeInfo) => n.language === 'cpp');
+      expect(cppNode?.serviceServers?.map(s => s.name)).not.toContain('/commented_service');
     });
   });
   

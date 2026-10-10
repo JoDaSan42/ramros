@@ -19,6 +19,14 @@ public:
     this->declare_parameter("max_retries", 3);
     this->declare_parameter("timeout", 5.0);
     this->declare_parameter("enabled", true);
+
+    // create_service<my_ns::srv::Commented>("/commented_service", std::bind(&CppNode::handle, this, _1, _2));
+    auto srv = create_service<my_ns::srv::MyService>(
+        "/my_service", std::bind(&CppNode::handle, this, std::placeholders::_1, std::placeholders::_2));
+    auto cli = this->create_client<my_ns::srv::OtherService>("/other_service");
+    auto act_srv = rclcpp_action::create_server<my_ns::action::MyAction>(
+        this, "/my_action", std::bind(&CppNode::goal, this, std::placeholders::_1));
+    auto act_cli = rclcpp_action::create_client<my_ns::action::CliAction>(this, "/cli_action");
   }
 
 private:

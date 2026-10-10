@@ -11,6 +11,16 @@ class PythonNode(Node):
         timer_period = 0.5
         self.timer = self.create_timer(timer_period, self.timer_callback)
         self.i = 0
+        self.srv = self.create_service(MySrv, '/py_service', self.srv_callback)
+        self.cli = self.create_client(OtherSrv, '/py_other_service')
+        self.act_srv = ActionServer(self, MyAction, '/py_action', self.execute_cb)
+        self.act_cli = ActionClient(self, CliAction, '/py_cli_action')
+
+    def srv_callback(self, request, response):
+        return response
+
+    def execute_cb(self, goal_handle):
+        return goal_handle
 
     def timer_callback(self):
         msg = String()

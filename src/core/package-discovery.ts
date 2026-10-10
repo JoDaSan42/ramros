@@ -676,6 +676,12 @@ export class PackageDiscoveryService {
     return null;
   }
 
+  private isCommentedLine(content: string, matchIndex: number): boolean {
+    const lineStart = content.lastIndexOf('\n', matchIndex) + 1;
+    const beforeMatch = content.slice(lineStart, matchIndex).trim();
+    return beforeMatch.startsWith('//');
+  }
+
   private async analyzeCppNode(filePath: string): Promise<Partial<NodeInfo>> {
     if (!fs.existsSync(filePath)) {
       return {};
@@ -685,6 +691,10 @@ export class PackageDiscoveryService {
     const publishers: TopicEndpointInfo[] = [];
     const subscriptions: TopicEndpointInfo[] = [];
     const parameters: ParameterInfo[] = [];
+    const serviceServers: ServiceInfo[] = [];
+    const serviceClients: ServiceInfo[] = [];
+    const actionServers: ActionInfo[] = [];
+    const actionClients: ActionInfo[] = [];
 
     const publisherPattern = /create_publisher\s*<\s*([^>]+)>\s*\(\s*["']([^"']+)["']/gs;
     let match: RegExpExecArray | null;
@@ -710,12 +720,12 @@ export class PackageDiscoveryService {
       const rawDefault = match[2]?.trim();
       let defaultValue: string | undefined;
       let paramType: string | undefined;
-      
+
       if (rawDefault) {
         defaultValue = rawDefault.replace(/^["']|["']$/g, '');
         paramType = ParameterCoercer.inferType(rawDefault);
       }
-      
+
       parameters.push({
         name: paramName,
         defaultValue,
@@ -723,10 +733,38 @@ export class PackageDiscoveryService {
       });
     }
 
+    const cppServiceServerPattern = /(?:this->)?create_service\s*<\s*([^>]+)>\s*\(\s*(?:this\s*,\s*)?["']([^"']+)["']/gs;
+    while ((match = cppServiceServerPattern.exec(content)) !== null) {
+      if (this.isCommentedLine(content, match.index)) continue;
+      serviceServers.push({ serviceType: match[1].trim(), name: match[2] });
+    }
+
+    const cppServiceClientPattern = /(?:this->)?create_client\s*<\s*([^>]+)>\s*\(\s*(?:this\s*,\s*)?["']([^"']+)["']/gs;
+    while ((match = cppServiceClientPattern.exec(content)) !== null) {
+      if (this.isCommentedLine(content, match.index)) continue;
+      serviceClients.push({ serviceType: match[1].trim(), name: match[2] });
+    }
+
+    const cppActionServerPattern = /rclcpp_action::create_server\s*<\s*([^>]+)>\s*\(\s*(?:this\s*,\s*)?["']([^"']+)["']/gs;
+    while ((match = cppActionServerPattern.exec(content)) !== null) {
+      if (this.isCommentedLine(content, match.index)) continue;
+      actionServers.push({ actionType: match[1].trim(), name: match[2] });
+    }
+
+    const cppActionClientPattern = /rclcpp_action::create_client\s*<\s*([^>]+)>\s*\(\s*(?:this\s*,\s*)?["']([^"']+)["']/gs;
+    while ((match = cppActionClientPattern.exec(content)) !== null) {
+      if (this.isCommentedLine(content, match.index)) continue;
+      actionClients.push({ actionType: match[1].trim(), name: match[2] });
+    }
+
     return {
       publishers: publishers.length > 0 ? publishers : undefined,
       subscriptions: subscriptions.length > 0 ? subscriptions : undefined,
       parameters: parameters.length > 0 ? parameters : undefined,
+      serviceServers: serviceServers.length > 0 ? serviceServers : undefined,
+      serviceClients: serviceClients.length > 0 ? serviceClients : undefined,
+      actionServers: actionServers.length > 0 ? actionServers : undefined,
+      actionClients: actionClients.length > 0 ? actionClients : undefined,
     };
   }
 
@@ -769,6 +807,7 @@ export class PackageDiscoveryService {
     nodeName: string
   ): string | null {
     const possiblePaths = [
+      path.join(packagePath, moduleName.replace(/\./g, '/') + '.py'),
       path.join(packagePath, moduleName.replace(/\./g, '/'), `${nodeName}.py`),
       path.join(packagePath, moduleName.replace(/\./g, '/'), '__main__.py'),
       path.join(packagePath, 'src', moduleName.replace(/\./g, '/'), `${nodeName}.py`),
@@ -799,6 +838,10 @@ export class PackageDiscoveryService {
     const publishers: TopicEndpointInfo[] = [];
     const subscriptions: TopicEndpointInfo[] = [];
     const parameters: ParameterInfo[] = [];
+    const serviceServers: ServiceInfo[] = [];
+    const serviceClients: ServiceInfo[] = [];
+    const actionServers: ActionInfo[] = [];
+    const actionClients: ActionInfo[] = [];
 
     const publisherPattern = /create_publisher\s*\(\s*([^,]+),\s*["']([^"']+)["']/gs;
     let match: RegExpExecArray | null;
@@ -818,6 +861,30 @@ export class PackageDiscoveryService {
         messageType: msgType,
         topicName: match[2],
       });
+    }
+
+    const pyServiceServerPattern = /create_service\s*\(\s*([\w.]+)\s*,\s*["']([^"']+)["']/gs;
+    while ((match = pyServiceServerPattern.exec(content)) !== null) {
+      if (this.isCommentedLine(content, match.index)) continue;
+      serviceServers.push({ serviceType: match[1].trim(), name: match[2] });
+    }
+
+    const pyServiceClientPattern = /create_client\s*\(\s*([\w.]+)\s*,\s*["']([^"']+)["']/gs;
+    while ((match = pyServiceClientPattern.exec(content)) !== null) {
+      if (this.isCommentedLine(content, match.index)) continue;
+      serviceClients.push({ serviceType: match[1].trim(), name: match[2] });
+    }
+
+    const pyActionServerPattern = /ActionServer\s*\(\s*self\s*,\s*([\w.]+)\s*,\s*["']([^"']+)["']/gs;
+    while ((match = pyActionServerPattern.exec(content)) !== null) {
+      if (this.isCommentedLine(content, match.index)) continue;
+      actionServers.push({ actionType: match[1].trim(), name: match[2] });
+    }
+
+    const pyActionClientPattern = /ActionClient\s*\(\s*self\s*,\s*([\w.]+)\s*,\s*["']([^"']+)["']/gs;
+    while ((match = pyActionClientPattern.exec(content)) !== null) {
+      if (this.isCommentedLine(content, match.index)) continue;
+      actionClients.push({ actionType: match[1].trim(), name: match[2] });
     }
 
     const paramPattern = /declare_parameter\s*\(['"]([^'"]+)['"]\s*(?:,\s*([^)]+))?/g;
@@ -846,6 +913,10 @@ export class PackageDiscoveryService {
       publishers: publishers.length > 0 ? publishers : undefined,
       subscriptions: subscriptions.length > 0 ? subscriptions : undefined,
       parameters: parameters.length > 0 ? parameters : undefined,
+      serviceServers: serviceServers.length > 0 ? serviceServers : undefined,
+      serviceClients: serviceClients.length > 0 ? serviceClients : undefined,
+      actionServers: actionServers.length > 0 ? actionServers : undefined,
+      actionClients: actionClients.length > 0 ? actionClients : undefined,
     };
   }
 
