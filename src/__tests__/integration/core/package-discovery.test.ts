@@ -121,9 +121,13 @@ describe('PackageDiscoveryService', () => {
 
     it('should not detect services from commented-out code', async () => {
       const packages = await service.discoverPackages(testFixturesPath);
-      const cppNode = packages.find((p: PackageInfo) => p.name === 'mixed_package_example')
-        ?.nodes.find((n: NodeInfo) => n.language === 'cpp');
+      const pkg = packages.find((p: PackageInfo) => p.name === 'mixed_package_example');
+      const cppNode = pkg?.nodes.find((n: NodeInfo) => n.language === 'cpp');
       expect(cppNode?.serviceServers?.map(s => s.name)).not.toContain('/commented_service');
+
+      const pyNode = pkg?.nodes.find((n: NodeInfo) => n.language === 'python');
+      expect(pyNode?.serviceServers?.map(s => s.name)).not.toContain('/py_commented_service');
+      expect(pyNode?.actionClients?.map(a => a.name)).not.toContain('/py_commented_action');
     });
   });
   

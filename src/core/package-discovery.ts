@@ -679,7 +679,7 @@ export class PackageDiscoveryService {
   private isCommentedLine(content: string, matchIndex: number): boolean {
     const lineStart = content.lastIndexOf('\n', matchIndex) + 1;
     const beforeMatch = content.slice(lineStart, matchIndex).trim();
-    return beforeMatch.startsWith('//');
+    return beforeMatch.startsWith('//') || beforeMatch.startsWith('#');
   }
 
   private async analyzeCppNode(filePath: string): Promise<Partial<NodeInfo>> {

@@ -15,6 +15,8 @@ class PythonNode(Node):
         self.cli = self.create_client(OtherSrv, '/py_other_service')
         self.act_srv = ActionServer(self, MyAction, '/py_action', self.execute_cb)
         self.act_cli = ActionClient(self, CliAction, '/py_cli_action')
+        # self.act_cli2 = ActionClient(self, CliAction, '/py_commented_action')
+        # self.srv2 = self.create_service(MySrv, '/py_commented_service', self.srv_callback)
 
     def srv_callback(self, request, response):
         return response
