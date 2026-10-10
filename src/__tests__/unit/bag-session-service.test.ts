@@ -119,4 +119,59 @@ describe('BagSessionService', () => {
       expect(service.isPlaying).toBe(false);
     });
   });
+
+  describe('handleTerminalClosed', () => {
+    it('resets recording state when the recording terminal closes', () => {
+      const mockTerminal = { dispose: jest.fn(), sendText: jest.fn() } as any;
+      service.setRecordingTerminal(mockTerminal);
+      const handled = service.handleTerminalClosed(mockTerminal);
+      expect(handled).toBe(true);
+      expect(service.isRecording).toBe(false);
+      expect(service.isRecordingPaused).toBe(false);
+    });
+
+    it('resets playback state when the playback terminal closes', () => {
+      const mockTerminal = { dispose: jest.fn(), sendText: jest.fn() } as any;
+      service.setPlaybackTerminal(mockTerminal);
+      service.setPlaybackPaused(true);
+      const handled = service.handleTerminalClosed(mockTerminal);
+      expect(handled).toBe(true);
+      expect(service.isPlaying).toBe(false);
+      expect(service.isPlaybackPaused).toBe(false);
+    });
+
+    it('ignores unrelated terminals', () => {
+      const recording = { dispose: jest.fn(), sendText: jest.fn() } as any;
+      service.setRecordingTerminal(recording);
+      const other = { dispose: jest.fn() } as any;
+      expect(service.handleTerminalClosed(other)).toBe(false);
+      expect(service.isRecording).toBe(true);
+      service.setRecordingTerminal(null);
+    });
+  });
+
+  describe('stopRecordingAsync / stopPlaybackAsync', () => {
+    it('sends SIGINT and waits before disposing the recording terminal', async () => {
+      const mockTerminal = { dispose: jest.fn(), sendText: jest.fn() } as any;
+      service.setRecordingTerminal(mockTerminal);
+      await service.stopRecordingAsync();
+      expect(mockTerminal.sendText).toHaveBeenCalledWith('\x03');
+      expect(mockTerminal.dispose).toHaveBeenCalled();
+      expect(service.isRecording).toBe(false);
+    });
+
+    it('sends SIGINT and waits before disposing the playback terminal', async () => {
+      const mockTerminal = { dispose: jest.fn(), sendText: jest.fn() } as any;
+      service.setPlaybackTerminal(mockTerminal);
+      await service.stopPlaybackAsync();
+      expect(mockTerminal.sendText).toHaveBeenCalledWith('\x03');
+      expect(mockTerminal.dispose).toHaveBeenCalled();
+      expect(service.isPlaying).toBe(false);
+    });
+
+    it('is a no-op without an active recording terminal', async () => {
+      await expect(service.stopRecordingAsync()).resolves.toBeUndefined();
+      await expect(service.stopPlaybackAsync()).resolves.toBeUndefined();
+    });
+  });
 });

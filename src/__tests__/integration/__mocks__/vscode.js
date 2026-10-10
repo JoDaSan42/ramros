@@ -37,7 +37,8 @@ module.exports = {
     showInputBox: jest.fn(),
     showOpenDialog: jest.fn(),
     withProgress: jest.fn(),
-    createTreeView: jest.fn()
+    createTreeView: jest.fn(),
+    onDidCloseTerminal: jest.fn().mockReturnValue({ dispose: jest.fn() })
   },
   commands: {
     registerCommand: jest.fn(),

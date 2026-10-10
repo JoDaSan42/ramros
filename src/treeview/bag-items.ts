@@ -413,7 +413,7 @@ export class BagInfoLineItem extends TreeItemBase {
     this.iconPath = isHeader ? new vscode.ThemeIcon('archive') : undefined;
     this.contextValue = 'bagInfoLine';
     if (isHeader) {
-      this.resourceUri = vscode.Uri.file(text);
+      this.resourceUri = vscode.Uri.file(text.replace(/^📦\s*/, ''));
     }
   }
   

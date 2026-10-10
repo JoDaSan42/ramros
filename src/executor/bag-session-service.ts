@@ -1,5 +1,13 @@
 import * as vscode from 'vscode';
 
+// SIGINT needs a moment to reach ros2 bag before the terminal is torn down,
+// otherwise the recording may not finalize cleanly.
+const SIGINT_SETTLE_MS = 200;
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export class BagSessionService implements vscode.Disposable {
   private static instance: BagSessionService | undefined;
 
@@ -112,6 +120,40 @@ export class BagSessionService implements vscode.Disposable {
   clearBagInfo(): void {
     this._bagInfoText = 'No bag file selected';
     this._bagInfoPath = null;
+  }
+
+  handleTerminalClosed(terminal: vscode.Terminal): boolean {
+    if (terminal === this._recordingTerminal) {
+      this._recordingTerminal = null;
+      this._recordingPaused = false;
+      return true;
+    }
+    if (terminal === this._playbackTerminal) {
+      this._playbackTerminal = null;
+      this._playbackPaused = false;
+      return true;
+    }
+    return false;
+  }
+
+  async stopRecordingAsync(): Promise<void> {
+    const terminal = this._recordingTerminal;
+    if (!terminal) return;
+    terminal.sendText('\x03');
+    await delay(SIGINT_SETTLE_MS);
+    this._recordingTerminal = null;
+    this._recordingPaused = false;
+    terminal.dispose();
+  }
+
+  async stopPlaybackAsync(): Promise<void> {
+    const terminal = this._playbackTerminal;
+    if (!terminal) return;
+    terminal.sendText('\x03');
+    await delay(SIGINT_SETTLE_MS);
+    this._playbackTerminal = null;
+    this._playbackPaused = false;
+    terminal.dispose();
   }
 
   dispose(): void {

@@ -155,7 +155,12 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       void treeProvider.onWorkspaceFoldersChanged();
     }),
-    
+    vscode.window.onDidCloseTerminal(terminal => {
+      if (bagSession.handleTerminalClosed(terminal)) {
+        void toolsTreeProvider.refresh();
+      }
+    }),
+
     vscode.commands.registerCommand('ramros.refreshWorkspaces', async () => {
       await treeProvider.refresh();
       void vscode.window.showInformationMessage('Workspaces refreshed');
@@ -734,22 +739,15 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
     
     vscode.commands.registerCommand('ramros.bag.stopRecording', async () => {
-      const recordingTerminal = bagSession.recordingTerminal;
-      if (recordingTerminal) {
-        recordingTerminal.sendText('\x03'); // Ctrl+C
-        
-        // Clear terminal reference and state
-        recordingTerminal.dispose();
-        bagSession.setRecordingTerminal(null);
-        BagRecordItem.setRecordingState(false);
-        BagRecordItem.setPausedState(false);
-        
+      if (bagSession.isRecording) {
+        await bagSession.stopRecordingAsync();
+
         // Reset instances to clear the controls from the tree
         BagFilesFolderItem.resetInstances();
-        
+
         // Update tree view
         await toolsTreeProvider.refresh();
-        
+
         void vscode.window.showInformationMessage('Recording stopped');
       } else {
         void vscode.window.showWarningMessage('No active recording');
@@ -881,48 +879,39 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('ramros.bag.toggleLoop', async () => {
       const isLooping = bagSession.togglePlaybackLoop();
       BagLoopItem.setLoopingState(isLooping);
-      
+
       void vscode.window.showInformationMessage(`Loop playback ${isLooping ? 'enabled' : 'disabled'}`);
-      
-      // If currently playing, restart with new loop setting
-      const playbackTerminal = bagSession.playbackTerminal;
-      if (playbackTerminal) {
-        // Stop current playback
-        playbackTerminal.sendText('\x03'); // Ctrl+C
-        playbackTerminal.dispose();
-        bagSession.setPlaybackTerminal(null);
+
+      // If currently playing, restart with the new loop setting
+      if (bagSession.isPlaying) {
+        await bagSession.stopPlaybackAsync();
         BagPlayControlItem.setPlayingState(false, false);
-        
+
         const bagPath = bagSession.selectedBagPath ?? BagPlayItem.getSelectedBag();
-        if (bagPath && isLooping) {
+        if (bagPath) {
           const workspace = await pickWorkspace();
           if (workspace) {
             await terminalManager.waitForRestart();
-            const loopArg = '--loop';
+            const loopArg = isLooping ? '--loop' : '';
             const playCommand = `script -q -c 'ros2 bag play "${bagPath}" ${loopArg}' /dev/null`;
             const newTerminal = await terminalManager.executeInNewTerminal(playCommand, workspace, `Bag Play: ${path.basename(bagPath)}`);
             bagSession.setPlaybackTerminal(newTerminal);
             BagPlayControlItem.setPlayingState(true, false);
-
-            await toolsTreeProvider.refresh();
           }
         }
       }
-      
+
       await toolsTreeProvider.refresh();
     }),
-    
+
     vscode.commands.registerCommand('ramros.bag.stop', async () => {
-      const playbackTerminal = bagSession.playbackTerminal;
-      if (playbackTerminal) {
-        playbackTerminal.sendText('\x03'); // Ctrl+C
-        playbackTerminal.dispose();
-        bagSession.setPlaybackTerminal(null);
+      if (bagSession.isPlaying) {
+        await bagSession.stopPlaybackAsync();
         BagPlayControlItem.setPlayingState(false, false);
-        
+
         // Reset instances to clear the controls from the tree
         BagFilesFolderItem.resetInstances();
-        
+
         await toolsTreeProvider.refresh();
         void vscode.window.showInformationMessage('Bag playback stopped');
       } else {
