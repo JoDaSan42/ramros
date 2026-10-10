@@ -420,19 +420,18 @@ export class LaunchWizard {
   }
 
   private async determineSaveLocation(fileName: string): Promise<string | undefined> {
-    if (this.targetPackage) {
-      // Save in target package's launch folder: /src/<package>/launch/
-      const launchDir = path.join(this.targetPackage.path, 'launch');
+    const defaultDir = this.resolveDefaultSaveDir();
 
-      // Ensure launch directory exists
+    if (defaultDir) {
+      // Ensure the target directory exists
       try {
-        await vscode.workspace.fs.stat(vscode.Uri.file(launchDir));
+        await vscode.workspace.fs.stat(vscode.Uri.file(defaultDir));
       } catch {
-        await vscode.workspace.fs.createDirectory(vscode.Uri.file(launchDir));
+        await vscode.workspace.fs.createDirectory(vscode.Uri.file(defaultDir));
       }
 
       // Create .gitignore to exclude __pycache__ and build artifacts
-      const gitignorePath = path.join(launchDir, '.gitignore');
+      const gitignorePath = path.join(defaultDir, '.gitignore');
       const gitignoreContent = '# Python cache\n__pycache__/\n*.pyc\n\n# Build artifacts\nbuild/\n';
       try {
         await vscode.workspace.fs.stat(vscode.Uri.file(gitignorePath));
@@ -443,7 +442,7 @@ export class LaunchWizard {
         );
       }
 
-      return path.join(launchDir, `${fileName}${this.getFileExtension()}`);
+      return path.join(defaultDir, `${fileName}${this.getFileExtension()}`);
     }
 
     // Ask user for custom location
@@ -464,6 +463,31 @@ export class LaunchWizard {
 
   getFileExtension(): string {
     return this.format === 'xml' ? '.launch.xml' : '.launch.py';
+  }
+
+  resolveDefaultSaveDir(): string | null {
+    const config = vscode.workspace.getConfiguration('ramros.launchGenerator');
+    const location = config.get<string>('defaultLocation', 'package_launch_folder');
+
+    if (location === 'workspace_root') {
+      return this.workspacePath;
+    }
+
+    if (location === 'custom') {
+      const customPath = config.get<string>('customPath', '');
+      if (!customPath || customPath.trim().length === 0) {
+        return null;
+      }
+      return customPath
+        .replace(/\{workspace\}/g, this.workspacePath)
+        .replace(/\{package\}/g, this.targetPackage?.name ?? '{package}');
+    }
+
+    if (this.targetPackage) {
+      return path.join(this.targetPackage.path, 'launch');
+    }
+
+    return null;
   }
 
   private async ensureLaunchFileRegistration(pkg: PackageInfo): Promise<void> {
