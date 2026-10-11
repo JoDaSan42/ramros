@@ -221,6 +221,11 @@
         "command": "ramros.interface.showDefinition",
         "title": "Show Definition",
         "icon": "$(eye)"
+      },
+      {
+        "command": "ramros.tools.healthCheck",
+        "title": "Run ROS2 Health Check",
+        "icon": "$(heart)"
       }
     ],
     "menus": {
@@ -259,6 +264,11 @@
           "command": "ramros.launchTool.rqt_graph",
           "when": "view == ramrosLive",
           "group": "navigation@3"
+        },
+        {
+          "command": "ramros.tools.healthCheck",
+          "when": "view == ramrosLive",
+          "group": "navigation@4"
         }
       ],
       "view/item/context": [

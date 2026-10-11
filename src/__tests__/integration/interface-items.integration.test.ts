@@ -1,7 +1,7 @@
 import { exec } from 'child_process';
 import * as vscode from 'vscode';
 import { RamrosDocProvider } from '../../core/ramros-doc-provider';
-import { showInterfaceDefinition, __setDocProviderForTests } from '../../extension';
+import { showInterfaceDefinition, runHealthCheck, __setDocProviderForTests } from '../../extension';
 import { InterfaceFileItem } from '../../treeview/workspace-items';
 import { CategoryInterfaceFileItem } from '../../treeview/category-items';
 import { InterfaceInfo } from '../../core/package-discovery';
@@ -140,6 +140,75 @@ describe('showInterfaceDefinition', () => {
       expect.stringContaining('colcon build')
     );
     expect(vscode.window.showErrorMessage).toHaveBeenCalledTimes(1);
+    expect(vscode.window.showTextDocument).not.toHaveBeenCalled();
+  });
+});
+
+describe('runHealthCheck', () => {
+  let provider: RamrosDocProvider;
+
+  beforeEach(() => {
+    provider = new RamrosDocProvider();
+    __setDocProviderForTests(provider);
+    (vscode.window.showErrorMessage as jest.Mock).mockReset();
+    (vscode.window.showWarningMessage as jest.Mock).mockReset();
+    (vscode.window.showTextDocument as jest.Mock).mockReset().mockResolvedValue({});
+  });
+
+  afterEach(() => {
+    provider.dispose();
+    (vscode.window.showErrorMessage as jest.Mock).mockReset();
+    (vscode.window.showWarningMessage as jest.Mock).mockReset();
+    (vscode.window.showTextDocument as jest.Mock).mockReset().mockResolvedValue({});
+    jest.restoreAllMocks();
+  });
+
+  it('shows ros2 doctor stdout in a read-only document', async () => {
+    (exec as unknown as jest.Mock).mockImplementationOnce((...args: unknown[]) => {
+      const cb = args[args.length - 1] as (error: Error | null, stdout: string, stderr: string) => void;
+      cb(null, 'out', '');
+    });
+
+    await runHealthCheck(provider);
+
+    expect(provider.provideTextDocumentContent(RamrosDocProvider.docUri('ros2-doctor'))).toBe('out');
+    expect(vscode.window.showTextDocument).toHaveBeenCalledWith(
+      RamrosDocProvider.docUri('ros2-doctor'),
+      { preview: true, preserveFocus: false }
+    );
+    expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+    expect(exec).toHaveBeenCalledWith(
+      'ros2 doctor',
+      { encoding: 'utf-8', timeout: 60000 },
+      expect.any(Function)
+    );
+  });
+
+  it('shows stderr findings when ros2 doctor exits non-zero', async () => {
+    (exec as unknown as jest.Mock).mockImplementationOnce((...args: unknown[]) => {
+      const cb = args[args.length - 1] as (error: Error | null, stdout: string, stderr: string) => void;
+      cb(new Error('ros2 doctor failed'), '', 'warnings');
+    });
+
+    await runHealthCheck(provider);
+
+    expect(provider.provideTextDocumentContent(RamrosDocProvider.docUri('ros2-doctor'))).toBe('warnings');
+    expect(vscode.window.showTextDocument).toHaveBeenCalledWith(
+      RamrosDocProvider.docUri('ros2-doctor'),
+      { preview: true, preserveFocus: false }
+    );
+    expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
+  it('warns when ros2 doctor returns no output', async () => {
+    (exec as unknown as jest.Mock).mockImplementationOnce((...args: unknown[]) => {
+      const cb = args[args.length - 1] as (error: Error | null, stdout: string, stderr: string) => void;
+      cb(new Error('ros2 doctor failed'), '', '');
+    });
+
+    await runHealthCheck(provider);
+
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith('ros2 doctor returned no output');
     expect(vscode.window.showTextDocument).not.toHaveBeenCalled();
   });
 });

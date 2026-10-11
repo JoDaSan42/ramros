@@ -219,6 +219,24 @@ export async function showInterfaceDefinition(qualifiedName: string): Promise<vo
   }
 }
 
+export async function runHealthCheck(provider: RamrosDocProvider): Promise<void> {
+  let stdout = '';
+  let stderr = '';
+  try {
+    ({ stdout, stderr } = await execAsync('ros2 doctor', { encoding: 'utf-8', timeout: 60000 }));
+  } catch (error) {
+    const err = error as Error & { stdout?: string; stderr?: string };
+    stdout = err.stdout ?? '';
+    stderr = err.stderr ?? '';
+  }
+  const combinedOutput = stdout + stderr;
+  if (combinedOutput.length === 0) {
+    void vscode.window.showWarningMessage('ros2 doctor returned no output');
+    return;
+  }
+  await showInReadonlyDoc(provider, 'ros2-doctor', combinedOutput);
+}
+
 export function resolveWorkspaceForLaunch(
   arg: TreeItemBase | undefined,
   workspaces: WorkspaceInfo[]
@@ -936,6 +954,10 @@ export async function activate(context: vscode.ExtensionContext) {
     
     vscode.commands.registerCommand('ramros.live.settings', async () => {
       liveTreeProvider.openSettings();
+    }),
+    
+    vscode.commands.registerCommand('ramros.tools.healthCheck', async () => {
+      await runHealthCheck(ramrosDocProvider);
     }),
     
     vscode.commands.registerCommand('ramros.live.echoTopic', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
