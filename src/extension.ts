@@ -110,6 +110,14 @@ function resolveBagPath(treeItem?: TreeItemBase | TreeItemBase[]): string | unde
   return undefined;
 }
 
+function resolveInterfaceQualifiedName(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {
+  const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
+  if (item && 'getQualifiedName' in item && typeof (item as { getQualifiedName?: unknown }).getQualifiedName === 'function') {
+    return (item as unknown as { getQualifiedName: () => string }).getQualifiedName();
+  }
+  return undefined;
+}
+
 async function pickTopic(): Promise<string | undefined> {
   const topics = await executeCommandAndGetOutput('ros2 topic list');
   if (topics.length === 0) {
@@ -196,6 +204,19 @@ export async function selectBagForPlayback(bagPath: string): Promise<void> {
 
 export function __setTreeProviderForTests(provider: RamrosTreeProvider): void {
   treeProvider = provider;
+}
+
+export function __setDocProviderForTests(provider: RamrosDocProvider): void {
+  ramrosDocProvider = provider;
+}
+
+export async function showInterfaceDefinition(qualifiedName: string): Promise<void> {
+  try {
+    const { stdout } = await execAsync(`ros2 interface show ${qualifiedName}`, { encoding: 'utf-8', timeout: 5000 });
+    await showInReadonlyDoc(ramrosDocProvider, `interface/${qualifiedName.replace(/\//g, '-')}`, stdout);
+  } catch {
+    void vscode.window.showErrorMessage(`Could not show interface ${qualifiedName}. Is the workspace built (colcon build)?`);
+  }
 }
 
 export function resolveWorkspaceForLaunch(
@@ -636,6 +657,15 @@ export async function activate(context: vscode.ExtensionContext) {
       await terminalManager.openPackageTerminal(selectedWorkspace, packagePath);
     }),
     
+    vscode.commands.registerCommand('ramros.interface.showDefinition', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
+      const qualifiedName = resolveInterfaceQualifiedName(treeItem);
+      if (!qualifiedName) {
+        void vscode.window.showWarningMessage('No interface selected');
+        return;
+      }
+      await showInterfaceDefinition(qualifiedName);
+    }),
+
     vscode.commands.registerCommand('ramros.createLaunchFile', async (arg?: TreeItemBase) => {
       const workspaces = treeProvider.getWorkspaces();
       if (workspaces.length === 0) {

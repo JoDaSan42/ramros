@@ -1,6 +1,33 @@
+import { exec } from 'child_process';
+import * as vscode from 'vscode';
+import { RamrosDocProvider } from '../../core/ramros-doc-provider';
+import { showInterfaceDefinition, __setDocProviderForTests } from '../../extension';
 import { InterfaceFileItem } from '../../treeview/workspace-items';
 import { CategoryInterfaceFileItem } from '../../treeview/category-items';
 import { InterfaceInfo } from '../../core/package-discovery';
+
+jest.mock('child_process', () => {
+  const execMock = jest.fn((...args: unknown[]) => {
+    const cb = args[args.length - 1] as (error: Error | null, stdout: string, stderr: string) => void;
+    cb(new Error('ros2 CLI not available in tests'), '', '');
+  });
+  Object.defineProperty(execMock, Symbol.for('nodejs.util.promisify.custom'), {
+    value: (command: string, options: unknown) =>
+      new Promise((resolve, reject) => {
+        execMock(command, options, (error: Error | null, stdout: string, stderr: string) => {
+          if (error) {
+            (error as Error & { stdout?: string; stderr?: string }).stdout = stdout;
+            (error as Error & { stdout?: string; stderr?: string }).stderr = stderr;
+            reject(error);
+          } else {
+            resolve({ stdout, stderr });
+          }
+        });
+      }),
+    configurable: true
+  });
+  return { exec: execMock };
+});
 
 describe('Interface tree item qualified names', () => {
   const makeIface = (overrides: Partial<InterfaceInfo>): InterfaceInfo => ({
@@ -59,5 +86,60 @@ describe('Interface tree item qualified names', () => {
       );
       expect(item.getQualifiedName()).toBe('my_pkg/action/Navigate');
     });
+  });
+});
+
+describe('showInterfaceDefinition', () => {
+  let provider: RamrosDocProvider;
+
+  beforeEach(() => {
+    provider = new RamrosDocProvider();
+    __setDocProviderForTests(provider);
+    (vscode.window.showErrorMessage as jest.Mock).mockReset();
+    (vscode.window.showTextDocument as jest.Mock).mockReset().mockResolvedValue({});
+  });
+
+  afterEach(() => {
+    provider.dispose();
+    (vscode.window.showErrorMessage as jest.Mock).mockReset();
+    (vscode.window.showTextDocument as jest.Mock).mockReset().mockResolvedValue({});
+    jest.restoreAllMocks();
+  });
+
+  it('shows the resolved definition in a read-only document', async () => {
+    (exec as unknown as jest.Mock).mockImplementationOnce((...args: unknown[]) => {
+      const cb = args[args.length - 1] as (error: Error | null, stdout: string, stderr: string) => void;
+      cb(null, 'definition text', '');
+    });
+
+    await showInterfaceDefinition('my_pkg/srv/Reset');
+
+    const key = 'interface/my_pkg-srv-Reset';
+    expect(provider.provideTextDocumentContent(RamrosDocProvider.docUri(key))).toBe('definition text');
+    expect(vscode.window.showTextDocument).toHaveBeenCalledWith(
+      RamrosDocProvider.docUri(key),
+      { preview: true, preserveFocus: false }
+    );
+    expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+    expect(exec).toHaveBeenCalledWith(
+      'ros2 interface show my_pkg/srv/Reset',
+      { encoding: 'utf-8', timeout: 5000 },
+      expect.any(Function)
+    );
+  });
+
+  it('shows a colcon build hint when ros2 interface show fails', async () => {
+    (exec as unknown as jest.Mock).mockImplementationOnce((...args: unknown[]) => {
+      const cb = args[args.length - 1] as (error: Error | null, stdout: string, stderr: string) => void;
+      cb(new Error('interface not found'), '', '');
+    });
+
+    await showInterfaceDefinition('my_pkg/srv/Reset');
+
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+      expect.stringContaining('colcon build')
+    );
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledTimes(1);
+    expect(vscode.window.showTextDocument).not.toHaveBeenCalled();
   });
 });

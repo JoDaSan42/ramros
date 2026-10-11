@@ -216,6 +216,11 @@
       {
         "command": "ramros.bag.playBagByPath",
         "title": "Select Bag for Playback"
+      },
+      {
+        "command": "ramros.interface.showDefinition",
+        "title": "Show Definition",
+        "icon": "$(eye)"
       }
     ],
     "menus": {
@@ -328,6 +333,15 @@
         {
           "command": "ramros.runLaunchFile",
           "when": "view == ramrosExplorer && viewItem == launchFile"
+        },
+        {
+          "command": "ramros.interface.showDefinition",
+          "when": "view == ramrosExplorer && viewItem == interfaceFile",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.interface.showDefinition",
+          "when": "view == ramrosExplorer && viewItem == interfaceFile"
         },
         {
           "command": "ramros.addNodeToPackage",
