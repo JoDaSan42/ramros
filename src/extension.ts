@@ -1255,6 +1255,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
   
   await treeProvider.refresh();
+  await liveTreeProvider.reloadFromWorkspaceConfig();
 }
 
 export function deactivate() {

@@ -397,5 +397,27 @@ describe('LiveTreeProvider Integration Tests', () => {
         configuredProvider.dispose();
       }
     });
+
+    it('applies enabled:false via reloadFromWorkspaceConfig when the config file appears after construction', async () => {
+      const configService = new WorkspaceConfigService(() => tempDir);
+
+      const configuredProvider = new LiveTreeProvider(configService);
+      try {
+        await new Promise(resolve => setTimeout(resolve, 25));
+        expect(configuredProvider.isEnabled()).toBe(true);
+
+        writeRamrosJson({ liveView: { enabled: false } });
+        await configuredProvider.reloadFromWorkspaceConfig();
+
+        expect(configuredProvider.isEnabled()).toBe(false);
+        expect(configuredProvider.isAutoRefreshEnabled()).toBe(false);
+
+        const children = await configuredProvider.getChildren();
+        expect(children).toHaveLength(1);
+        expect(children[0]).toBeInstanceOf(LiveViewDisabledItem);
+      } finally {
+        configuredProvider.dispose();
+      }
+    });
   });
 });

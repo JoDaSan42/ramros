@@ -16,6 +16,7 @@ module.exports = {
     getConfiguration: jest.fn().mockReturnValue({
       get: jest.fn((_key, defaultValue) => defaultValue)
     }),
+    registerTextDocumentContentProvider: jest.fn(),
     onDidChangeConfiguration: jest.fn().mockReturnValue({ dispose: jest.fn() }),
     onDidChangeWorkspaceFolders: jest.fn().mockReturnValue({ dispose: jest.fn() })
   },
