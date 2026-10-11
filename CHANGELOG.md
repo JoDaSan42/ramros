@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ros2 topic pub` from live topics (once or at a rate), `ros2 service call`
   with JSON input and read-only response document, runtime node parameters listed
   under live nodes with set-via-input-box.
+- "Show Definition" on interface items: resolved interface definition from
+  `ros2 interface show` in a read-only document (with a colcon-build hint on
+  failure).
+- "Run ROS2 Health Check": `ros2 doctor` output in a read-only document,
+  accessible from the live view title bar and the command palette.
 
 ### Fixed
 - Bag recording/playback context menus now appear on the Bag Files folder
