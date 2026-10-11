@@ -5,6 +5,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { RosEnvironmentService } from './core/ros-environment';
 import { WorkspaceDetector, WorkspaceInfo, findWorkspaceForPath } from './core/workspace-detector';
+import { getWorkspaceBagPaths } from './core/bag-discovery';
 import { DuplicatePackageDetector } from './core/duplicate-package-detector';
 import { CacheManager } from './cache/cache-manager';
 import { RamrosTreeProvider } from './treeview/tree-provider';
@@ -91,9 +92,7 @@ async function discoverTopics(): Promise<string[]> {
 }
 
 export async function findWorkspaceBags(): Promise<string[]> {
-  const workspaces = treeProvider.getWorkspaces();
-  const uris = await vscode.workspace.findFiles('**/*.{db3,mcap}', '**/{node_modules,build,install,log}/**');
-  return uris.map(u => u.fsPath).filter(p => workspaces.some(w => p.startsWith(w.rootPath.fsPath)));
+  return getWorkspaceBagPaths(treeProvider.getWorkspaces());
 }
 
 export function __setTreeProviderForTests(provider: RamrosTreeProvider): void {

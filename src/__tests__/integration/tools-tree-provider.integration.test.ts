@@ -2,6 +2,7 @@ import { ToolsTreeProvider } from '../../treeview/tools-tree-provider';
 import { BagFilesFolderItem, BagInfoItem, BagRecordItem } from '../../treeview/bag-items';
 import { BagSessionService } from '../../executor/bag-session-service';
 import * as vscode from 'vscode';
+import { getWorkspaceBagPaths } from '../../core/bag-discovery';
 import { findWorkspaceBags, __setTreeProviderForTests } from '../../extension';
 
 describe('ToolsTreeProvider Integration Tests', () => {
@@ -122,6 +123,32 @@ describe('ToolsTreeProvider Integration Tests', () => {
   describe('refresh', () => {
     it('resolves without throwing', async () => {
       await expect(provider.refresh()).resolves.toBeUndefined();
+    });
+  });
+
+  describe('getWorkspaceBagPaths', () => {
+    it('returns only bag files inside workspace roots', async () => {
+      const fakeWorkspace = {
+        id: '/ws',
+        name: 'ws',
+        rootPath: { fsPath: '/ws' },
+        srcPath: null,
+        installPath: null,
+        buildPath: null,
+        rosDistribution: null,
+        isValid: true,
+        errors: [],
+        warnings: [],
+        packages: [],
+      };
+
+      (vscode.workspace.findFiles as jest.Mock).mockResolvedValue([
+        { fsPath: '/ws/my.db3' },
+        { fsPath: '/opt/other/location.mcap' },
+      ]);
+
+      const bags = await getWorkspaceBagPaths([fakeWorkspace as any]);
+      expect(bags).toEqual(['/ws/my.db3']);
     });
   });
 
