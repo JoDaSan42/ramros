@@ -417,6 +417,24 @@
           "when": "view == ramrosExplorer && viewItem == categoryLaunchFilesFolder"
         },
         {
+          "command": "ramros.addNodeToPackage",
+          "when": "view == ramrosExplorer && viewItem == categoryNodesFolder",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.addNodeToPackage",
+          "when": "view == ramrosExplorer && viewItem == categoryNodesFolder"
+        },
+        {
+          "command": "ramros.addNodeToPackage",
+          "when": "view == ramrosExplorer && viewItem == categoryInterfacesFolder",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.addNodeToPackage",
+          "when": "view == ramrosExplorer && viewItem == categoryInterfacesFolder"
+        },
+        {
           "command": "ramros.launchTool.rviz2",
           "when": "view == ramrosTools && viewItem == tool"
         },
