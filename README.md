@@ -84,6 +84,11 @@ Record and playback ROS2 bag files with a user-friendly interface.
   - Duration and start/end times
   - Storage format and compression
 
+**External Bag Folders:**
+- Add bag folders outside the workspace via "Add Bag Folder" (stored per-workspace in `ramros.json`)
+- Remove external folders via context menu
+- Open bag files in rqt_bag via inline button or context menu
+
 #### Live View
 Real-time monitoring of ROS2 system activity.
 
@@ -93,6 +98,11 @@ Real-time monitoring of ROS2 system activity.
 - Refresh rate configuration (1-60 seconds)
 - Auto-refresh on interval
 - Publisher and subscriber count display
+- Enable/disable the live view via view-title toggle (persisted as `liveView.enabled` in `ramros.json`)
+- Publish messages to topics (`ros2 topic pub`, once or at a rate)
+- Call services with JSON input (`ros2 service call`); response shown in a read-only document
+- View runtime node parameters under live nodes and set them via input box
+- Run a ROS2 health check (`ros2 doctor`) from the view title bar; report shown in a read-only document
 
 ### 📦 Workspace Section
 
@@ -129,6 +139,7 @@ Supports both C++ (`create_service`, `create_client`, `rclcpp_action::create_ser
 - Field definitions shown in tooltip
 - Click to open interface file in editor
 - Support for `.msg`, `.srv`, and `.action` files
+- "Show Definition": resolved interface definition (`ros2 interface show`) in a read-only document
 
 #### Launch File Support
 - Automatic detection of `.launch.py` and `.launch.xml` files
@@ -153,6 +164,7 @@ Interactive wizard for creating new ROS2 packages:
 1. Enter package name (validates naming rules and package-name uniqueness across workspaces; cross-workspace duplicates warn)
 2. Select template type (python / cpp / cpp-python / interface)
 3. Add description, author, license
+   - Maintainer name/email optional: skip to use ROS convention placeholders (`todo` / `todo@todo.todo`); email is validated when entered
 4. Build type is derived automatically from the package type (`ament_python` for python, `ament_cmake` otherwise)
 5. Define node name (for node templates) and whether to include the template node implementation
 6. Add dependencies (comma-separated)
@@ -171,6 +183,10 @@ Interactive wizard for creating new ROS2 packages:
 - **Same-workspace duplicates**: Blocked with error message
 - **Cross-workspace duplicates**: Warning shown (allowed in different workspaces)
 - Real-time validation during package creation
+
+#### Category View
+- Group packages by node/interface/launch-file category via "Toggle Tree View Mode"
+- Create buttons (inline "Add Node/Interface") directly on category folders
 
 #### Commands & Actions
 Access commands from tree view context menu or command palette (`Ctrl+Shift+P`; most commands appear without a `RAMROS:` prefix — only `RAMROS: Toggle Tree View Mode` carries the category):
