@@ -103,6 +103,39 @@ describe('LiveTreeProvider Integration Tests', () => {
     });
   });
 
+  describe('service servers passthrough', () => {
+    it('passes serviceServers through to the node info result', async () => {
+      jest.spyOn(cli, 'getNodeInfo').mockResolvedValue({
+        name: '/add_two_ints',
+        publishedTopics: ['/sum'],
+        subscribedTopics: [],
+        serviceServers: [{ name: '/add_two_ints', type: 'example_interfaces/srv/AddTwoInts' }],
+      });
+
+      const info = await provider.getNodeInfo('/add_two_ints');
+
+      expect(info?.serviceServers).toEqual([
+        { name: '/add_two_ints', type: 'example_interfaces/srv/AddTwoInts' },
+      ]);
+    });
+
+    it('keeps serviceServers when system topics are filtered', async () => {
+      jest.spyOn(cli, 'getNodeInfo').mockResolvedValue({
+        name: '/talker',
+        publishedTopics: ['/chatter', '/rosout'],
+        subscribedTopics: [],
+        serviceServers: [{ name: '/reset', type: 'std_srvs/srv/Trigger' }],
+      });
+
+      const info = await provider.getNodeInfo('/talker');
+
+      expect(info?.publishedTopics).toEqual(['/chatter']);
+      expect(info?.serviceServers).toEqual([
+        { name: '/reset', type: 'std_srvs/srv/Trigger' },
+      ]);
+    });
+  });
+
   describe('system topic filtering for node endpoints', () => {
     it('strips system topics from node pub/sub lists', async () => {
       jest.spyOn(cli, 'getNodeInfo').mockResolvedValue({
