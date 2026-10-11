@@ -117,6 +117,10 @@ export class CategoryInterfaceFileItem extends TreeItemBase {
       default: return 'interface';
     }
   }
+
+  getQualifiedName(): string {
+    return `${this.iface.packageName}/${this.getInterfaceExtension(this.iface.type)}/${this.iface.name}`;
+  }
   
   private updateTooltip(): void {
     const lines: string[] = [

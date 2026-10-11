@@ -67,6 +67,7 @@ export interface InterfaceInfo {
   name: string;
   path: string;
   fields: InterfaceFieldInfo[];
+  packageName: string;
 }
 
 export interface InterfaceFieldInfo {
@@ -403,7 +404,7 @@ export class PackageDiscoveryService {
     const packageType = this.detectPackageType(packageDir);
     const packageName = xmlData.name || path.basename(packageDir);
     const nodes = await this.findExecutableNodes(packageDir, packageType, packageName);
-    const interfaces = await this.findInterfaceFiles(packageDir);
+    const interfaces = await this.findInterfaceFiles(packageDir, packageName);
     const launchFiles = await this.findLaunchFiles(packageDir, packageName);
 
     return {
@@ -920,8 +921,9 @@ export class PackageDiscoveryService {
     };
   }
 
-  async findInterfaceFiles(packagePath: string): Promise<InterfaceInfo[]> {
+  async findInterfaceFiles(packagePath: string, packageName?: string): Promise<InterfaceInfo[]> {
     const interfaces: InterfaceInfo[] = [];
+    const resolvedPackageName = packageName ?? path.basename(packagePath);
 
     const msgDir = path.join(packagePath, 'msg');
     if (fs.existsSync(msgDir)) {
@@ -934,6 +936,7 @@ export class PackageDiscoveryService {
           name: path.basename(file, '.msg'),
           path: filePath,
           fields,
+          packageName: resolvedPackageName,
         });
       }
     }
@@ -949,6 +952,7 @@ export class PackageDiscoveryService {
           name: path.basename(file, '.srv'),
           path: filePath,
           fields,
+          packageName: resolvedPackageName,
         });
       }
     }
@@ -964,6 +968,7 @@ export class PackageDiscoveryService {
           name: path.basename(file, '.action'),
           path: filePath,
           fields,
+          packageName: resolvedPackageName,
         });
       }
     }
