@@ -152,7 +152,8 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
             items.push(new LiveNodeItem(
               info.name,
               info.publishedTopics,
-              info.subscribedTopics
+              info.subscribedTopics,
+              info.serviceServers
             ));
           } else {
             items.push(new LiveNodeItem(name));

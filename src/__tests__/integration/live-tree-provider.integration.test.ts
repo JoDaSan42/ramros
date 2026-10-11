@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { exec } from 'child_process';
 import { LiveTreeProvider } from '../../treeview/live-tree-provider';
-import { LiveFolderItem, LiveNodeItem, LiveTopicItem, LiveViewDisabledItem } from '../../treeview/live-items';
+import { LiveFolderItem, LiveNodeItem, LiveServiceItem, LiveTopicItem, LiveViewDisabledItem, NodeServicesItem } from '../../treeview/live-items';
 import { Ros2CliService } from '../../core/ros2-cli-service';
 import { WorkspaceConfigService } from '../../core/workspace-config-service';
 
@@ -82,6 +82,33 @@ describe('LiveTreeProvider Integration Tests', () => {
 
       expect(nodes[0]).toBeInstanceOf(LiveNodeItem);
       expect((nodes[0] as LiveNodeItem).getNodeName()).toBe('/mystery');
+    });
+
+    it('renders a services folder reachable through the node item when getNodeInfo returns service servers', async () => {
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/add_two_ints']);
+      jest.spyOn(cli, 'getNodeInfo').mockResolvedValue({
+        name: '/add_two_ints',
+        publishedTopics: [],
+        subscribedTopics: [],
+        serviceServers: [{ name: '/add_two_ints', type: 'example_interfaces/srv/AddTwoInts' }],
+      });
+
+      const folders = await provider.getChildren();
+      const nodes = await provider.getChildren(folders[0]);
+
+      expect(nodes).toHaveLength(1);
+      const node = nodes[0] as LiveNodeItem;
+      expect(node.getNodeName()).toBe('/add_two_ints');
+
+      const nodeChildren = await node.getChildren();
+      const services = nodeChildren.find(c => c instanceof NodeServicesItem);
+      expect(services).toBeInstanceOf(NodeServicesItem);
+
+      const serviceChildren = await services!.getChildren();
+      const service = serviceChildren.find(c => c instanceof LiveServiceItem) as LiveServiceItem;
+      expect(service).toBeInstanceOf(LiveServiceItem);
+      expect(service.getServiceName()).toBe('/add_two_ints');
+      expect(service.getServiceType()).toBe('example_interfaces/srv/AddTwoInts');
     });
   });
 
