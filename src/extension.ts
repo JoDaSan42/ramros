@@ -20,8 +20,10 @@ import { TreeItemBase } from './treeview/base-tree-item';
 import { BagPlayItem, BagPlayControlItem, BagLoopItem, BagRecordItem, BagFilesFolderItem, BagFileItem, ExternalBagFolderItem, BagEntriesProvider } from './treeview/bag-items';
 import { LaunchWizard } from './wizard/launch-wizard';
 import { runCreatePackageWizard, runAddToPackageWizard } from './wizard/package-wizard';
+import { RamrosDocProvider, showInReadonlyDoc } from './core/ramros-doc-provider';
 
 let cacheManager: CacheManager;
+let ramrosDocProvider: RamrosDocProvider;
 let terminalManager: TerminalManager;
 let treeProvider: RamrosTreeProvider;
 let toolsTreeProvider: ToolsTreeProvider;
@@ -208,6 +210,7 @@ export async function activate(context: vscode.ExtensionContext) {
   
    terminalManager = new TerminalManager();
    bagSession = BagSessionService.getInstance();
+   ramrosDocProvider = new RamrosDocProvider();
    
    treeProvider = new RamrosTreeProvider(workspaceDetector, duplicateDetector, packageDiscovery);
   workspaceConfigService = getWorkspaceConfigService();
@@ -236,6 +239,11 @@ export async function activate(context: vscode.ExtensionContext) {
   ramrosConfigWatcher.onDidCreate(() => void toolsTreeProvider.refresh());
   ramrosConfigWatcher.onDidDelete(() => void toolsTreeProvider.refresh());
   
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider(RamrosDocProvider.scheme, ramrosDocProvider),
+    vscode.commands.registerCommand('ramros.openReadonlyDoc', (key: string, content: string) => showInReadonlyDoc(ramrosDocProvider, key, content))
+  );
+
   context.subscriptions.push(
     treeView,
     toolsTreeView,

@@ -36,6 +36,7 @@ module.exports = {
     showQuickPick: jest.fn(),
     showInputBox: jest.fn(),
     showOpenDialog: jest.fn(),
+    showTextDocument: jest.fn().mockResolvedValue({}),
     withProgress: jest.fn(),
     createTreeView: jest.fn(),
     onDidCloseTerminal: jest.fn().mockReturnValue({ dispose: jest.fn() })
@@ -73,6 +74,7 @@ module.exports = {
   },
   Uri: {
     file: (p) => ({ fsPath: p, path: p }),
+    from: (parts) => ({ scheme: parts.scheme, path: parts.path }),
     joinPath: (uri, ...paths) => {
       const path = require('path');
       return { fsPath: path.join(uri.fsPath, ...paths) };
@@ -85,8 +87,24 @@ module.exports = {
     SymbolicLink: 64
   },
   EventEmitter: class EventEmitter {
-    event = jest.fn();
-    fire = jest.fn();
-    dispose = jest.fn();
+    constructor() {
+      this._listeners = [];
+      this.event = jest.fn((listener) => {
+        this._listeners.push(listener);
+        return {
+          dispose: jest.fn(() => {
+            this._listeners = this._listeners.filter((l) => l !== listener);
+          })
+        };
+      });
+      this.fire = jest.fn((value) => {
+        for (const listener of [...this._listeners]) {
+          listener(value);
+        }
+      });
+      this.dispose = jest.fn(() => {
+        this._listeners = [];
+      });
+    }
   }
 };
