@@ -1,5 +1,11 @@
 import { ToolsTreeProvider } from '../../treeview/tools-tree-provider';
-import { BagFilesFolderItem, BagInfoItem, BagRecordItem } from '../../treeview/bag-items';
+import {
+  BagFileItem,
+  BagFilesFolderItem,
+  BagInfoItem,
+  BagRecordItem,
+  ToolsFolderItem
+} from '../../treeview/bag-items';
 import { BagSessionService } from '../../executor/bag-session-service';
 import * as vscode from 'vscode';
 import { getWorkspaceBagPaths } from '../../core/bag-discovery';
@@ -123,6 +129,75 @@ describe('ToolsTreeProvider Integration Tests', () => {
   describe('refresh', () => {
     it('resolves without throwing', async () => {
       await expect(provider.refresh()).resolves.toBeUndefined();
+    });
+  });
+
+  describe('bag entries threading', () => {
+    it('appends a Files separator and the bag entries under Bag Files', async () => {
+      const providerWithEntries = new ToolsTreeProvider(
+        async () => [new BagFileItem('/x/a.db3')]
+      );
+
+      const children = await providerWithEntries.getChildren();
+      const bagFilesFolder = children.find(
+        c => c instanceof BagFilesFolderItem
+      ) as BagFilesFolderItem;
+      expect(bagFilesFolder).toBeDefined();
+
+      const bagFilesChildren = await bagFilesFolder.getChildren();
+      const filesSeparator = bagFilesChildren.find(
+        c => c.contextValue === 'separator' && c.description === 'Files'
+      );
+      expect(filesSeparator).toBeDefined();
+
+      const bagItem = bagFilesChildren.find(c => c.contextValue === 'bagFile');
+      expect(bagItem).toBeInstanceOf(BagFileItem);
+      expect((bagItem as BagFileItem).getBagPath()).toBe('/x/a.db3');
+
+      // Files section must come after the existing recording/playback items.
+      const separatorIndex = bagFilesChildren.indexOf(filesSeparator!);
+      const bagInfoIndex = bagFilesChildren.findIndex(c => c.contextValue === 'bagInfo');
+      expect(separatorIndex).toBeGreaterThan(bagInfoIndex);
+    });
+
+    it('threads the provider through ToolsFolderItem to BagFilesFolderItem', async () => {
+      const toolsFolder = new ToolsFolderItem(async () => [new BagFileItem('/y/b.db3')]);
+      const toolsChildren = await toolsFolder.getChildren();
+      const bagFilesFolder = toolsChildren.find(
+        c => c instanceof BagFilesFolderItem
+      ) as BagFilesFolderItem;
+      expect(bagFilesFolder).toBeDefined();
+
+      const bagFilesChildren = await bagFilesFolder.getChildren();
+      const bagItem = bagFilesChildren.find(c => c.contextValue === 'bagFile') as BagFileItem;
+      expect(bagItem).toBeDefined();
+      expect(bagItem.getBagPath()).toBe('/y/b.db3');
+    });
+
+    it('appends nothing when the provider yields an empty array', async () => {
+      const providerWithNoEntries = new ToolsTreeProvider(async () => []);
+
+      const children = await providerWithNoEntries.getChildren();
+      const bagFilesFolder = children.find(
+        c => c instanceof BagFilesFolderItem
+      ) as BagFilesFolderItem;
+
+      const bagFilesChildren = await bagFilesFolder.getChildren();
+      expect(
+        bagFilesChildren.some(c => c.contextValue === 'separator' && c.description === 'Files')
+      ).toBe(false);
+    });
+
+    it('shows no Files section without a provider (existing behavior unchanged)', async () => {
+      const children = await provider.getChildren();
+      const bagFilesFolder = children.find(
+        c => c instanceof BagFilesFolderItem
+      ) as BagFilesFolderItem;
+
+      const bagFilesChildren = await bagFilesFolder.getChildren();
+      expect(
+        bagFilesChildren.some(c => c.contextValue === 'separator' && c.description === 'Files')
+      ).toBe(false);
     });
   });
 

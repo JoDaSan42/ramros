@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { TreeItemBase } from './base-tree-item';
-import { ToolsFolderItem, BagRecordItem, BagFilesFolderItem } from './bag-items';
+import { ToolsFolderItem, BagRecordItem, BagFilesFolderItem, BagEntriesProvider } from './bag-items';
 import { BagSessionService } from '../executor/bag-session-service';
 
 export class ToolsTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
@@ -8,6 +8,8 @@ export class ToolsTreeProvider implements vscode.TreeDataProvider<TreeItemBase> 
   readonly onDidChangeTreeData: vscode.Event<TreeItemBase | undefined | null | void> = this._onDidChangeTreeData.event;
   
   private bagRecordItem: BagRecordItem | null = null;
+
+  constructor(private readonly getBagEntries?: BagEntriesProvider) {}
 
   async refresh(): Promise<void> {
     this._onDidChangeTreeData.fire(undefined);
@@ -42,7 +44,7 @@ export class ToolsTreeProvider implements vscode.TreeDataProvider<TreeItemBase> 
 
   async getChildren(element?: TreeItemBase): Promise<TreeItemBase[]> {
     if (!element) {
-      const toolsFolder = new ToolsFolderItem();
+      const toolsFolder = new ToolsFolderItem(this.getBagEntries);
       return await toolsFolder.getChildren();
     }
 

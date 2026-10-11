@@ -3,8 +3,10 @@ import * as path from 'path';
 import { TreeItemBase } from './base-tree-item';
 import { BagSessionService } from '../executor/bag-session-service';
 
+export type BagEntriesProvider = () => Promise<TreeItemBase[]>;
+
 export class ToolsFolderItem extends TreeItemBase {
-  constructor() {
+  constructor(private readonly getBagEntries?: BagEntriesProvider) {
     super('Tools', vscode.TreeItemCollapsibleState.Collapsed);
     this.iconPath = new vscode.ThemeIcon('tools');
     this.contextValue = 'toolsFolder';
@@ -14,7 +16,7 @@ export class ToolsFolderItem extends TreeItemBase {
     return [
       new ToolItem('RVIZ2', 'rviz2', 'vm'),
       new ToolItem('rqt_graph', 'rqt_graph', 'git-compare'),
-      new BagFilesFolderItem()
+      new BagFilesFolderItem(this.getBagEntries)
     ];
   }
 }
@@ -24,7 +26,7 @@ export class BagFilesFolderItem extends TreeItemBase {
   private static loopItemInstance: BagLoopItem | null = null;
   private static playControlItemInstance: BagPlayControlItem | null = null;
   
-  constructor() {
+  constructor(private readonly getBagEntries?: BagEntriesProvider) {
     super('Bag Files', vscode.TreeItemCollapsibleState.Expanded);
     this.iconPath = new vscode.ThemeIcon('archive');
     this.contextValue = 'bagFilesFolder';
@@ -78,6 +80,15 @@ export class BagFilesFolderItem extends TreeItemBase {
     }
     items.push(BagFilesFolderItem.bagInfoItemInstance);
     
+    // Append externally provided bag entries under a Files section
+    if (this.getBagEntries) {
+      const entries = await this.getBagEntries();
+      if (entries.length > 0) {
+        items.push(new SeparatorItem('Files'));
+        items.push(...entries);
+      }
+    }
+    
     return items;
   }
   
@@ -104,6 +115,47 @@ export class SeparatorItem extends TreeItemBase {
   
   async getChildren(): Promise<TreeItemBase[]> {
     return [];
+  }
+}
+
+export class BagFileItem extends TreeItemBase {
+  constructor(private readonly bagPath: string) {
+    super(path.basename(bagPath), vscode.TreeItemCollapsibleState.None);
+    this.iconPath = new vscode.ThemeIcon('file');
+    this.contextValue = 'bagFile';
+    this.tooltip = bagPath;
+    this.command = {
+      command: 'ramros.bag.playBagByPath',
+      title: 'Select for Playback',
+      arguments: [bagPath]
+    };
+  }
+  
+  getBagPath(): string {
+    return this.bagPath;
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
+export class ExternalBagFolderItem extends TreeItemBase {
+  constructor(
+    private readonly folderPath: string,
+    private readonly bags: string[]
+  ) {
+    super(folderPath, vscode.TreeItemCollapsibleState.Collapsed);
+    this.iconPath = new vscode.ThemeIcon('file-directory');
+    this.contextValue = 'externalBagFolder';
+  }
+  
+  getFolderPath(): string {
+    return this.folderPath;
+  }
+  
+  async getChildren(): Promise<TreeItemBase[]> {
+    return this.bags.map(b => new BagFileItem(b));
   }
 }
 
