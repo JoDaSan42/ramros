@@ -115,6 +115,7 @@ describe('package-wizard', () => {
 
       showQuickPick
         .mockResolvedValueOnce({ label: 'python' })          // package type
+        .mockResolvedValueOnce({ label: 'yes' })              // maintainer/license in package.xml?
         .mockResolvedValueOnce({ label: 'Apache-2.0' })      // license
         .mockResolvedValueOnce({ label: 'yes' });            // include template
 
@@ -151,6 +152,7 @@ describe('package-wizard', () => {
 
       showQuickPick
         .mockResolvedValueOnce({ label: 'cpp' })
+        .mockResolvedValueOnce({ label: 'yes' })
         .mockResolvedValueOnce({ label: 'MIT' })
         .mockResolvedValueOnce({ label: 'yes' });
 
@@ -175,6 +177,7 @@ describe('package-wizard', () => {
 
       showQuickPick
         .mockResolvedValueOnce({ label: 'cpp' })
+        .mockResolvedValueOnce({ label: 'yes' })
         .mockResolvedValueOnce({ label: 'MIT' })
         .mockResolvedValueOnce({ label: 'yes' });
 
@@ -187,6 +190,95 @@ describe('package-wizard', () => {
       expect(showErrorMessage).toHaveBeenCalledWith(
         'Failed to create package: No workspace found. Please open a folder in VSCode first.'
       );
+    });
+  });
+
+  describe('maintainer and license step', () => {
+    it('skips author inputs and uses ROS placeholders when answering no', async () => {
+      showInputBox
+        .mockResolvedValueOnce('my_pkg')       // package name
+        .mockResolvedValueOnce('A ROS2 package') // description
+        .mockResolvedValueOnce('my_node')      // node name
+        .mockResolvedValueOnce('');             // deps (accept defaults)
+
+      showQuickPick
+        .mockResolvedValueOnce({ label: 'cpp' })     // package type
+        .mockResolvedValueOnce({ label: 'no' })      // maintainer/license in package.xml?
+        .mockResolvedValueOnce('MIT')                // license (still selected)
+        .mockResolvedValueOnce({ label: 'yes' });     // include template
+
+      await runCreatePackageWizard({
+        packageCreator,
+        getWorkspaces: () => [makeWorkspace()],
+        refresh,
+      });
+
+      const authorPrompts = showInputBox.mock.calls
+        .filter((call: unknown[]) => {
+          const prompt = (call[0] as { prompt?: string })?.prompt;
+          return prompt === 'Enter author name' || prompt === 'Enter author email';
+        });
+      expect(authorPrompts).toHaveLength(0);
+
+      expect(showQuickPick).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ label: 'yes' }),
+          expect.objectContaining({ label: 'no' }),
+        ]),
+        expect.objectContaining({ placeHolder: 'Specify maintainer and license in package.xml?' })
+      );
+
+      expect(packageCreator.createPackage).toHaveBeenCalledTimes(1);
+      const [, config] = (packageCreator.createPackage as jest.Mock).mock.calls[0];
+      expect(config).toMatchObject({
+        authorName: 'todo',
+        authorEmail: 'todo@todo.todo',
+        license: 'MIT',
+      });
+      expect(refresh).toHaveBeenCalled();
+    });
+
+    it('asks for author name and validates the email when answering yes', async () => {
+      showInputBox
+        .mockResolvedValueOnce('my_pkg')       // package name
+        .mockResolvedValueOnce('A ROS2 package') // description
+        .mockResolvedValueOnce('Jane Doe')     // author name
+        .mockResolvedValueOnce('jane@example.com') // author email
+        .mockResolvedValueOnce('my_node')      // node name
+        .mockResolvedValueOnce('');            // deps (accept defaults)
+
+      showQuickPick
+        .mockResolvedValueOnce({ label: 'cpp' })     // package type
+        .mockResolvedValueOnce({ label: 'yes' })     // maintainer/license in package.xml?
+        .mockResolvedValueOnce('MIT')                // license
+        .mockResolvedValueOnce({ label: 'yes' });    // include template
+
+      await runCreatePackageWizard({
+        packageCreator,
+        getWorkspaces: () => [makeWorkspace()],
+        refresh,
+      });
+
+      const emailCall = showInputBox.mock.calls.find((call: unknown[]) => {
+        const opts = call[0] as { prompt?: string };
+        return opts?.prompt === 'Enter author email';
+      });
+      expect(emailCall).toBeDefined();
+
+      const validateInput = (emailCall![0] as { validateInput: (value: string) => string | undefined }).validateInput;
+      expect(validateInput).toBeInstanceOf(Function);
+      expect(typeof validateInput('not-an-email')).toBe('string');
+      expect(validateInput('not-an-email')).toBe('Invalid email format');
+      expect(validateInput('jane@example.com')).toBeUndefined();
+      expect(validateInput('')).toBeUndefined();
+
+      expect(packageCreator.createPackage).toHaveBeenCalledTimes(1);
+      const [, config] = (packageCreator.createPackage as jest.Mock).mock.calls[0];
+      expect(config).toMatchObject({
+        authorName: 'Jane Doe',
+        authorEmail: 'jane@example.com',
+        license: 'MIT',
+      });
     });
   });
 
