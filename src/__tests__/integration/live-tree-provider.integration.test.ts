@@ -1,6 +1,10 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { LiveTreeProvider } from '../../treeview/live-tree-provider';
-import { LiveFolderItem, LiveNodeItem, LiveTopicItem } from '../../treeview/live-items';
+import { LiveFolderItem, LiveNodeItem, LiveTopicItem, LiveViewDisabledItem } from '../../treeview/live-items';
 import { Ros2CliService } from '../../core/ros2-cli-service';
+import { WorkspaceConfigService } from '../../core/workspace-config-service';
 
 describe('LiveTreeProvider Integration Tests', () => {
   let provider: LiveTreeProvider;
@@ -187,6 +191,131 @@ describe('LiveTreeProvider Integration Tests', () => {
         'workbench.action.openSettings',
         'ramros.liveView'
       );
+    });
+  });
+
+  describe('workspace config integration', () => {
+    let tempDir: string;
+
+    beforeEach(() => {
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ramros-live-tree-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    function writeRamrosJson(content: object): void {
+      fs.writeFileSync(path.join(tempDir, 'ramros.json'), JSON.stringify(content, null, 2) + '\n', 'utf8');
+    }
+
+    function readRamrosJson(): { liveView?: { enabled?: boolean; refreshRate?: number } } {
+      return JSON.parse(fs.readFileSync(path.join(tempDir, 'ramros.json'), 'utf8'));
+    }
+
+    async function waitFor(condition: () => boolean): Promise<void> {
+      const deadline = Date.now() + 2000;
+      while (!condition() && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+    }
+
+    it('starts disabled and shows only the disabled item when liveView.enabled is false', async () => {
+      writeRamrosJson({ liveView: { enabled: false } });
+      const configService = new WorkspaceConfigService(() => tempDir);
+
+      const configuredProvider = new LiveTreeProvider(configService);
+      try {
+        await waitFor(() => !configuredProvider.isEnabled());
+        expect(configuredProvider.isEnabled()).toBe(false);
+        expect(configuredProvider.isAutoRefreshEnabled()).toBe(false);
+
+        const children = await configuredProvider.getChildren();
+        expect(children).toHaveLength(1);
+        expect(children[0]).toBeInstanceOf(LiveViewDisabledItem);
+      } finally {
+        configuredProvider.dispose();
+      }
+    });
+
+    it('persists enabled=true in ramros.json and restarts polling on setEnabled(true)', async () => {
+      writeRamrosJson({ liveView: { enabled: false } });
+      const configService = new WorkspaceConfigService(() => tempDir);
+
+      const configuredProvider = new LiveTreeProvider(configService);
+      try {
+        await waitFor(() => !configuredProvider.isEnabled());
+        expect(configuredProvider.isEnabled()).toBe(false);
+
+        await configuredProvider.setEnabled(true);
+        expect(configuredProvider.isEnabled()).toBe(true);
+        expect(configuredProvider.isAutoRefreshEnabled()).toBe(true);
+        expect(readRamrosJson().liveView?.enabled).toBe(true);
+
+        const children = await configuredProvider.getChildren();
+        expect(children).toHaveLength(2);
+        expect(children[0]).toBeInstanceOf(LiveFolderItem);
+        expect(children[1]).toBeInstanceOf(LiveFolderItem);
+      } finally {
+        configuredProvider.dispose();
+      }
+    });
+
+    it('persists enabled=false in ramros.json and stops polling on setEnabled(false)', async () => {
+      const configService = new WorkspaceConfigService(() => tempDir);
+
+      const configuredProvider = new LiveTreeProvider(configService);
+      try {
+        expect(configuredProvider.isEnabled()).toBe(true);
+
+        await configuredProvider.setEnabled(false);
+        expect(configuredProvider.isEnabled()).toBe(false);
+        expect(configuredProvider.isAutoRefreshEnabled()).toBe(false);
+        expect(readRamrosJson().liveView?.enabled).toBe(false);
+      } finally {
+        configuredProvider.dispose();
+      }
+    });
+
+    it('applies the ramros.json refreshRate override over the global setting', async () => {
+      writeRamrosJson({ liveView: { refreshRate: 10 } });
+      const configService = new WorkspaceConfigService(() => tempDir);
+
+      const configuredProvider = new LiveTreeProvider(configService);
+      try {
+        await waitFor(() => configuredProvider.getEffectiveRefreshRate() === 10);
+        expect(configuredProvider.getEffectiveRefreshRate()).toBe(10);
+      } finally {
+        configuredProvider.dispose();
+      }
+    });
+
+    it('falls back to the global setting without a refreshRate override', async () => {
+      const configService = new WorkspaceConfigService(() => tempDir);
+
+      const configuredProvider = new LiveTreeProvider(configService);
+      try {
+        expect(configuredProvider.getEffectiveRefreshRate()).toBe(5);
+      } finally {
+        configuredProvider.dispose();
+      }
+    });
+
+    it('reloads the refreshRate override via reloadFromWorkspaceConfig', async () => {
+      writeRamrosJson({ liveView: { refreshRate: 7 } });
+      const configService = new WorkspaceConfigService(() => tempDir);
+
+      const configuredProvider = new LiveTreeProvider(configService);
+      try {
+        await waitFor(() => configuredProvider.getEffectiveRefreshRate() === 7);
+        expect(configuredProvider.getEffectiveRefreshRate()).toBe(7);
+
+        writeRamrosJson({ liveView: { refreshRate: 10 } });
+        await configuredProvider.reloadFromWorkspaceConfig();
+        expect(configuredProvider.getEffectiveRefreshRate()).toBe(10);
+      } finally {
+        configuredProvider.dispose();
+      }
     });
   });
 });
