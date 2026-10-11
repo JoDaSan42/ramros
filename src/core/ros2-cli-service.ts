@@ -1,6 +1,6 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { buildServiceCallCommand } from './command-builders';
+import { buildServiceCallCommand, shellDoubleQuote } from './command-builders';
 
 const execAsync = promisify(exec);
 
@@ -297,7 +297,7 @@ export class Ros2CliService {
 
   async setParameterValue(nodeName: string, paramName: string, value: string): Promise<boolean> {
     try {
-      await execAsync(`ros2 param set ${nodeName} ${paramName} ${value}`, { encoding: 'utf-8', timeout: 10000 });
+      await execAsync(`ros2 param set ${shellDoubleQuote(nodeName)} ${shellDoubleQuote(paramName)} ${shellDoubleQuote(value)}`, { encoding: 'utf-8', timeout: 10000 });
       return true;
     } catch (error) {
       console.error(`Failed to set parameter ${paramName} for node ${nodeName}`, error);

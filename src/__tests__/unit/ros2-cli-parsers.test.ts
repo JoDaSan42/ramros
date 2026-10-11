@@ -1,8 +1,27 @@
+import { exec } from 'child_process';
 import {
   parseNodeInfoOutput,
   parseParameterList,
   parseParameterValue,
+  Ros2CliService,
 } from '../../core/ros2-cli-service';
+
+jest.mock('child_process', () => {
+  const execMock = jest.fn((...args: unknown[]) => {
+    const cb = args[args.length - 1] as (error: Error | null, stdout: string, stderr: string) => void;
+    cb(null, '', '');
+  });
+  Object.defineProperty(execMock, Symbol.for('nodejs.util.promisify.custom'), {
+    value: (command: string, options: unknown) =>
+      new Promise((resolve) => {
+        execMock(command, options, (_error: Error | null, stdout: string, stderr: string) => {
+          resolve({ stdout, stderr });
+        });
+      }),
+    configurable: true
+  });
+  return { exec: execMock };
+});
 
 const NODE_INFO_STDOUT = [
   '/add_two_ints',
@@ -101,5 +120,32 @@ describe('parseParameterValue', () => {
 
   it('returns null when no line matches', () => {
     expect(parseParameterValue('Parameter not set')).toBeNull();
+  });
+});
+
+describe('setParameterValue command quoting', () => {
+  it('shell-quotes node, param and free-text value in the exec command', async () => {
+    const cli = Ros2CliService.getInstance();
+
+    const result = await cli.setParameterValue('/my node', 'my param', 'hello world');
+
+    expect(result).toBe(true);
+    expect(exec).toHaveBeenCalledWith(
+      'ros2 param set "/my node" "my param" "hello world"',
+      { encoding: 'utf-8', timeout: 10000 },
+      expect.any(Function)
+    );
+  });
+
+  it('escapes shell metacharacters in the value', async () => {
+    const cli = Ros2CliService.getInstance();
+
+    await cli.setParameterValue('/talker', 'greeting', '$(reboot) `touch /tmp/pwned`');
+
+    expect(exec).toHaveBeenCalledWith(
+      'ros2 param set "/talker" "greeting" "\\$(reboot) \\`touch /tmp/pwned\\`"',
+      { encoding: 'utf-8', timeout: 10000 },
+      expect.any(Function)
+    );
   });
 });
