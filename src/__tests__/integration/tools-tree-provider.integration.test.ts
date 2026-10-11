@@ -1,15 +1,21 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { ToolsTreeProvider } from '../../treeview/tools-tree-provider';
 import {
   BagFileItem,
   BagFilesFolderItem,
   BagInfoItem,
   BagRecordItem,
+  ExternalBagFolderItem,
   ToolsFolderItem
 } from '../../treeview/bag-items';
 import { BagSessionService } from '../../executor/bag-session-service';
+import { TreeItemBase } from '../../treeview/base-tree-item';
 import * as vscode from 'vscode';
-import { getWorkspaceBagPaths } from '../../core/bag-discovery';
-import { findWorkspaceBags, __setTreeProviderForTests } from '../../extension';
+import { getWorkspaceBagPaths, scanBagFolder } from '../../core/bag-discovery';
+import { WorkspaceConfigService } from '../../core/workspace-config-service';
+import { findWorkspaceBags, getBagEntriesForTests, __setTreeProviderForTests } from '../../extension';
 
 describe('ToolsTreeProvider Integration Tests', () => {
   let provider: ToolsTreeProvider;
@@ -263,6 +269,85 @@ describe('ToolsTreeProvider Integration Tests', () => {
       const bags = await findWorkspaceBags();
       expect(bags).toContain('/ws/my.db3');
       expect(bags).not.toContain('/opt/other/location.mcap');
+    });
+  });
+
+  describe('getBagEntries composition', () => {
+    it('includes workspace bags as BagFileItem and external ramros.json folders with their bags', async () => {
+      const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ramros-ws-'));
+      const bagsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ramros-bags-'));
+      try {
+        const externalBag = path.join(bagsDir, 'recording.db3');
+        fs.writeFileSync(externalBag, 'bag');
+        fs.writeFileSync(
+          path.join(workspaceDir, 'ramros.json'),
+          JSON.stringify({ bagFolders: [bagsDir] })
+        );
+
+        const { RamrosTreeProvider } = await import('../../treeview/tree-provider');
+        const { WorkspaceDetector } = await import('../../core/workspace-detector');
+        const { DuplicatePackageDetector } = await import('../../core/duplicate-package-detector');
+        const treeProviderForEntries = new RamrosTreeProvider(
+          new WorkspaceDetector(async () => []),
+          new DuplicatePackageDetector(),
+          undefined,
+          false
+        );
+        __setTreeProviderForTests(treeProviderForEntries);
+
+        const fakeWorkspace = {
+          id: workspaceDir,
+          name: 'ws',
+          rootPath: { fsPath: workspaceDir },
+          srcPath: null,
+          installPath: null,
+          buildPath: null,
+          rosDistribution: null,
+          isValid: true,
+          errors: [],
+          warnings: [],
+          packages: []
+        };
+        jest.spyOn(treeProviderForEntries, 'getWorkspaces').mockReturnValue([fakeWorkspace as any]);
+
+        (vscode.workspace.findFiles as jest.Mock).mockResolvedValue([
+          { fsPath: path.join(workspaceDir, 'ws-bag.db3') }
+        ]);
+
+        // Compose the entries exactly as getBagEntries does in extension.ts.
+        const configService = new WorkspaceConfigService(
+          () => treeProviderForEntries.getWorkspaces()[0]?.rootPath.fsPath
+        );
+        const entries: TreeItemBase[] = (await getWorkspaceBagPaths(treeProviderForEntries.getWorkspaces()))
+          .map(bagPath => new BagFileItem(bagPath));
+        for (const folder of await configService.getBagFolders()) {
+          entries.push(new ExternalBagFolderItem(folder, scanBagFolder(folder)));
+        }
+
+        const workspaceBag = entries.find(
+          e => e instanceof BagFileItem && e.getBagPath() === path.join(workspaceDir, 'ws-bag.db3')
+        );
+        expect(workspaceBag).toBeDefined();
+
+        const externalFolder = entries.find(e => e instanceof ExternalBagFolderItem) as ExternalBagFolderItem;
+        expect(externalFolder).toBeDefined();
+        expect(externalFolder.getFolderPath()).toBe(bagsDir);
+        const folderChildren = await externalFolder.getChildren();
+        expect(folderChildren.map(c => (c as BagFileItem).getBagPath())).toContain(externalBag);
+
+        // The exported composition used by the tools tree must yield the same entries.
+        const exportedEntries = await getBagEntriesForTests();
+        expect(exportedEntries).toHaveLength(2);
+        expect((exportedEntries[0] as BagFileItem).getBagPath()).toBe(path.join(workspaceDir, 'ws-bag.db3'));
+        expect((exportedEntries[1] as ExternalBagFolderItem).getFolderPath()).toBe(bagsDir);
+        const exportedChildren = await (exportedEntries[1] as ExternalBagFolderItem).getChildren();
+        expect(exportedChildren.map(c => (c as BagFileItem).getBagPath())).toContain(externalBag);
+      } finally {
+        fs.rmSync(workspaceDir, { recursive: true, force: true });
+        fs.rmSync(bagsDir, { recursive: true, force: true });
+        (vscode.workspace.findFiles as jest.Mock).mockReset();
+        (vscode.workspace.findFiles as jest.Mock).mockResolvedValue([]);
+      }
     });
   });
 });

@@ -5,7 +5,8 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { RosEnvironmentService } from './core/ros-environment';
 import { WorkspaceDetector, WorkspaceInfo, findWorkspaceForPath } from './core/workspace-detector';
-import { getWorkspaceBagPaths } from './core/bag-discovery';
+import { getWorkspaceBagPaths, scanBagFolder } from './core/bag-discovery';
+import { WorkspaceConfigService } from './core/workspace-config-service';
 import { DuplicatePackageDetector } from './core/duplicate-package-detector';
 import { CacheManager } from './cache/cache-manager';
 import { RamrosTreeProvider } from './treeview/tree-provider';
@@ -16,7 +17,7 @@ import { BagSessionService } from './executor/bag-session-service';
 import { PackageCreator } from './wizard/package-creator';
 import { NodeInfo, LaunchFileInfo, PackageDiscoveryService, PackageInfo } from './core/package-discovery';
 import { TreeItemBase } from './treeview/base-tree-item';
-import { BagPlayItem, BagPlayControlItem, BagLoopItem, BagRecordItem, BagFilesFolderItem } from './treeview/bag-items';
+import { BagPlayItem, BagPlayControlItem, BagLoopItem, BagRecordItem, BagFilesFolderItem, BagFileItem, ExternalBagFolderItem, BagEntriesProvider } from './treeview/bag-items';
 import { LaunchWizard } from './wizard/launch-wizard';
 import { runCreatePackageWizard, runAddToPackageWizard } from './wizard/package-wizard';
 
@@ -27,6 +28,7 @@ let toolsTreeProvider: ToolsTreeProvider;
 let liveTreeProvider: LiveTreeProvider;
 let packageCreator: PackageCreator;
 let bagSession: BagSessionService;
+let workspaceConfigService: WorkspaceConfigService | undefined;
 
 const execAsync = promisify(exec);
 
@@ -65,6 +67,22 @@ function resolveTopicName(treeItem?: TreeItemBase | TreeItemBase[]): string | un
   return undefined;
 }
 
+function resolveBagFolderPath(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {
+  const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
+  if (item && 'getFolderPath' in item && typeof (item as { getFolderPath?: unknown }).getFolderPath === 'function') {
+    return (item as unknown as { getFolderPath: () => string }).getFolderPath();
+  }
+  return undefined;
+}
+
+function resolveBagPath(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {
+  const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
+  if (item && 'getBagPath' in item && typeof (item as { getBagPath?: unknown }).getBagPath === 'function') {
+    return (item as unknown as { getBagPath: () => string }).getBagPath();
+  }
+  return undefined;
+}
+
 async function pickTopic(): Promise<string | undefined> {
   const topics = await executeCommandAndGetOutput('ros2 topic list');
   if (topics.length === 0) {
@@ -93,6 +111,60 @@ async function discoverTopics(): Promise<string[]> {
 
 export async function findWorkspaceBags(): Promise<string[]> {
   return getWorkspaceBagPaths(treeProvider.getWorkspaces());
+}
+
+function getWorkspaceConfigService(): WorkspaceConfigService {
+  if (!workspaceConfigService) {
+    workspaceConfigService = new WorkspaceConfigService(
+      () => treeProvider.getWorkspaces()[0]?.rootPath.fsPath
+    );
+  }
+  return workspaceConfigService;
+}
+
+async function composeBagEntries(): Promise<TreeItemBase[]> {
+  const workspaceBags = await getWorkspaceBagPaths(treeProvider.getWorkspaces());
+  const entries: TreeItemBase[] = workspaceBags.map(bag => new BagFileItem(bag));
+  for (const folder of await getWorkspaceConfigService().getBagFolders()) {
+    entries.push(new ExternalBagFolderItem(folder, scanBagFolder(folder)));
+  }
+  return entries;
+}
+
+const getBagEntries: BagEntriesProvider = async (): Promise<TreeItemBase[]> => {
+  try {
+    return await composeBagEntries();
+  } catch (error) {
+    console.error('RAMROS: failed to compose bag entries', error);
+    return [];
+  }
+};
+
+export async function getBagEntriesForTests(): Promise<TreeItemBase[]> {
+  return composeBagEntries();
+}
+
+export async function selectBagForPlayback(bagPath: string): Promise<void> {
+  bagSession.setSelectedBagPath(bagPath);
+  BagPlayItem.setSelectedBag(bagPath);
+
+  // Get bag info
+  try {
+    const { stdout: bagInfoOutput } = await execAsync(`ros2 bag info "${bagPath}"`, { encoding: 'utf-8' });
+
+    // Filter out "closing." lines from the output
+    const filteredOutput = bagInfoOutput.split('\n').filter(line => !line.includes('closing.')).join('\n');
+
+    // Update BagInfoItem with bag path and info
+    await toolsTreeProvider.setBagInfo(filteredOutput, bagPath);
+  } catch (error) {
+    void vscode.window.showErrorMessage(`Failed to get bag info: ${error}`);
+  }
+
+  // Refresh tree to show play controls and bag info
+  await toolsTreeProvider.refresh();
+
+  void vscode.window.showInformationMessage(`Bag file selected: ${path.basename(bagPath)}`);
 }
 
 export function __setTreeProviderForTests(provider: RamrosTreeProvider): void {
@@ -138,7 +210,8 @@ export async function activate(context: vscode.ExtensionContext) {
    bagSession = BagSessionService.getInstance();
    
    treeProvider = new RamrosTreeProvider(workspaceDetector, duplicateDetector, packageDiscovery);
-  toolsTreeProvider = new ToolsTreeProvider();
+  workspaceConfigService = getWorkspaceConfigService();
+  toolsTreeProvider = new ToolsTreeProvider(getBagEntries);
   liveTreeProvider = new LiveTreeProvider();
   
    packageCreator = new PackageCreator(context.extensionPath, rosEnvironmentService);
@@ -158,6 +231,11 @@ export async function activate(context: vscode.ExtensionContext) {
     showCollapseAll: false
   });
   
+  const ramrosConfigWatcher = vscode.workspace.createFileSystemWatcher('**/ramros.json');
+  ramrosConfigWatcher.onDidChange(() => void toolsTreeProvider.refresh());
+  ramrosConfigWatcher.onDidCreate(() => void toolsTreeProvider.refresh());
+  ramrosConfigWatcher.onDidDelete(() => void toolsTreeProvider.refresh());
+  
   context.subscriptions.push(
     treeView,
     toolsTreeView,
@@ -166,6 +244,7 @@ export async function activate(context: vscode.ExtensionContext) {
     terminalManager,
     bagSession,
     liveTreeProvider,
+    ramrosConfigWatcher,
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       void treeProvider.onWorkspaceFoldersChanged();
     }),
@@ -846,26 +925,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
       if (!bagPath) return;
 
-      bagSession.setSelectedBagPath(bagPath);
-      BagPlayItem.setSelectedBag(bagPath);
-
-      // Get bag info
-      try {
-        const { stdout: bagInfoOutput } = await execAsync(`ros2 bag info "${bagPath}"`, { encoding: 'utf-8' });
-
-        // Filter out "closing." lines from the output
-        const filteredOutput = bagInfoOutput.split('\n').filter(line => !line.includes('closing.')).join('\n');
-
-        // Update BagInfoItem with bag path and info
-        await toolsTreeProvider.setBagInfo(filteredOutput, bagPath);
-      } catch (error) {
-        void vscode.window.showErrorMessage(`Failed to get bag info: ${error}`);
-      }
-
-      // Refresh tree to show play controls and bag info
-      await toolsTreeProvider.refresh();
-
-      void vscode.window.showInformationMessage(`Bag file selected: ${path.basename(bagPath)}`);
+      await selectBagForPlayback(bagPath);
     }),
     
     vscode.commands.registerCommand('ramros.bag.playPause', async () => {
@@ -941,6 +1001,51 @@ export async function activate(context: vscode.ExtensionContext) {
       } else {
         void vscode.window.showWarningMessage('No active bag playback');
       }
+    }),
+
+    vscode.commands.registerCommand('ramros.bag.addBagFolder', async () => {
+      if (!treeProvider.getWorkspaces()[0]) {
+        void vscode.window.showWarningMessage('No ROS2 workspace found');
+        return;
+      }
+
+      const selectedUris = await vscode.window.showOpenDialog({
+        canSelectFolders: true,
+        canSelectMany: false,
+        openLabel: 'Add Bag Folder'
+      });
+
+      if (!selectedUris || selectedUris.length === 0) return;
+
+      await getWorkspaceConfigService().addBagFolder(selectedUris[0].fsPath);
+      await toolsTreeProvider.refresh();
+      void vscode.window.showInformationMessage('Bag folder added');
+    }),
+
+    vscode.commands.registerCommand('ramros.bag.removeBagFolder', async (item?: TreeItemBase) => {
+      const folder = resolveBagFolderPath(item);
+      if (!folder) return;
+
+      await getWorkspaceConfigService().removeBagFolder(folder);
+      await toolsTreeProvider.refresh();
+    }),
+
+    vscode.commands.registerCommand('ramros.bag.openInRqtBag', async (item?: TreeItemBase) => {
+      const bagPath = resolveBagPath(item);
+      if (!bagPath) {
+        void vscode.window.showWarningMessage('No bag file selected');
+        return;
+      }
+
+      const workspace = await resolveWorkspaceForPath(bagPath);
+      if (!workspace) return;
+
+      await terminalManager.executeInNewTerminal(`rqt_bag "${bagPath}"`, workspace, `rqt_bag: ${path.basename(bagPath)}`);
+    }),
+
+    vscode.commands.registerCommand('ramros.bag.playBagByPath', async (bagPath: string) => {
+      if (!bagPath) return;
+      await selectBagForPlayback(bagPath);
     })
   );
   

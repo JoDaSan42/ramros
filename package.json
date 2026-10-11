@@ -177,6 +177,25 @@
         "command": "ramros.createLaunchFile",
         "title": "Create Launch File",
         "icon": "$(rocket)"
+      },
+      {
+        "command": "ramros.bag.addBagFolder",
+        "title": "Add Bag Folder",
+        "icon": "$(add)"
+      },
+      {
+        "command": "ramros.bag.removeBagFolder",
+        "title": "Remove Bag Folder",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "ramros.bag.openInRqtBag",
+        "title": "Open in rqt_bag",
+        "icon": "$(play)"
+      },
+      {
+        "command": "ramros.bag.playBagByPath",
+        "title": "Select Bag for Playback"
       }
     ],
     "menus": {
@@ -388,6 +407,28 @@
           "command": "ramros.bag.stopRecording",
           "when": "view == ramrosTools && viewItem == bagStopRecording",
           "group": "inline@1"
+        },
+        {
+          "command": "ramros.bag.addBagFolder",
+          "when": "view == ramrosTools && viewItem == bagFilesFolder",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.bag.addBagFolder",
+          "when": "view == ramrosTools && viewItem == bagFilesFolder"
+        },
+        {
+          "command": "ramros.bag.removeBagFolder",
+          "when": "view == ramrosTools && viewItem == externalBagFolder"
+        },
+        {
+          "command": "ramros.bag.openInRqtBag",
+          "when": "view == ramrosTools && viewItem == bagFile",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.bag.openInRqtBag",
+          "when": "view == ramrosTools && viewItem == bagFile"
         },
         {
           "command": "ramros.live.echoTopic",
