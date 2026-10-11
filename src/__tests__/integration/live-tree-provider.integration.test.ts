@@ -1,10 +1,34 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { exec } from 'child_process';
 import { LiveTreeProvider } from '../../treeview/live-tree-provider';
 import { LiveFolderItem, LiveNodeItem, LiveTopicItem, LiveViewDisabledItem } from '../../treeview/live-items';
 import { Ros2CliService } from '../../core/ros2-cli-service';
 import { WorkspaceConfigService } from '../../core/workspace-config-service';
+
+jest.mock('child_process', () => {
+  const execMock = jest.fn((...args: unknown[]) => {
+    const cb = args[args.length - 1] as (error: Error | null, stdout: string, stderr: string) => void;
+    cb(new Error('ros2 CLI not available in tests'), '', '');
+  });
+  Object.defineProperty(execMock, Symbol.for('nodejs.util.promisify.custom'), {
+    value: (command: string, options: unknown) =>
+      new Promise((resolve, reject) => {
+        execMock(command, options, (error: Error | null, stdout: string, stderr: string) => {
+          if (error) {
+            (error as Error & { stdout?: string; stderr?: string }).stdout = stdout;
+            (error as Error & { stdout?: string; stderr?: string }).stderr = stderr;
+            reject(error);
+          } else {
+            resolve({ stdout, stderr });
+          }
+        });
+      }),
+    configurable: true
+  });
+  return { exec: execMock };
+});
 
 describe('LiveTreeProvider Integration Tests', () => {
   let provider: LiveTreeProvider;
@@ -166,6 +190,35 @@ describe('LiveTreeProvider Integration Tests', () => {
       const info = await provider.getNodeInfo('/talker');
 
       expect(info?.publishedTopics).toEqual(['/chatter', '/rosout']);
+    });
+  });
+
+  describe('callService', () => {
+    it('passes stdout through on success', async () => {
+      (exec as unknown as jest.Mock).mockImplementationOnce((...args: unknown[]) => {
+        const cb = args[args.length - 1] as (error: Error | null, stdout: string, stderr: string) => void;
+        cb(null, 'response', '');
+      });
+
+      const result = await cli.callService('/add_two_ints', 'example_interfaces/srv/AddTwoInts', '{a: 1, b: 2}');
+
+      expect(result).toBe('response');
+      expect(exec).toHaveBeenCalledWith(
+        'ros2 service call "/add_two_ints" "example_interfaces/srv/AddTwoInts" \'{a: 1, b: 2}\'',
+        { encoding: 'utf-8', timeout: 30000 },
+        expect.any(Function)
+      );
+    });
+
+    it('returns null on error', async () => {
+      (exec as unknown as jest.Mock).mockImplementationOnce((...args: unknown[]) => {
+        const cb = args[args.length - 1] as (error: Error | null, stdout: string, stderr: string) => void;
+        cb(new Error('service call failed'), '', 'boom');
+      });
+
+      const result = await cli.callService('/add_two_ints', 'example_interfaces/srv/AddTwoInts', '{}');
+
+      expect(result).toBeNull();
     });
   });
 

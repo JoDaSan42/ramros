@@ -21,6 +21,8 @@ import { BagPlayItem, BagPlayControlItem, BagLoopItem, BagRecordItem, BagFilesFo
 import { LaunchWizard } from './wizard/launch-wizard';
 import { runCreatePackageWizard, runAddToPackageWizard } from './wizard/package-wizard';
 import { RamrosDocProvider, showInReadonlyDoc } from './core/ramros-doc-provider';
+import { buildTopicPubCommand } from './core/command-builders';
+import { Ros2CliService } from './core/ros2-cli-service';
 
 let cacheManager: CacheManager;
 let ramrosDocProvider: RamrosDocProvider;
@@ -65,6 +67,29 @@ function resolveTopicName(treeItem?: TreeItemBase | TreeItemBase[]): string | un
   const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
   if (item && 'getTopicName' in item && typeof (item as { getTopicName?: unknown }).getTopicName === 'function') {
     return (item as unknown as { getTopicName: () => string }).getTopicName();
+  }
+  return undefined;
+}
+
+function resolveTopicMessageType(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {
+  const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
+  if (item && 'getMessageType' in item && typeof (item as { getMessageType?: unknown }).getMessageType === 'function') {
+    return (item as unknown as { getMessageType: () => string }).getMessageType();
+  }
+  return undefined;
+}
+
+function resolveServiceItem(treeItem?: TreeItemBase | TreeItemBase[]): { name: string; type?: string } | undefined {
+  const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
+  if (
+    item &&
+    'getServiceName' in item && typeof (item as { getServiceName?: unknown }).getServiceName === 'function' &&
+    'getServiceType' in item && typeof (item as { getServiceType?: unknown }).getServiceType === 'function'
+  ) {
+    return {
+      name: (item as unknown as { getServiceName: () => string }).getServiceName(),
+      type: (item as unknown as { getServiceType: () => string | undefined }).getServiceType(),
+    };
   }
   return undefined;
 }
@@ -213,9 +238,9 @@ export async function activate(context: vscode.ExtensionContext) {
    ramrosDocProvider = new RamrosDocProvider();
    
    treeProvider = new RamrosTreeProvider(workspaceDetector, duplicateDetector, packageDiscovery);
-  workspaceConfigService = getWorkspaceConfigService();
-  toolsTreeProvider = new ToolsTreeProvider(getBagEntries);
-  liveTreeProvider = new LiveTreeProvider();
+   workspaceConfigService = getWorkspaceConfigService();
+   toolsTreeProvider = new ToolsTreeProvider(getBagEntries);
+   liveTreeProvider = new LiveTreeProvider(workspaceConfigService);
   
    packageCreator = new PackageCreator(context.extensionPath, rosEnvironmentService);
   
@@ -234,10 +259,19 @@ export async function activate(context: vscode.ExtensionContext) {
     showCollapseAll: false
   });
   
-  const ramrosConfigWatcher = vscode.workspace.createFileSystemWatcher('**/ramros.json');
-  ramrosConfigWatcher.onDidChange(() => void toolsTreeProvider.refresh());
-  ramrosConfigWatcher.onDidCreate(() => void toolsTreeProvider.refresh());
-  ramrosConfigWatcher.onDidDelete(() => void toolsTreeProvider.refresh());
+   const ramrosConfigWatcher = vscode.workspace.createFileSystemWatcher('**/ramros.json');
+   ramrosConfigWatcher.onDidChange(() => {
+     void toolsTreeProvider.refresh();
+     void liveTreeProvider.reloadFromWorkspaceConfig();
+   });
+   ramrosConfigWatcher.onDidCreate(() => {
+     void toolsTreeProvider.refresh();
+     void liveTreeProvider.reloadFromWorkspaceConfig();
+   });
+   ramrosConfigWatcher.onDidDelete(() => {
+     void toolsTreeProvider.refresh();
+     void liveTreeProvider.reloadFromWorkspaceConfig();
+   });
   
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(RamrosDocProvider.scheme, ramrosDocProvider),
@@ -892,6 +926,117 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!workspace) return;
       
       await terminalManager.executeInNewTerminal(`ros2 topic hz "${topicName}"`, workspace, `Hz: ${topicName}`);
+    }),
+    
+    vscode.commands.registerCommand('ramros.live.toggleEnabled', async () => {
+      await liveTreeProvider.setEnabled(!liveTreeProvider.isEnabled());
+    }),
+    
+    vscode.commands.registerCommand('ramros.live.pubTopic', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
+      const cli = Ros2CliService.getInstance();
+      const topicName = resolveTopicName(treeItem) ?? await pickTopic();
+      if (!topicName) return;
+      
+      const messageType = resolveTopicMessageType(treeItem) ?? await cli.getTopicType(topicName) ?? undefined;
+      if (!messageType) {
+        void vscode.window.showErrorMessage('Could not resolve topic type');
+        return;
+      }
+      
+      const modePick = await vscode.window.showQuickPick([
+        { label: 'once', description: 'Publish the message once' },
+        { label: 'rate', description: 'Publish repeatedly at a rate' }
+      ], { placeHolder: 'Select publish mode' });
+      if (!modePick) return;
+      
+      const mode = modePick.label as 'once' | 'rate';
+      let rate: number | undefined;
+      if (mode === 'rate') {
+        const rateInput = await vscode.window.showInputBox({
+          prompt: 'Publish rate (Hz)',
+          value: '1',
+          validateInput: value => {
+            if (!/^\d+(\.\d+)?$/.test(value)) {
+              return 'Rate must be a positive number';
+            }
+            if (!(parseFloat(value) > 0)) {
+              return 'Rate must be greater than 0';
+            }
+            return undefined;
+          }
+        });
+        if (rateInput === undefined) return;
+        rate = parseFloat(rateInput);
+      }
+      
+      const content = await vscode.window.showInputBox({
+        prompt: 'Message content (YAML)',
+        value: '{}',
+        validateInput: value => (value.trim().length > 0 ? undefined : 'Message content is required')
+      });
+      if (content === undefined || content.trim().length === 0) return;
+      
+      const workspace = await pickWorkspace();
+      if (!workspace) return;
+      
+      const command = buildTopicPubCommand(topicName, messageType, content, mode, rate);
+      await terminalManager.executeInNewTerminal(command, workspace, `Pub: ${topicName}`);
+    }),
+    
+    vscode.commands.registerCommand('ramros.live.callService', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
+      const cli = Ros2CliService.getInstance();
+      const serviceItem = resolveServiceItem(treeItem);
+      if (!serviceItem) {
+        void vscode.window.showWarningMessage('No service selected');
+        return;
+      }
+      
+      const serviceName = serviceItem.name;
+      const serviceType = serviceItem.type ?? await cli.getServiceType(serviceName) ?? undefined;
+      if (!serviceType) {
+        void vscode.window.showErrorMessage('Could not resolve service type');
+        return;
+      }
+      
+      const json = await vscode.window.showInputBox({
+        prompt: `Request JSON for ${serviceName}`,
+        value: '{}',
+        validateInput: value => {
+          try {
+            JSON.parse(value);
+            return undefined;
+          } catch {
+            return 'Request must be valid JSON';
+          }
+        }
+      });
+      if (json === undefined) return;
+      
+      const response = await cli.callService(serviceName, serviceType, json);
+      if (response === null) {
+        void vscode.window.showErrorMessage('Service call failed');
+        return;
+      }
+      
+      await showInReadonlyDoc(ramrosDocProvider, `service-call/${serviceName}`, response);
+      void vscode.window.showInformationMessage(`Service call to ${serviceName} completed`);
+    }),
+    
+    vscode.commands.registerCommand('ramros.live.setParameter', async (nodeName: string, paramName: string, currentValue?: string) => {
+      const cli = Ros2CliService.getInstance();
+      const value = await vscode.window.showInputBox({
+        prompt: `Set parameter ${paramName} on ${nodeName}`,
+        value: currentValue
+      });
+      if (value === undefined) return;
+      
+      const success = await cli.setParameterValue(nodeName, paramName, value);
+      if (success) {
+        void vscode.window.showInformationMessage(`Parameter ${paramName} set`);
+        await liveTreeProvider.refresh();
+      } else {
+        void vscode.window.showErrorMessage(`Failed to set parameter ${paramName}`);
+      }
     }),
     
     vscode.commands.registerCommand('ramros.bag.selectFile', async () => {

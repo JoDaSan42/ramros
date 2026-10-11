@@ -1,5 +1,6 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { buildServiceCallCommand } from './command-builders';
 
 const execAsync = promisify(exec);
 
@@ -301,6 +302,16 @@ export class Ros2CliService {
     } catch (error) {
       console.error(`Failed to set parameter ${paramName} for node ${nodeName}`, error);
       return false;
+    }
+  }
+
+  async callService(serviceName: string, serviceType: string, json: string): Promise<string | null> {
+    try {
+      const { stdout } = await execAsync(buildServiceCallCommand(serviceName, serviceType, json), { encoding: 'utf-8', timeout: 30000 });
+      return stdout;
+    } catch (error) {
+      console.error(`Failed to call service ${serviceName}`, error);
+      return null;
     }
   }
 }
