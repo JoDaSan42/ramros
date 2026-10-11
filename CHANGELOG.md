@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hot-reload via file watcher.
 - External bag folders in the Bag Files tree (add via "Add Bag Folder", remove
   via context menu); bag files open in rqt_bag via inline button or context menu.
+- Live view enable/disable toggle (view-title button) persisted as
+  `liveView.enabled` in `ramros.json`; per-workspace `liveView.refreshRate` override.
+- `ros2 topic pub` from live topics (once or at a rate), `ros2 service call`
+  with JSON input and read-only response document, runtime node parameters listed
+  under live nodes with set-via-input-box.
 
 ### Fixed
 - Bag recording/playback context menus now appear on the Bag Files folder
