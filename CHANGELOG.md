@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   settings are now honored (`{workspace}`/`{package}` placeholders supported).
 - Cache settings (`ramros.cache.ttlSeconds`, `ramros.cache.maxEntries`) reload
   live without restarting the extension.
+- Per-workspace `ramros.json` configuration file (first key: `bagFolders`) with
+  hot-reload via file watcher.
+- External bag folders in the Bag Files tree (add via "Add Bag Folder", remove
+  via context menu); bag files open in rqt_bag via inline button or context menu.
 
 ### Fixed
 - Bag recording/playback context menus now appear on the Bag Files folder
