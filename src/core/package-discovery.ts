@@ -715,7 +715,7 @@ export class PackageDiscoveryService {
       });
     }
 
-    const paramPattern = /declare_parameter\s*\(\s*["']([^"']+)["']\s*(?:,\s*([^)]+))?/g;
+    const paramPattern = /declare_parameter(?:\s*<[^>]*>)?\s*\(\s*["']([^"']+)["']\s*(?:,\s*([^),]+))?/g;
     while ((match = paramPattern.exec(content)) !== null) {
       const paramName = match[1];
       const rawDefault = match[2]?.trim();
@@ -888,7 +888,7 @@ export class PackageDiscoveryService {
       actionClients.push({ actionType: match[1].trim(), name: match[2] });
     }
 
-    const paramPattern = /declare_parameter\s*\(['"]([^'"]+)['"]\s*(?:,\s*([^)]+))?/g;
+    const paramPattern = /declare_parameter\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*([^),]+))?/g;
     while ((match = paramPattern.exec(content)) !== null) {
       const paramName = match[1];
       const rawDefault = match[2]?.trim();

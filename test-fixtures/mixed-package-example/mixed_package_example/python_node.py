@@ -17,6 +17,10 @@ class PythonNode(Node):
         self.act_cli = ActionClient(self, CliAction, '/py_cli_action')
         # self.act_cli2 = ActionClient(self, CliAction, '/py_commented_action')
         # self.srv2 = self.create_service(MySrv, '/py_commented_service', self.srv_callback)
+        self.declare_parameter('py_timeout', 0.5, ParameterDescriptor(description='timeout'))
+        self.declare_parameter('py_gain', 1.5)
+        self.declare_parameter('py_enabled', True)
+        self.declare_parameter('py_frame', 'map')
 
     def srv_callback(self, request, response):
         return response
