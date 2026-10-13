@@ -3,6 +3,8 @@ import {
   parseNodeInfoOutput,
   parseParameterList,
   parseParameterValue,
+  parseParameterType,
+  validateParameterValue,
   Ros2CliService,
 } from '../../core/ros2-cli-service';
 
@@ -120,6 +122,83 @@ describe('parseParameterValue', () => {
 
   it('returns null when no line matches', () => {
     expect(parseParameterValue('Parameter not set')).toBeNull();
+  });
+});
+
+describe('parseParameterType', () => {
+  it('extracts integer type', () => {
+    expect(parseParameterType('Integer value is: 10')).toBe('integer');
+  });
+
+  it('extracts double type', () => {
+    expect(parseParameterType('Double value is: 1.5')).toBe('double');
+  });
+
+  it('extracts string type', () => {
+    expect(parseParameterType('String value is: hello')).toBe('string');
+  });
+
+  it('extracts boolean type', () => {
+    expect(parseParameterType('Boolean value is: True')).toBe('bool');
+  });
+
+  it('extracts byte type', () => {
+    expect(parseParameterType('Byte array value is: bytearray(b\x27\\x01\x27)')).toBe('bytearray');
+  });
+
+  it('returns null when no line matches', () => {
+    expect(parseParameterType('Parameter not set')).toBeNull();
+  });
+
+  it('returns null for an untyped value line', () => {
+    expect(parseParameterType('Some value is: 10')).toBeNull();
+  });
+});
+
+describe('validateParameterValue', () => {
+  it('accepts an integer for an integer parameter', () => {
+    expect(validateParameterValue('42', 'integer')).toBeUndefined();
+  });
+
+  it('rejects a non-integer for an integer parameter', () => {
+    expect(validateParameterValue('abc', 'integer')).toBe('Value must be an integer');
+  });
+
+  it('accepts a double for a double parameter', () => {
+    expect(validateParameterValue('1.5', 'double')).toBeUndefined();
+  });
+
+  it('rejects a non-number for a double parameter', () => {
+    expect(validateParameterValue('abc', 'double')).toBe('Value must be a number');
+  });
+
+  it('accepts booleans case-insensitively for a boolean parameter', () => {
+    expect(validateParameterValue('true', 'bool')).toBeUndefined();
+    expect(validateParameterValue('False', 'bool')).toBeUndefined();
+  });
+
+  it('rejects an invalid boolean', () => {
+    expect(validateParameterValue('yes', 'bool')).toBe('Value must be true or false');
+  });
+
+  it('accepts any non-empty string for a string parameter', () => {
+    expect(validateParameterValue('hello world', 'string')).toBeUndefined();
+  });
+
+  it('rejects an empty value for a string parameter', () => {
+    expect(validateParameterValue('', 'string')).toBe('Value must not be empty');
+  });
+
+  it('accepts a JSON array for a byte array parameter', () => {
+    expect(validateParameterValue('[1, 2, 3]', 'bytearray')).toBeUndefined();
+  });
+
+  it('rejects invalid input for a byte array parameter', () => {
+    expect(validateParameterValue('abc', 'bytearray')).toBe('Value must be a byte array like [1, 2, 3]');
+  });
+
+  it('accepts any value when the type is unknown', () => {
+    expect(validateParameterValue('anything', null)).toBeUndefined();
   });
 });
 

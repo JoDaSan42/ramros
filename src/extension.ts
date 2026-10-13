@@ -15,14 +15,14 @@ import { LiveTreeProvider } from './treeview/live-tree-provider';
 import { TerminalManager } from './executor/terminal-manager';
 import { BagSessionService } from './executor/bag-session-service';
 import { PackageCreator } from './wizard/package-creator';
-import { NodeInfo, LaunchFileInfo, PackageDiscoveryService, PackageInfo } from './core/package-discovery';
+import { NodeInfo, LaunchFileInfo, PackageDiscoveryService, PackageInfo, InterfaceInfo } from './core/package-discovery';
 import { TreeItemBase } from './treeview/base-tree-item';
 import { BagPlayItem, BagPlayControlItem, BagLoopItem, BagRecordItem, BagFilesFolderItem, BagFileItem, ExternalBagFolderItem, BagEntriesProvider } from './treeview/bag-items';
 import { LaunchWizard } from './wizard/launch-wizard';
 import { runCreatePackageWizard, runAddToPackageWizard } from './wizard/package-wizard';
 import { RamrosDocProvider, showInReadonlyDoc } from './core/ramros-doc-provider';
 import { buildTopicPubCommand } from './core/command-builders';
-import { Ros2CliService } from './core/ros2-cli-service';
+import { Ros2CliService, validateParameterValue } from './core/ros2-cli-service';
 
 let cacheManager: CacheManager;
 let ramrosDocProvider: RamrosDocProvider;
@@ -114,6 +114,14 @@ function resolveInterfaceQualifiedName(treeItem?: TreeItemBase | TreeItemBase[])
   const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
   if (item && 'getQualifiedName' in item && typeof (item as { getQualifiedName?: unknown }).getQualifiedName === 'function') {
     return (item as unknown as { getQualifiedName: () => string }).getQualifiedName();
+  }
+  return undefined;
+}
+
+function resolveInterfacePath(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {
+  const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
+  if (item && 'getInterfaceInfo' in item && typeof (item as { getInterfaceInfo?: unknown }).getInterfaceInfo === 'function') {
+    return (item as unknown as { getInterfaceInfo: () => InterfaceInfo }).getInterfaceInfo().path;
   }
   return undefined;
 }
@@ -210,13 +218,27 @@ export function __setDocProviderForTests(provider: RamrosDocProvider): void {
   ramrosDocProvider = provider;
 }
 
-export async function showInterfaceDefinition(qualifiedName: string): Promise<void> {
+export async function showInterfaceDefinition(qualifiedName: string, interfacePath?: string): Promise<void> {
   try {
-    const { stdout } = await execAsync(`ros2 interface show ${qualifiedName}`, { encoding: 'utf-8', timeout: 5000 });
+    const command = await buildInterfaceShowCommand(qualifiedName, interfacePath);
+    const { stdout } = await execAsync(command, { encoding: 'utf-8', timeout: 5000 });
     await showInReadonlyDoc(ramrosDocProvider, `interface/${qualifiedName.replace(/\//g, '-')}`, stdout);
   } catch {
     void vscode.window.showErrorMessage(`Could not show interface ${qualifiedName}. Is the workspace built (colcon build)?`);
   }
+}
+
+async function buildInterfaceShowCommand(qualifiedName: string, interfacePath?: string): Promise<string> {
+  if (!interfacePath) {
+    return `ros2 interface show ${qualifiedName}`;
+  }
+  const workspaces = treeProvider?.getWorkspaces() ?? [];
+  const workspace = findWorkspaceForPath(workspaces, interfacePath);
+  const setupBashPath = workspace?.installPath ? path.join(workspace.installPath.fsPath, 'setup.bash') : undefined;
+  if (!setupBashPath || !fs.existsSync(setupBashPath)) {
+    return `ros2 interface show ${qualifiedName}`;
+  }
+  return `source "${setupBashPath}" && ros2 interface show ${qualifiedName}`;
 }
 
 export async function runHealthCheck(provider: RamrosDocProvider): Promise<void> {
@@ -248,6 +270,89 @@ export function resolveWorkspaceForLaunch(
   if (arg && 'getWorkspace' in arg && typeof (arg as unknown as Record<string, unknown>).getWorkspace === 'function') {
     const ws = (arg as unknown as { getWorkspace: () => WorkspaceInfo }).getWorkspace();
     return workspaces.find(w => w.id === ws.id) ?? undefined;
+  }
+  return undefined;
+}
+
+export async function publishToTopic(
+  topicName: string,
+  knownMessageType: string | undefined,
+  terminalManager: TerminalManager,
+  resolveWorkspace: () => Promise<WorkspaceInfo | undefined>,
+  cli: Ros2CliService
+): Promise<string | undefined> {
+  let messageType = knownMessageType ?? await cli.getTopicType(topicName) ?? undefined;
+  if (!messageType) {
+    const manualEntry = await vscode.window.showErrorMessage(
+      `Could not resolve the type of ${topicName}. Is a node publishing on it?`,
+      'Enter topic type manually'
+    );
+    if (!manualEntry) return undefined;
+    messageType = await vscode.window.showInputBox({
+      prompt: `Message type for ${topicName} (e.g. std_msgs/msg/String)`,
+      validateInput: value => (value && value.trim().length > 0 ? undefined : 'Message type is required')
+    });
+    if (!messageType) return undefined;
+  }
+
+  const modePick = await vscode.window.showQuickPick([
+    { label: 'once', description: 'Publish the message once' },
+    { label: 'rate', description: 'Publish repeatedly at a rate' }
+  ], { placeHolder: 'Select publish mode' });
+  if (!modePick) return undefined;
+
+  const mode = modePick.label as 'once' | 'rate';
+  let rate: number | undefined;
+  if (mode === 'rate') {
+    const rateInput = await vscode.window.showInputBox({
+      prompt: 'Publish rate (Hz)',
+      value: '1',
+      validateInput: value => {
+        if (!/^\d+(\.\d+)?$/.test(value)) {
+          return 'Rate must be a positive number';
+        }
+        if (!(parseFloat(value) > 0)) {
+          return 'Rate must be greater than 0';
+        }
+        return undefined;
+      }
+    });
+    if (rateInput === undefined) return undefined;
+    rate = parseFloat(rateInput);
+  }
+
+  const content = await vscode.window.showInputBox({
+    prompt: 'Message content (YAML)',
+    value: '{}',
+    validateInput: value => (value.trim().length > 0 ? undefined : 'Message content is required')
+  });
+  if (content === undefined || content.trim().length === 0) return undefined;
+
+  const workspace = await resolveWorkspace();
+  if (!workspace) return undefined;
+
+  const command = buildTopicPubCommand(topicName, messageType, content, mode, rate);
+  await terminalManager.executeInNewTerminal(command, workspace, `Pub: ${topicName}`);
+  return messageType;
+}
+
+async function pickTargetPackage(workspaces: WorkspaceInfo[]): Promise<PackageInfo | undefined> {
+  const packages = workspaces.flatMap(w => w.packages || []);
+  if (packages.length === 0) {
+    void vscode.window.showWarningMessage('No packages found');
+    return undefined;
+  }
+  const packageNames = packages.map(p => p.name);
+  const selected = await vscode.window.showQuickPick(packageNames, {
+    placeHolder: 'Select a package'
+  });
+  if (!selected) return undefined;
+  return packages.find(p => p.name === selected);
+}
+
+function resolvePresetPackageForLaunch(arg: TreeItemBase | undefined): PackageInfo | undefined {
+  if (arg && 'getPackageInfo' in arg && typeof (arg as unknown as Record<string, unknown>).getPackageInfo === 'function') {
+    return (arg as unknown as { getPackageInfo: () => PackageInfo }).getPackageInfo();
   }
   return undefined;
 }
@@ -681,7 +786,7 @@ export async function activate(context: vscode.ExtensionContext) {
         void vscode.window.showWarningMessage('No interface selected');
         return;
       }
-      await showInterfaceDefinition(qualifiedName);
+      await showInterfaceDefinition(qualifiedName, resolveInterfacePath(treeItem));
     }),
 
     vscode.commands.registerCommand('ramros.createLaunchFile', async (arg?: TreeItemBase) => {
@@ -691,12 +796,20 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const selectedWorkspace = resolveWorkspaceForLaunch(arg, workspaces) ?? await pickWorkspace();
+      let presetPackage = resolvePresetPackageForLaunch(arg);
+      if (!presetPackage && !resolveWorkspaceForLaunch(arg, workspaces)) {
+        presetPackage = await pickTargetPackage(workspaces);
+        if (!presetPackage) return;
+      }
+
+      const selectedWorkspace = presetPackage
+        ? findWorkspaceForPath(workspaces, presetPackage.path) ?? await pickWorkspace()
+        : resolveWorkspaceForLaunch(arg, workspaces) ?? await pickWorkspace();
       if (!selectedWorkspace) return;
 
       const workspacePath = selectedWorkspace.rootPath.fsPath;
 
-      const wizard = new LaunchWizard(workspacePath, packageDiscovery);
+      const wizard = new LaunchWizard(workspacePath, packageDiscovery, presetPackage);
       await wizard.run();
     }),
     
@@ -979,62 +1092,39 @@ export async function activate(context: vscode.ExtensionContext) {
       
       await terminalManager.executeInNewTerminal(`ros2 topic hz "${topicName}"`, workspace, `Hz: ${topicName}`);
     }),
-    
+
     vscode.commands.registerCommand('ramros.live.toggleEnabled', async () => {
       await liveTreeProvider.setEnabled(!liveTreeProvider.isEnabled());
+    }),
+
+    vscode.commands.registerCommand('ramros.live.pubTopic', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
+      const cli = Ros2CliService.getInstance();
+      const topicName = resolveTopicName(treeItem) ?? await pickTopic();
+      if (!topicName) return;
+
+      await publishToTopic(
+        topicName,
+        resolveTopicMessageType(treeItem),
+        terminalManager,
+        pickWorkspace,
+        cli
+      );
     }),
     
     vscode.commands.registerCommand('ramros.live.pubTopic', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
       const cli = Ros2CliService.getInstance();
       const topicName = resolveTopicName(treeItem) ?? await pickTopic();
       if (!topicName) return;
-      
-      const messageType = resolveTopicMessageType(treeItem) ?? await cli.getTopicType(topicName) ?? undefined;
-      if (!messageType) {
-        void vscode.window.showErrorMessage('Could not resolve topic type');
-        return;
-      }
-      
-      const modePick = await vscode.window.showQuickPick([
-        { label: 'once', description: 'Publish the message once' },
-        { label: 'rate', description: 'Publish repeatedly at a rate' }
-      ], { placeHolder: 'Select publish mode' });
-      if (!modePick) return;
-      
-      const mode = modePick.label as 'once' | 'rate';
-      let rate: number | undefined;
-      if (mode === 'rate') {
-        const rateInput = await vscode.window.showInputBox({
-          prompt: 'Publish rate (Hz)',
-          value: '1',
-          validateInput: value => {
-            if (!/^\d+(\.\d+)?$/.test(value)) {
-              return 'Rate must be a positive number';
-            }
-            if (!(parseFloat(value) > 0)) {
-              return 'Rate must be greater than 0';
-            }
-            return undefined;
-          }
-        });
-        if (rateInput === undefined) return;
-        rate = parseFloat(rateInput);
-      }
-      
-      const content = await vscode.window.showInputBox({
-        prompt: 'Message content (YAML)',
-        value: '{}',
-        validateInput: value => (value.trim().length > 0 ? undefined : 'Message content is required')
-      });
-      if (content === undefined || content.trim().length === 0) return;
-      
-      const workspace = await pickWorkspace();
-      if (!workspace) return;
-      
-      const command = buildTopicPubCommand(topicName, messageType, content, mode, rate);
-      await terminalManager.executeInNewTerminal(command, workspace, `Pub: ${topicName}`);
+
+      await publishToTopic(
+        topicName,
+        resolveTopicMessageType(treeItem),
+        terminalManager,
+        pickWorkspace,
+        cli
+      );
     }),
-    
+
     vscode.commands.registerCommand('ramros.live.callService', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
       const cli = Ros2CliService.getInstance();
       const serviceItem = resolveServiceItem(treeItem);
@@ -1076,12 +1166,16 @@ export async function activate(context: vscode.ExtensionContext) {
     
     vscode.commands.registerCommand('ramros.live.setParameter', async (nodeName: string, paramName: string, currentValue?: string) => {
       const cli = Ros2CliService.getInstance();
+      const { type } = await cli.getParameterValueWithType(nodeName, paramName);
       const value = await vscode.window.showInputBox({
-        prompt: `Set parameter ${paramName} on ${nodeName}`,
-        value: currentValue
+        prompt: type
+          ? `Set parameter ${paramName} on ${nodeName} (${type})`
+          : `Set parameter ${paramName} on ${nodeName}`,
+        value: currentValue,
+        validateInput: value => validateParameterValue(value, type)
       });
       if (value === undefined) return;
-      
+
       const success = await cli.setParameterValue(nodeName, paramName, value);
       if (success) {
         void vscode.window.showInformationMessage(`Parameter ${paramName} set`);

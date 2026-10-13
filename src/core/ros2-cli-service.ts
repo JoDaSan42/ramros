@@ -117,6 +117,46 @@ export function parseParameterValue(stdout: string): string | null {
   return value;
 }
 
+export function parseParameterType(stdout: string): string | null {
+  const match = stdout.match(/^(Integer|Double|String|Boolean|Byte array|Byte) value is:/m);
+  if (!match) return null;
+  const type = match[1];
+  switch (type) {
+    case 'Integer': return 'integer';
+    case 'Double': return 'double';
+    case 'String': return 'string';
+    case 'Boolean': return 'bool';
+    case 'Byte array': return 'bytearray';
+    case 'Byte': return 'byte';
+    default: return null;
+  }
+}
+
+export function validateParameterValue(value: string, paramType: string | null): string | undefined {
+  if (!paramType) return undefined;
+  const trimmed = value.trim();
+  switch (paramType) {
+    case 'integer':
+      if (!/^-?\d+$/.test(trimmed)) return 'Value must be an integer';
+      return undefined;
+    case 'double':
+      if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return 'Value must be a number';
+      return undefined;
+    case 'bool':
+      if (trimmed.toLowerCase() !== 'true' && trimmed.toLowerCase() !== 'false') return 'Value must be true or false';
+      return undefined;
+    case 'string':
+      if (trimmed.length === 0) return 'Value must not be empty';
+      return undefined;
+    case 'byte':
+    case 'bytearray':
+      if (!/^\[\s*-?\d+(\s*,\s*-?\d+)*\s*\]$/.test(trimmed)) return 'Value must be a byte array like [1, 2, 3]';
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
 export class Ros2CliService {
   private static instance: Ros2CliService;
 
@@ -287,11 +327,21 @@ export class Ros2CliService {
 
   async getParameterValue(nodeName: string, paramName: string): Promise<string | null> {
     try {
-      const { stdout } = await execAsync(`ros2 param get ${nodeName} ${paramName}`, { encoding: 'utf-8', timeout: 5000 });
+      const { stdout } = await execAsync(`ros2 param get ${shellDoubleQuote(nodeName)} ${shellDoubleQuote(paramName)}`, { encoding: 'utf-8', timeout: 5000 });
       return parseParameterValue(stdout);
     } catch (error) {
       console.error(`Failed to get parameter ${paramName} for node ${nodeName}`, error);
       return null;
+    }
+  }
+
+  async getParameterValueWithType(nodeName: string, paramName: string): Promise<{ value: string | null; type: string | null }> {
+    try {
+      const { stdout } = await execAsync(`ros2 param get ${shellDoubleQuote(nodeName)} ${shellDoubleQuote(paramName)}`, { encoding: 'utf-8', timeout: 5000 });
+      return { value: parseParameterValue(stdout), type: parseParameterType(stdout) };
+    } catch (error) {
+      console.error(`Failed to get parameter ${paramName} for node ${nodeName}`, error);
+      return { value: null, type: null };
     }
   }
 

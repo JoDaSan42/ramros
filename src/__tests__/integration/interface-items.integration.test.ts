@@ -1,10 +1,13 @@
 import { exec } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { RamrosDocProvider } from '../../core/ramros-doc-provider';
 import { showInterfaceDefinition, runHealthCheck, __setDocProviderForTests } from '../../extension';
 import { InterfaceFileItem } from '../../treeview/workspace-items';
 import { CategoryInterfaceFileItem } from '../../treeview/category-items';
 import { InterfaceInfo } from '../../core/package-discovery';
+import { WorkspaceInfo } from '../../core/workspace-detector';
 
 jest.mock('child_process', () => {
   const execMock = jest.fn((...args: unknown[]) => {
@@ -28,6 +31,15 @@ jest.mock('child_process', () => {
   });
   return { exec: execMock };
 });
+
+const makeWorkspaceInfo = (overrides: Partial<WorkspaceInfo>): WorkspaceInfo => ({
+  id: 'ws',
+  name: 'ws',
+  rootPath: { fsPath: '/ws/root' } as vscode.Uri,
+  installPath: { fsPath: '/ws/root/install' } as vscode.Uri,
+  packages: [],
+  ...overrides,
+} as WorkspaceInfo);
 
 describe('Interface tree item qualified names', () => {
   const makeIface = (overrides: Partial<InterfaceInfo>): InterfaceInfo => ({
@@ -121,6 +133,59 @@ describe('showInterfaceDefinition', () => {
       { preview: true, preserveFocus: false }
     );
     expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+    expect(exec).toHaveBeenCalledWith(
+      'ros2 interface show my_pkg/srv/Reset',
+      { encoding: 'utf-8', timeout: 5000 },
+      expect.any(Function)
+    );
+  });
+
+  it('sources the workspace overlay when the interface belongs to a workspace', async () => {
+    const { __setTreeProviderForTests } = await import('../../extension');
+    const os = await import('os');
+    const tmpRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'ramros-iface-'));
+    await fs.promises.mkdir(path.join(tmpRoot, 'install'), { recursive: true });
+    await fs.promises.writeFile(path.join(tmpRoot, 'install', 'setup.bash'), '', 'utf8');
+    const treeProvider = {
+      getWorkspaces: jest.fn(() => [
+        makeWorkspaceInfo({
+          rootPath: { fsPath: tmpRoot } as vscode.Uri,
+          installPath: { fsPath: path.join(tmpRoot, 'install') } as vscode.Uri,
+        })
+      ]),
+    };
+    __setTreeProviderForTests(treeProvider as never);
+
+    (exec as unknown as jest.Mock).mockImplementationOnce((...args: unknown[]) => {
+      const cb = args[args.length - 1] as (error: Error | null, stdout: string, stderr: string) => void;
+      cb(null, 'definition text', '');
+    });
+
+    await showInterfaceDefinition('my_pkg/srv/Reset', `${tmpRoot}/src/my_pkg/msg/Reset.msg`);
+
+    const expectedCommand = `source "${path.join(tmpRoot, 'install', 'setup.bash')}" && ros2 interface show my_pkg/srv/Reset`;
+    const calls = (exec as unknown as jest.Mock).mock.calls as unknown[][];
+    const withSource = calls.find(call => String(call[0]).includes('source'));
+    expect(withSource?.[0]).toBe(expectedCommand);
+    await fs.promises.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it('falls back to the plain command when the interface path matches no workspace', async () => {
+    const { __setTreeProviderForTests } = await import('../../extension');
+    const treeProvider = {
+      getWorkspaces: jest.fn(() => [
+        makeWorkspaceInfo({ rootPath: { fsPath: '/ws/root' } as vscode.Uri })
+      ]),
+    };
+    __setTreeProviderForTests(treeProvider as never);
+
+    (exec as unknown as jest.Mock).mockImplementationOnce((...args: unknown[]) => {
+      const cb = args[args.length - 1] as (error: Error | null, stdout: string, stderr: string) => void;
+      cb(null, 'definition text', '');
+    });
+
+    await showInterfaceDefinition('my_pkg/srv/Reset', '/elsewhere/msg/Reset.msg');
+
     expect(exec).toHaveBeenCalledWith(
       'ros2 interface show my_pkg/srv/Reset',
       { encoding: 'utf-8', timeout: 5000 },
