@@ -71,7 +71,9 @@ module.exports = {
     constructor(_value) {}
   },
   RelativePattern: class RelativePattern {
-    constructor(_baseUriOrWorkspaceFolder, _path) {}
+    constructor(_baseUriOrWorkspaceFolder, patternPath) {
+      this.pattern = patternPath;
+    }
   },
   Uri: {
     file: (p) => ({ fsPath: p, path: p }),

@@ -160,6 +160,69 @@ describe('RamrosTreeProvider Integration Tests', () => {
     it('refresh resolves and clears caches', async () => {
       await expect(treeProvider.refresh()).resolves.toBeUndefined();
     });
+
+    it('watches install/setup.bash so builds refresh the workspace state', async () => {
+      const vscode = require('vscode');
+      vscode.workspace.workspaceFolders = [
+        { uri: { fsPath: '/tmp/ws' }, name: 'ws', index: 0 }
+      ];
+      const createWatcher = vscode.workspace.createFileSystemWatcher as jest.Mock;
+      createWatcher.mockClear();
+
+      await treeProvider.onWorkspaceFoldersChanged();
+
+      const watchedPatterns = createWatcher.mock.calls.map(call => String(call[0].pattern));
+      expect(watchedPatterns.some(p => p.includes('install/setup.bash'))).toBe(true);
+      vscode.workspace.workspaceFolders = [];
+    });
+
+    it('detects installPath changes as a workspace change in the silent refresh', async () => {
+      const os = require('os');
+      const fs = require('fs');
+      const vscode = require('vscode');
+      const tmpRoot = fs.mkdtempSync(require('path').join(os.tmpdir(), 'ramros-ws-'));
+      fs.mkdirSync(require('path').join(tmpRoot, 'src'), { recursive: true });
+
+      vscode.workspace.workspaceFolders = [
+        { uri: { fsPath: tmpRoot }, name: require('path').basename(tmpRoot), index: 0 }
+      ];
+
+      try {
+        const provider = new RamrosTreeProvider(
+          workspaceDetector, duplicateDetector, undefined, false
+        );
+        providersToCleanUp.push(provider);
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        const before = provider.getWorkspaces();
+        expect(before).toHaveLength(1);
+        expect(before[0].installPath).toBeNull();
+
+        fs.mkdirSync(require('path').join(tmpRoot, 'install'), { recursive: true });
+
+        const fsStat = vscode.workspace.fs.stat as jest.Mock;
+        const realStat = async (uri: { fsPath: string }) => {
+          if (fs.existsSync(uri.fsPath) && fs.statSync(uri.fsPath).isDirectory()) {
+            return { type: 2 };
+          }
+          throw new Error('Not implemented');
+        };
+        fsStat.mockImplementation(realStat);
+
+        const detector = new WorkspaceDetector(mockGetDistributions);
+        const refreshed = await detector.detectWorkspaces(true);
+        expect(refreshed[0].installPath?.fsPath).toBe(require('path').join(tmpRoot, 'install'));
+
+        const signature = (workspaces: WorkspaceInfo[]) => workspaces.map(w => ({
+          packages: w.packages?.map(p => p.name).sort(),
+          installPath: w.installPath?.fsPath ?? null,
+        }));
+        expect(JSON.stringify(signature(before))).not.toBe(JSON.stringify(signature(refreshed)));
+      } finally {
+        vscode.workspace.workspaceFolders = [];
+        fs.rmSync(tmpRoot, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('getTreeItem', () => {

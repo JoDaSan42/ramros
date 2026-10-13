@@ -549,6 +549,14 @@ export async function activate(context: vscode.ExtensionContext) {
         useSymlinkInstall,
         cleanFirst
       });
+
+      // colcon build runs async in the terminal; the install/setup.bash file
+      // watcher refreshes the tree as soon as the build creates it. The
+      // delayed refresh below is a fallback for setups where the watcher
+      // misses the event (e.g. remote/ssh workspaces).
+      setTimeout(() => {
+        void treeProvider.refresh();
+      }, 5000);
     }),
     
     vscode.commands.registerCommand('ramros.createPackage', async (options?: Record<string, unknown>) => {
@@ -671,19 +679,19 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       
       if (!nodeToRun) return;
-      
+
       const selectedWorkspace = await resolveWorkspaceForPath(nodeToRun.path);
       if (!selectedWorkspace) return;
-      
-      const setupBashPath = path.join(selectedWorkspace.installPath?.fsPath || '', 'setup.bash');
-      
+
+      const setupBashPath = path.join(selectedWorkspace.rootPath.fsPath, 'install', 'setup.bash');
+
       let runCommand: string;
       if (fs.existsSync(setupBashPath)) {
         runCommand = `source "${setupBashPath}" && ros2 run ${nodeToRun.packageName} ${nodeToRun.name}`;
       } else {
         runCommand = `ros2 run ${nodeToRun.packageName} ${nodeToRun.name}`;
       }
-      
+
       await terminalManager.executeInNewTerminal(runCommand, selectedWorkspace, `Node: ${nodeToRun.name}`);
     }),
     
@@ -848,8 +856,8 @@ export async function activate(context: vscode.ExtensionContext) {
       
       const selectedWorkspace = await resolveWorkspaceForPath(launchFileToRun.path);
       if (!selectedWorkspace) return;
-      
-      const setupBashPath = path.join(selectedWorkspace.installPath?.fsPath || '', 'setup.bash');
+
+      const setupBashPath = path.join(selectedWorkspace.rootPath.fsPath, 'install', 'setup.bash');
       
       let runCommand: string;
       if (fs.existsSync(setupBashPath)) {

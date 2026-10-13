@@ -68,47 +68,41 @@ export class TerminalManager implements vscode.Disposable {
   
   async executeInTerminal(command: string, workspace: WorkspaceInfo): Promise<vscode.Terminal> {
     let terminal = this.terminals.get(workspace.id);
-    
+
     if (!terminal || terminal.exitStatus !== undefined) {
       terminal = vscode.window.createTerminal({
         name: `ROS: ${workspace.name}`
       });
       this.terminals.set(workspace.id, terminal);
-      
-      if (workspace.installPath) {
-        const setupBashPath = path.join(workspace.installPath.fsPath, 'setup.bash');
-        if (fs.existsSync(setupBashPath)) {
-          terminal.sendText(`source "${setupBashPath}"`);
-        }
+
+      const setupBashPath = this.resolveSetupBash(workspace);
+      if (setupBashPath) {
+        terminal.sendText(`source "${setupBashPath}"`);
       }
     }
-    
+
     terminal.show();
     terminal.sendText(command);
-    
+
     return terminal;
   }
-  
+
   async executeInNewTerminal(command: string, workspace: WorkspaceInfo, terminalName?: string): Promise<vscode.Terminal> {
     const name = terminalName || `ROS Run: ${new Date().toLocaleTimeString()}`;
-    
+
     const terminal = vscode.window.createTerminal({
       name
     });
-    
+
     terminal.show();
-    
-    if (workspace.installPath) {
-      const setupBashPath = path.join(workspace.installPath.fsPath, 'setup.bash');
-      if (fs.existsSync(setupBashPath)) {
-        terminal.sendText(`source "${setupBashPath}" && ${command}`);
-      } else {
-        terminal.sendText(command);
-      }
+
+    const setupBashPath = this.resolveSetupBash(workspace);
+    if (setupBashPath) {
+      terminal.sendText(`source "${setupBashPath}" && ${command}`);
     } else {
       terminal.sendText(command);
     }
-    
+
     return terminal;
   }
 
@@ -117,18 +111,28 @@ export class TerminalManager implements vscode.Disposable {
     const terminal = vscode.window.createTerminal({ name: terminalName });
     terminal.show();
 
-    if (workspace.installPath) {
-      const setupBashPath = path.join(workspace.installPath.fsPath, 'setup.bash');
-      if (fs.existsSync(setupBashPath)) {
-        terminal.sendText(`source "${setupBashPath}" && cd "${packagePath}"`);
-      } else {
-        terminal.sendText(`cd "${packagePath}"`);
-      }
+    const setupBashPath = this.resolveSetupBash(workspace);
+    if (setupBashPath) {
+      terminal.sendText(`source "${setupBashPath}" && cd "${packagePath}"`);
     } else {
       terminal.sendText(`cd "${packagePath}"`);
     }
 
     return terminal;
+  }
+
+  private resolveSetupBash(workspace: WorkspaceInfo): string | undefined {
+    const candidates = [
+      workspace.installPath ? path.join(workspace.installPath.fsPath, 'setup.bash') : undefined,
+      path.join(workspace.rootPath.fsPath, 'install', 'setup.bash'),
+    ].filter((p): p is string => Boolean(p));
+
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+    return undefined;
   }
   
   async buildWorkspace(workspace: WorkspaceInfo, options?: BuildOptions): Promise<vscode.Terminal> {

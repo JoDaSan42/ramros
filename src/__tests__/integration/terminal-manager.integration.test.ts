@@ -74,6 +74,59 @@ describe('TerminalManager Integration Tests', () => {
     });
   });
 
+  describe('resolveSetupBash fallback', () => {
+    it('sources via rootPath/install when installPath is stale null', async () => {
+      const validWorkspacePath = path.join(FIXTURES_ROOT, 'workspace-valid');
+
+      const staleWorkspace: WorkspaceInfo = {
+        id: validWorkspacePath,
+        name: 'workspace-valid',
+        rootPath: { fsPath: validWorkspacePath } as any,
+        srcPath: { fsPath: path.join(validWorkspacePath, 'src') } as any,
+        installPath: null,
+        buildPath: null,
+        rosDistribution: null,
+        isValid: true,
+        errors: [],
+        warnings: []
+      };
+
+      const terminal = await terminalManager.executeInNewTerminal(
+        'ros2 run my_pkg my_node',
+        staleWorkspace,
+        'Stale Run'
+      );
+
+      const sentCommands = (terminal.sendText as jest.Mock).mock.calls.map(call => call[0]);
+      const expectedSetup = path.join(validWorkspacePath, 'install', 'setup.bash');
+      expect(sentCommands.some(cmd => cmd.startsWith(`source "${expectedSetup}"`))).toBe(true);
+    });
+
+    it('does not source when no setup.bash exists anywhere', async () => {
+      const staleWorkspace: WorkspaceInfo = {
+        id: '/no-install-ws',
+        name: 'no-install',
+        rootPath: { fsPath: '/no-install-ws' } as any,
+        srcPath: { fsPath: '/no-install-ws/src' } as any,
+        installPath: null,
+        buildPath: null,
+        rosDistribution: null,
+        isValid: true,
+        errors: [],
+        warnings: []
+      };
+
+      const terminal = await terminalManager.executeInNewTerminal(
+        'ros2 run my_pkg my_node',
+        staleWorkspace,
+        'Bare Run'
+      );
+
+      const sentCommands = (terminal.sendText as jest.Mock).mock.calls.map(call => call[0]);
+      expect(sentCommands).toEqual(['ros2 run my_pkg my_node']);
+    });
+  });
+
   describe('executeInTerminal', () => {
     it('terminal creation and tracking', async () => {
       const workspace: WorkspaceInfo = {

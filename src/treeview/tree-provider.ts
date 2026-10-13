@@ -62,20 +62,25 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
   private async loadWorkspacesSilent(): Promise<void> {
     this.packageDiscovery.clearCache();
     const newWorkspaces = await this.workspaceDetector.detectWorkspaces(true);
-    
+
     // detectWorkspaces already validates each workspace, no need to re-validate here
-    
+
     const newConflicts = await this.duplicateDetector.detectDuplicates(newWorkspaces);
-    
+
     const oldPackageCount = this.workspaces.reduce((sum, w) => sum + (w.packages?.length || 0), 0);
     const newPackageCount = newWorkspaces.reduce((sum, w) => sum + (w.packages?.length || 0), 0);
-    
-    const hasChanged = 
+
+    const workspaceSignature = (workspaces: WorkspaceInfo[]) => workspaces.map(w => ({
+      packages: w.packages?.map(p => p.name).sort(),
+      installPath: w.installPath?.fsPath ?? null,
+    }));
+
+    const hasChanged =
       newWorkspaces.length !== this.workspaces.length ||
       oldPackageCount !== newPackageCount ||
-      JSON.stringify(this.workspaces.map(w => w.packages?.map(p => p.name).sort())) !== 
-      JSON.stringify(newWorkspaces.map(w => w.packages?.map(p => p.name).sort()));
-    
+      JSON.stringify(workspaceSignature(this.workspaces)) !==
+      JSON.stringify(workspaceSignature(newWorkspaces));
+
     if (hasChanged) {
       this.workspaces = newWorkspaces;
       this.conflicts = newConflicts;
@@ -131,6 +136,7 @@ export class RamrosTreeProvider implements vscode.TreeDataProvider<TreeItemBase>
       'src/**/*.action',
       'src/**/*.launch.py',
       'src/**/*.launch.xml',
+      'install/setup.bash',
     ];
 
     const debouncedRefresh = (): void => {
