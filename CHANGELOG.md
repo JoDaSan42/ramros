@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-10-13
+
+### Fixed
+- Workspace state now refreshes after `colcon build`: the tree watches
+  `install/setup.bash`, so "workspace has not been built yet" clears as soon as
+  the build finishes instead of persisting until a manual reload.
+- Running nodes and launch files now sources `install/setup.bash` reliably on a
+  freshly built workspace; the setup.bash path is resolved from the workspace
+  root when the cached workspace info is stale.
+- A short fallback tree refresh runs after starting a build, covering
+  environments where file watchers miss the `install/setup.bash` event.
+
 ## [1.3.0] - 2026-10-11
 
 ### Added

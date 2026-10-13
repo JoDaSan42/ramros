@@ -55,8 +55,8 @@ describe('package.json contract', () => {
     contextEntries = packageJson.contributes?.menus?.['view/item/context'] ?? [];
   });
 
-  it('declares version 1.3.0', () => {
-    expect(packageJson.version).toBe('1.3.0');
+  it('declares version 1.3.1', () => {
+    expect(packageJson.version).toBe('1.3.1');
   });
 
   it('registers every command referenced in menus', () => {

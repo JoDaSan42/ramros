@@ -8,7 +8,7 @@ A VSCode extension for managing ROS2 workspaces efficiently.
 
 ### From GitHub Release
 1. Go to the [Releases page](https://github.com/JoDaSan42/ramros/releases)
-2. Download the latest `.vsix` file (e.g., `ramros-1.0.0.vsix`)
+2. Download the latest `.vsix` file (e.g., `ramros-1.3.1.vsix`)
 3. In VSCode, open Extensions (`Ctrl+Shift+X`)
 4. Click the "..." menu → "Install from VSIX"
 5. Select the downloaded `.vsix` file
@@ -99,9 +99,9 @@ Real-time monitoring of ROS2 system activity.
 - Auto-refresh on interval
 - Publisher and subscriber count display
 - Enable/disable the live view via view-title toggle (persisted as `liveView.enabled` in `ramros.json`)
-- Publish messages to topics (`ros2 topic pub`, once or at a rate)
+- Publish messages to topics (`ros2 topic pub`, once or at a rate); if the topic type cannot be discovered (e.g. no node running), you can enter it manually
 - Call services with JSON input (`ros2 service call`); response shown in a read-only document
-- View runtime node parameters under live nodes and set them via input box
+- View runtime node parameters under live nodes and set them via input box (values are validated against the parameter type reported by `ros2 param get`)
 - Run a ROS2 health check (`ros2 doctor`) from the view title bar; report shown in a read-only document
 
 ### 📦 Workspace Section
@@ -144,6 +144,7 @@ Supports both C++ (`create_service`, `create_client`, `rclcpp_action::create_ser
 #### Launch File Support
 - Automatic detection of `.launch.py` and `.launch.xml` files
 - Creation wizard generates `.launch.py` or `.launch.xml` (format selection in the wizard)
+- Node parameters are validated during the wizard: values must match the declared type (int/float/bool/string/arrays; `1` is rejected for a float parameter and vice versa) and are re-prompted until valid; whole-number floats serialize as float literals (e.g. `1.0`)
 - Save location configurable: target package `launch/` folder, workspace root, or a custom path with `{workspace}`/`{package}` placeholders
 - Click to open launch file
 - Run launch files directly from tree view context menu
@@ -186,7 +187,7 @@ Interactive wizard for creating new ROS2 packages:
 
 #### Category View
 - Group packages by node/interface/launch-file category via "Toggle Tree View Mode"
-- Create buttons (inline "Add Node/Interface") directly on category folders
+- Create buttons (inline "Add Node/Interface") directly on category folders; the Launch Files "+" first asks for the target package and preselects it in the wizard
 
 #### Commands & Actions
 Access commands from tree view context menu or command palette (`Ctrl+Shift+P`; most commands appear without a `RAMROS:` prefix — only `RAMROS: Toggle Tree View Mode` carries the category):
@@ -240,6 +241,7 @@ Access commands from tree view context menu or command palette (`Ctrl+Shift+P`; 
 - Script wrapper for keyboard control support (spacebar, Ctrl+C)
 - Named terminals for easy identification
 - Automatic terminal cleanup on stop
+- `install/setup.bash` is sourced automatically when running nodes/launch files; the path is re-resolved from the workspace root after a build, so a freshly built workspace works without reloading
 
 #### Configuration
 No configuration required for basic usage. Optional settings:
