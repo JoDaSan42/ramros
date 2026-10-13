@@ -106,6 +106,37 @@ describe('PackageDiscoveryService', () => {
     });
   });
 
+  describe('findInterfaceFiles', () => {
+    let tempPackagePath: string;
+
+    beforeEach(() => {
+      tempPackagePath = path.join(testSrcPath, 'test_iface_pkg');
+      fs.mkdirSync(path.join(tempPackagePath, 'msg'), { recursive: true });
+      fs.writeFileSync(path.join(tempPackagePath, 'msg', 'Test.msg'), 'int32 id\n');
+    });
+
+    afterEach(() => {
+      if (fs.existsSync(tempPackagePath)) {
+        fs.rmSync(tempPackagePath, { recursive: true, force: true });
+      }
+    });
+
+    it('should set packageName to the passed name', async () => {
+      const interfaces = await service.findInterfaceFiles(tempPackagePath, 'explicit_name');
+
+      expect(interfaces.length).toBe(1);
+      expect(interfaces[0].packageName).toBe('explicit_name');
+      expect(interfaces[0].name).toBe('Test');
+    });
+
+    it('should fall back to the directory basename when no name is passed', async () => {
+      const interfaces = await service.findInterfaceFiles(tempPackagePath);
+
+      expect(interfaces.length).toBe(1);
+      expect(interfaces[0].packageName).toBe('test_iface_pkg');
+    });
+  });
+
   describe('detectPackageType', () => {
     it('should detect Python package', () => {
       const pythonPackagePath = path.join(__dirname, '../../../test-fixtures/workspace-valid/src/my_package');

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { PackageInfo, NodeInfo, InstalledPackageInfo, LaunchFileInfo, PackageDiscoveryService } from '../core/package-discovery';
+import { PackageInfo, NodeInfo, InstalledPackageInfo, LaunchFileInfo, ParameterInfo, PackageDiscoveryService } from '../core/package-discovery';
 import { LaunchGenerator, LaunchNodeConfig, LaunchFileConfig } from './launch-generator';
 import { BuildFilePatcher } from './build-file-patcher';
 import { ParameterCoercer, ParameterValue } from '../core/parameter-coercer';
@@ -8,12 +8,43 @@ import { ParameterCoercer, ParameterValue } from '../core/parameter-coercer';
 export interface SelectedNodeForLaunch {
   node: NodeInfo;
   package: PackageInfo | InstalledPackageInfo;
-  parameters?: Array<{ name: string; value: ParameterValue }>;
+  parameters?: Array<{ name: string; value: ParameterValue; type?: string }>;
 }
 
 export interface SelectedLaunchFile {
   launchFile: LaunchFileInfo;
   package: PackageInfo | InstalledPackageInfo;
+}
+
+export async function promptForParameterValue(
+  paramName: string,
+  param: ParameterInfo,
+  collected: Array<{ name: string; value: string }>
+): Promise<string | undefined> {
+  let currentValue = param.defaultValue || '';
+  let lastError: string | undefined;
+
+  for (;;) {
+    const inputValue = await vscode.window.showInputBox({
+      prompt: lastError ? `${lastError} — Parameter: ${paramName}` : `Parameter: ${paramName}`,
+      value: currentValue,
+      placeHolder: param.type ? `Type: ${param.type}` : 'Enter value',
+      validateInput: value => ParameterCoercer.validate(value, param.type)
+    });
+
+    if (inputValue === undefined) return undefined;
+    if (inputValue === '') return undefined;
+
+    const error = ParameterCoercer.validate(inputValue, param.type);
+    if (!error) {
+      collected.push({ name: paramName, value: inputValue });
+      return inputValue;
+    }
+
+    void vscode.window.showWarningMessage(`Parameter ${paramName}: ${error}`);
+    lastError = error;
+    currentValue = inputValue;
+  }
 }
 
 export class LaunchWizard {
@@ -24,8 +55,15 @@ export class LaunchWizard {
 
   constructor(
     private workspacePath: string,
-    private packageDiscovery: PackageDiscoveryService
-  ) {}
+    private packageDiscovery: PackageDiscoveryService,
+    presetTargetPackage?: PackageInfo
+  ) {
+    this.targetPackage = presetTargetPackage ?? null;
+  }
+
+  getTargetPackage(): PackageInfo | null {
+    return this.targetPackage;
+  }
 
   async run(): Promise<void> {
     try {
@@ -285,7 +323,8 @@ export class LaunchWizard {
 
     // Configure parameters immediately for this node
     const isInstalled = (pkg as InstalledPackageInfo).source === 'installed';
-    const nodeParams: Array<{ name: string; value: ParameterValue }> = [];
+    const nodeParams: Array<{ name: string; value: ParameterValue; type?: string }> = [];
+    const collectedParams: Array<{ name: string; value: string }> = [];
 
     if (!isInstalled && selected.node.parameters && selected.node.parameters.length > 0) {
       const shouldConfigure = await vscode.window.showQuickPick([
@@ -297,16 +336,12 @@ export class LaunchWizard {
 
       if (shouldConfigure && shouldConfigure.label.startsWith('Yes')) {
         for (const param of selected.node.parameters) {
-          const inputValue = await vscode.window.showInputBox({
-            prompt: `Parameter: ${param.name}`,
-            value: param.defaultValue || '',
-            placeHolder: param.type ? `Type: ${param.type}` : 'Enter value'
-          });
-
-          if (inputValue !== undefined && inputValue !== '') {
+          const inputValue = await promptForParameterValue(param.name, param, collectedParams);
+          if (inputValue !== undefined) {
             nodeParams.push({
               name: param.name,
-              value: this.parseParameterValue(inputValue, param.type)
+              value: this.parseParameterValue(inputValue, param.type),
+              type: param.type
             });
           }
         }

@@ -1,6 +1,34 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { exec } from 'child_process';
 import { LiveTreeProvider } from '../../treeview/live-tree-provider';
-import { LiveFolderItem, LiveNodeItem, LiveTopicItem } from '../../treeview/live-items';
+import { LiveFolderItem, LiveNodeItem, LiveServiceItem, LiveTopicItem, LiveViewDisabledItem, NodeServicesItem } from '../../treeview/live-items';
 import { Ros2CliService } from '../../core/ros2-cli-service';
+import { WorkspaceConfigService } from '../../core/workspace-config-service';
+
+jest.mock('child_process', () => {
+  const execMock = jest.fn((...args: unknown[]) => {
+    const cb = args[args.length - 1] as (error: Error | null, stdout: string, stderr: string) => void;
+    cb(new Error('ros2 CLI not available in tests'), '', '');
+  });
+  Object.defineProperty(execMock, Symbol.for('nodejs.util.promisify.custom'), {
+    value: (command: string, options: unknown) =>
+      new Promise((resolve, reject) => {
+        execMock(command, options, (error: Error | null, stdout: string, stderr: string) => {
+          if (error) {
+            (error as Error & { stdout?: string; stderr?: string }).stdout = stdout;
+            (error as Error & { stdout?: string; stderr?: string }).stderr = stderr;
+            reject(error);
+          } else {
+            resolve({ stdout, stderr });
+          }
+        });
+      }),
+    configurable: true
+  });
+  return { exec: execMock };
+});
 
 describe('LiveTreeProvider Integration Tests', () => {
   let provider: LiveTreeProvider;
@@ -55,6 +83,33 @@ describe('LiveTreeProvider Integration Tests', () => {
       expect(nodes[0]).toBeInstanceOf(LiveNodeItem);
       expect((nodes[0] as LiveNodeItem).getNodeName()).toBe('/mystery');
     });
+
+    it('renders a services folder reachable through the node item when getNodeInfo returns service servers', async () => {
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/add_two_ints']);
+      jest.spyOn(cli, 'getNodeInfo').mockResolvedValue({
+        name: '/add_two_ints',
+        publishedTopics: [],
+        subscribedTopics: [],
+        serviceServers: [{ name: '/add_two_ints', type: 'example_interfaces/srv/AddTwoInts' }],
+      });
+
+      const folders = await provider.getChildren();
+      const nodes = await provider.getChildren(folders[0]);
+
+      expect(nodes).toHaveLength(1);
+      const node = nodes[0] as LiveNodeItem;
+      expect(node.getNodeName()).toBe('/add_two_ints');
+
+      const nodeChildren = await node.getChildren();
+      const services = nodeChildren.find(c => c instanceof NodeServicesItem);
+      expect(services).toBeInstanceOf(NodeServicesItem);
+
+      const serviceChildren = await services!.getChildren();
+      const service = serviceChildren.find(c => c instanceof LiveServiceItem) as LiveServiceItem;
+      expect(service).toBeInstanceOf(LiveServiceItem);
+      expect(service.getServiceName()).toBe('/add_two_ints');
+      expect(service.getServiceType()).toBe('example_interfaces/srv/AddTwoInts');
+    });
   });
 
   describe('active topics folder', () => {
@@ -103,6 +158,39 @@ describe('LiveTreeProvider Integration Tests', () => {
     });
   });
 
+  describe('service servers passthrough', () => {
+    it('passes serviceServers through to the node info result', async () => {
+      jest.spyOn(cli, 'getNodeInfo').mockResolvedValue({
+        name: '/add_two_ints',
+        publishedTopics: ['/sum'],
+        subscribedTopics: [],
+        serviceServers: [{ name: '/add_two_ints', type: 'example_interfaces/srv/AddTwoInts' }],
+      });
+
+      const info = await provider.getNodeInfo('/add_two_ints');
+
+      expect(info?.serviceServers).toEqual([
+        { name: '/add_two_ints', type: 'example_interfaces/srv/AddTwoInts' },
+      ]);
+    });
+
+    it('keeps serviceServers when system topics are filtered', async () => {
+      jest.spyOn(cli, 'getNodeInfo').mockResolvedValue({
+        name: '/talker',
+        publishedTopics: ['/chatter', '/rosout'],
+        subscribedTopics: [],
+        serviceServers: [{ name: '/reset', type: 'std_srvs/srv/Trigger' }],
+      });
+
+      const info = await provider.getNodeInfo('/talker');
+
+      expect(info?.publishedTopics).toEqual(['/chatter']);
+      expect(info?.serviceServers).toEqual([
+        { name: '/reset', type: 'std_srvs/srv/Trigger' },
+      ]);
+    });
+  });
+
   describe('system topic filtering for node endpoints', () => {
     it('strips system topics from node pub/sub lists', async () => {
       jest.spyOn(cli, 'getNodeInfo').mockResolvedValue({
@@ -132,6 +220,35 @@ describe('LiveTreeProvider Integration Tests', () => {
     });
   });
 
+  describe('callService', () => {
+    it('passes stdout through on success', async () => {
+      (exec as unknown as jest.Mock).mockImplementationOnce((...args: unknown[]) => {
+        const cb = args[args.length - 1] as (error: Error | null, stdout: string, stderr: string) => void;
+        cb(null, 'response', '');
+      });
+
+      const result = await cli.callService('/add_two_ints', 'example_interfaces/srv/AddTwoInts', '{a: 1, b: 2}');
+
+      expect(result).toBe('response');
+      expect(exec).toHaveBeenCalledWith(
+        'ros2 service call "/add_two_ints" "example_interfaces/srv/AddTwoInts" \'{a: 1, b: 2}\'',
+        { encoding: 'utf-8', timeout: 30000 },
+        expect.any(Function)
+      );
+    });
+
+    it('returns null on error', async () => {
+      (exec as unknown as jest.Mock).mockImplementationOnce((...args: unknown[]) => {
+        const cb = args[args.length - 1] as (error: Error | null, stdout: string, stderr: string) => void;
+        cb(new Error('service call failed'), '', 'boom');
+      });
+
+      const result = await cli.callService('/add_two_ints', 'example_interfaces/srv/AddTwoInts', '{}');
+
+      expect(result).toBeNull();
+    });
+  });
+
   describe('auto-refresh', () => {
     it('can be toggled off and on', () => {
       provider.setAutoRefresh(false);
@@ -154,6 +271,153 @@ describe('LiveTreeProvider Integration Tests', () => {
         'workbench.action.openSettings',
         'ramros.liveView'
       );
+    });
+  });
+
+  describe('workspace config integration', () => {
+    let tempDir: string;
+
+    beforeEach(() => {
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ramros-live-tree-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    function writeRamrosJson(content: object): void {
+      fs.writeFileSync(path.join(tempDir, 'ramros.json'), JSON.stringify(content, null, 2) + '\n', 'utf8');
+    }
+
+    function readRamrosJson(): { liveView?: { enabled?: boolean; refreshRate?: number } } {
+      return JSON.parse(fs.readFileSync(path.join(tempDir, 'ramros.json'), 'utf8'));
+    }
+
+    async function waitFor(condition: () => boolean): Promise<void> {
+      const deadline = Date.now() + 2000;
+      while (!condition() && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+    }
+
+    it('starts disabled and shows only the disabled item when liveView.enabled is false', async () => {
+      writeRamrosJson({ liveView: { enabled: false } });
+      const configService = new WorkspaceConfigService(() => tempDir);
+
+      const configuredProvider = new LiveTreeProvider(configService);
+      try {
+        await waitFor(() => !configuredProvider.isEnabled());
+        expect(configuredProvider.isEnabled()).toBe(false);
+        expect(configuredProvider.isAutoRefreshEnabled()).toBe(false);
+
+        const children = await configuredProvider.getChildren();
+        expect(children).toHaveLength(1);
+        expect(children[0]).toBeInstanceOf(LiveViewDisabledItem);
+      } finally {
+        configuredProvider.dispose();
+      }
+    });
+
+    it('persists enabled=true in ramros.json and restarts polling on setEnabled(true)', async () => {
+      writeRamrosJson({ liveView: { enabled: false } });
+      const configService = new WorkspaceConfigService(() => tempDir);
+
+      const configuredProvider = new LiveTreeProvider(configService);
+      try {
+        await waitFor(() => !configuredProvider.isEnabled());
+        expect(configuredProvider.isEnabled()).toBe(false);
+
+        await configuredProvider.setEnabled(true);
+        expect(configuredProvider.isEnabled()).toBe(true);
+        expect(configuredProvider.isAutoRefreshEnabled()).toBe(true);
+        expect(readRamrosJson().liveView?.enabled).toBe(true);
+
+        const children = await configuredProvider.getChildren();
+        expect(children).toHaveLength(2);
+        expect(children[0]).toBeInstanceOf(LiveFolderItem);
+        expect(children[1]).toBeInstanceOf(LiveFolderItem);
+      } finally {
+        configuredProvider.dispose();
+      }
+    });
+
+    it('persists enabled=false in ramros.json and stops polling on setEnabled(false)', async () => {
+      const configService = new WorkspaceConfigService(() => tempDir);
+
+      const configuredProvider = new LiveTreeProvider(configService);
+      try {
+        expect(configuredProvider.isEnabled()).toBe(true);
+
+        await configuredProvider.setEnabled(false);
+        expect(configuredProvider.isEnabled()).toBe(false);
+        expect(configuredProvider.isAutoRefreshEnabled()).toBe(false);
+        expect(readRamrosJson().liveView?.enabled).toBe(false);
+      } finally {
+        configuredProvider.dispose();
+      }
+    });
+
+    it('applies the ramros.json refreshRate override over the global setting', async () => {
+      writeRamrosJson({ liveView: { refreshRate: 10 } });
+      const configService = new WorkspaceConfigService(() => tempDir);
+
+      const configuredProvider = new LiveTreeProvider(configService);
+      try {
+        await waitFor(() => configuredProvider.getEffectiveRefreshRate() === 10);
+        expect(configuredProvider.getEffectiveRefreshRate()).toBe(10);
+      } finally {
+        configuredProvider.dispose();
+      }
+    });
+
+    it('falls back to the global setting without a refreshRate override', async () => {
+      const configService = new WorkspaceConfigService(() => tempDir);
+
+      const configuredProvider = new LiveTreeProvider(configService);
+      try {
+        expect(configuredProvider.getEffectiveRefreshRate()).toBe(5);
+      } finally {
+        configuredProvider.dispose();
+      }
+    });
+
+    it('reloads the refreshRate override via reloadFromWorkspaceConfig', async () => {
+      writeRamrosJson({ liveView: { refreshRate: 7 } });
+      const configService = new WorkspaceConfigService(() => tempDir);
+
+      const configuredProvider = new LiveTreeProvider(configService);
+      try {
+        await waitFor(() => configuredProvider.getEffectiveRefreshRate() === 7);
+        expect(configuredProvider.getEffectiveRefreshRate()).toBe(7);
+
+        writeRamrosJson({ liveView: { refreshRate: 10 } });
+        await configuredProvider.reloadFromWorkspaceConfig();
+        expect(configuredProvider.getEffectiveRefreshRate()).toBe(10);
+      } finally {
+        configuredProvider.dispose();
+      }
+    });
+
+    it('applies enabled:false via reloadFromWorkspaceConfig when the config file appears after construction', async () => {
+      const configService = new WorkspaceConfigService(() => tempDir);
+
+      const configuredProvider = new LiveTreeProvider(configService);
+      try {
+        await new Promise(resolve => setTimeout(resolve, 25));
+        expect(configuredProvider.isEnabled()).toBe(true);
+
+        writeRamrosJson({ liveView: { enabled: false } });
+        await configuredProvider.reloadFromWorkspaceConfig();
+
+        expect(configuredProvider.isEnabled()).toBe(false);
+        expect(configuredProvider.isAutoRefreshEnabled()).toBe(false);
+
+        const children = await configuredProvider.getChildren();
+        expect(children).toHaveLength(1);
+        expect(children[0]).toBeInstanceOf(LiveViewDisabledItem);
+      } finally {
+        configuredProvider.dispose();
+      }
     });
   });
 });

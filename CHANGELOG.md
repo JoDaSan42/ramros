@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-11
+
 ### Added
 - Static analysis of service servers/clients and action servers/clients for
   C++ and Python nodes, with tree view items under each node.
@@ -16,6 +18,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   settings are now honored (`{workspace}`/`{package}` placeholders supported).
 - Cache settings (`ramros.cache.ttlSeconds`, `ramros.cache.maxEntries`) reload
   live without restarting the extension.
+- Per-workspace `ramros.json` configuration file (first key: `bagFolders`) with
+  hot-reload via file watcher.
+- External bag folders in the Bag Files tree (add via "Add Bag Folder", remove
+  via context menu); bag files open in rqt_bag via inline button or context menu.
+- Live view enable/disable toggle (view-title button) persisted as
+  `liveView.enabled` in `ramros.json`; per-workspace `liveView.refreshRate` override.
+- `ros2 topic pub` from live topics (once or at a rate), `ros2 service call`
+  with JSON input and read-only response document, runtime node parameters listed
+  under live nodes with set-via-input-box.
+- "Show Definition" on interface items: resolved interface definition from
+  `ros2 interface show` in a read-only document (with a colcon-build hint on
+  failure).
+- "Run ROS2 Health Check": `ros2 doctor` output in a read-only document,
+  accessible from the live view title bar and the command palette.
+- Package wizard: optional maintainer name/email prompt with ROS convention
+  placeholders (`todo` / `todo@todo.todo`) and email validation.
+- Create buttons (inline "Add Node/Interface") on the category folders of the
+  by-category tree view.
 
 ### Fixed
 - Bag recording/playback context menus now appear on the Bag Files folder

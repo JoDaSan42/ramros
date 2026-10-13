@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { exec } from 'child_process';
+import { ParameterCoercer } from '../../core/parameter-coercer';
 
 jest.mock('child_process');
 
@@ -11,6 +12,50 @@ describe('LaunchGenerator', () => {
 
   beforeEach(() => {
     generator = new LaunchGenerator();
+  });
+
+  describe('parameter type serialization', () => {
+    it('serializes whole-number double parameters as float literals', () => {
+      const config: LaunchFileConfig = {
+        fileName: 'typed_launch',
+        nodes: [
+          {
+            packageName: 'drive_control',
+            executableName: 'motor_control',
+            parameters: [
+              { name: 'max_speed', value: ParameterCoercer.parse('1.0', 'double'), type: 'double' },
+              { name: 'count', value: ParameterCoercer.parse('3', 'int'), type: 'int' },
+            ],
+          },
+        ],
+      };
+
+      const result = generator.generate(config);
+
+      expect(result).toContain("'max_speed': 1.0,");
+      expect(result).not.toContain("'max_speed': 1,");
+      expect(result).toContain("'count': 3,");
+      expect(result).not.toContain("'count': 3.0,");
+    });
+
+    it('serializes untyped whole numbers as integers (backward compatibility)', () => {
+      const config: LaunchFileConfig = {
+        fileName: 'untyped_launch',
+        nodes: [
+          {
+            packageName: 'my_pkg',
+            executableName: 'my_node',
+            parameters: [
+              { name: 'value', value: 1 },
+            ],
+          },
+        ],
+      };
+
+      const result = generator.generate(config);
+
+      expect(result).toContain("'value': 1,");
+    });
   });
 
   describe('generate', () => {

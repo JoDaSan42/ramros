@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { TreeItemBase } from './base-tree-item';
-import { LiveFolderItem, LiveNodeItem, LiveTopicItem } from './live-items';
+import { LiveFolderItem, LiveNodeItem, LiveTopicItem, LiveViewDisabledItem } from './live-items';
 import { Ros2CliService } from '../core/ros2-cli-service';
+import { WorkspaceConfigService } from '../core/workspace-config-service';
 
 export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   private _onDidChangeTreeData: vscode.EventEmitter<TreeItemBase | undefined | null | void> = new vscode.EventEmitter();
@@ -9,13 +10,16 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
 
   private autoRefreshInterval: NodeJS.Timeout | null = null;
   private refreshRate: number;
+  private configRefreshRate?: number;
+  private enabled: boolean = true;
   private autoRefreshEnabled: boolean = true;
+  private disposed: boolean = false;
   private hideSystemTopics: boolean;
   private readonly cli = Ros2CliService.getInstance();
 
   private readonly SYSTEM_TOPICS = ['/parameter_events', '/rosout', '/clock'];
 
-  constructor() {
+  constructor(private readonly configService?: WorkspaceConfigService) {
     const config = vscode.workspace.getConfiguration('ramros.liveView');
     this.refreshRate = config.get<number>('refreshRate') || 5;
     this.hideSystemTopics = config.get<boolean>('hideSystemTopics', true);
@@ -25,14 +29,22 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
       if (e.affectsConfiguration('ramros.liveView.refreshRate')) {
         const newConfig = vscode.workspace.getConfiguration('ramros.liveView');
         this.refreshRate = newConfig.get<number>('refreshRate') || 5;
-        this.startAutoRefresh();
-        void vscode.window.showInformationMessage(`ROS2 Live view refresh rate updated to ${this.refreshRate} seconds`);
+        if (this.configRefreshRate !== undefined) {
+          void vscode.window.showInformationMessage('ramros.json overrides the refresh rate');
+        } else {
+          this.startAutoRefresh();
+          void vscode.window.showInformationMessage(`ROS2 Live view refresh rate updated to ${this.refreshRate} seconds`);
+        }
       } else if (e.affectsConfiguration('ramros.liveView.hideSystemTopics')) {
         const newConfig = vscode.workspace.getConfiguration('ramros.liveView');
         this.hideSystemTopics = newConfig.get<boolean>('hideSystemTopics', true);
         void this.refresh();
       }
     });
+
+    if (this.configService) {
+      void this.reloadFromWorkspaceConfig();
+    }
   }
 
   private isSystemTopic(topicName: string): boolean {
@@ -41,6 +53,45 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
 
   isAutoRefreshEnabled(): boolean {
     return this.autoRefreshEnabled;
+  }
+
+  isEnabled(): boolean {
+    return this.enabled;
+  }
+
+  async setEnabled(enabled: boolean): Promise<void> {
+    this.enabled = enabled;
+    this.setAutoRefresh(enabled);
+    if (this.configService) {
+      await this.configService.setLiveViewConfig({ enabled });
+    }
+    this._onDidChangeTreeData.fire(null);
+  }
+
+  async reloadFromWorkspaceConfig(): Promise<void> {
+    if (!this.configService || this.disposed) {
+      return;
+    }
+    const liveViewConfig = await this.configService.getLiveViewConfig();
+    if (this.disposed) {
+      return;
+    }
+    const liveViewEnabled = liveViewConfig.enabled;
+    if (liveViewEnabled !== undefined) {
+      this.enabled = liveViewEnabled;
+      this.setAutoRefresh(liveViewEnabled);
+    }
+    if (liveViewConfig.refreshRate !== undefined && liveViewConfig.refreshRate > 0) {
+      this.configRefreshRate = liveViewConfig.refreshRate;
+    } else {
+      this.configRefreshRate = undefined;
+    }
+    this.startAutoRefresh();
+    this._onDidChangeTreeData.fire(null);
+  }
+
+  getEffectiveRefreshRate(): number {
+    return this.configRefreshRate ?? this.refreshRate;
   }
 
   setAutoRefresh(enabled: boolean): void {
@@ -66,7 +117,7 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
     if (this.autoRefreshEnabled) {
       this.autoRefreshInterval = setInterval(() => {
         this._onDidChangeTreeData.fire(null);
-      }, this.refreshRate * 1000);
+      }, this.getEffectiveRefreshRate() * 1000);
     }
   }
 
@@ -80,6 +131,9 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
 
   async getChildren(element?: TreeItemBase): Promise<TreeItemBase[]> {
     if (!element) {
+      if (!this.isEnabled()) {
+        return [new LiveViewDisabledItem()];
+      }
       return [
         new LiveFolderItem('Nodes', 'active-nodes'),
         new LiveFolderItem('Topics', 'active-topics')
@@ -98,7 +152,8 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
             items.push(new LiveNodeItem(
               info.name,
               info.publishedTopics,
-              info.subscribedTopics
+              info.subscribedTopics,
+              info.serviceServers
             ));
           } else {
             items.push(new LiveNodeItem(name));
@@ -165,6 +220,7 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   }
 
   dispose(): void {
+    this.disposed = true;
     if (this.autoRefreshInterval) {
       clearInterval(this.autoRefreshInterval);
       this.autoRefreshInterval = null;

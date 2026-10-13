@@ -19,6 +19,9 @@ public:
     this->declare_parameter("max_retries", 3);
     this->declare_parameter("timeout", 5.0);
     this->declare_parameter("enabled", true);
+    this->declare_parameter("epsilon", 1e-3);
+    this->declare_parameter<int>("rate", 5);
+    this->declare_parameter("gain", 2.5, rcl_interfaces::msg::ParameterDescriptor());
 
     // create_service<my_ns::srv::Commented>("/commented_service", std::bind(&CppNode::handle, this, _1, _2));
     auto srv = create_service<my_ns::srv::MyService>(

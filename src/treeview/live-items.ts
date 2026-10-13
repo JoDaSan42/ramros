@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { TopicEndpointInfo } from '../core/package-discovery';
-import { Ros2CliService } from '../core/ros2-cli-service';
+import { Ros2CliService, ServiceServerInfo } from '../core/ros2-cli-service';
 import { TreeItemBase } from './base-tree-item';
 
 export class LiveFolderItem extends TreeItemBase {
@@ -26,14 +26,15 @@ export class LiveNodeItem extends TreeItemBase {
   constructor(
     private readonly nodeName: string,
     private readonly publishedTopics?: string[],
-    private readonly subscribedTopics?: string[]
+    private readonly subscribedTopics?: string[],
+    private readonly serviceServers?: ServiceServerInfo[]
   ) {
     super(nodeName, vscode.TreeItemCollapsibleState.Collapsed);
     this.iconPath = new vscode.ThemeIcon('broadcast', new vscode.ThemeColor('charts.green'));
     this.contextValue = 'liveNode';
     this.updateDisplay();
   }
-  
+
   private updateDisplay(): void {
     const pubCount = this.publishedTopics?.length || 0;
     const subCount = this.subscribedTopics?.length || 0;
@@ -43,38 +44,135 @@ export class LiveNodeItem extends TreeItemBase {
       this.description = 'running';
     }
   }
-  
+
   getNodeName(): string {
     return this.nodeName;
   }
-  
+
   getPublishedTopics(): string[] | undefined {
     return this.publishedTopics;
   }
-  
+
   getSubscribedTopics(): string[] | undefined {
     return this.subscribedTopics;
   }
-  
+
   async getChildren(): Promise<TreeItemBase[]> {
     const children: TreeItemBase[] = [];
-    
+
     const pubCount = this.publishedTopics?.length || 0;
     const subCount = this.subscribedTopics?.length || 0;
-    
+
     if (pubCount > 0) {
       children.push(new NodePublishedTopicsItem(this.nodeName, this.publishedTopics || []));
     }
-    
+
     if (subCount > 0) {
       children.push(new NodeSubscribedTopicsItem(this.nodeName, this.subscribedTopics || []));
     }
-    
+
+    if (this.serviceServers && this.serviceServers.length > 0) {
+      children.push(new NodeServicesItem(this.serviceServers));
+    }
+
+    children.push(new NodeParametersItem(this.nodeName));
+
     if (children.length === 0) {
       children.push(new NoEndpointsItem());
     }
-    
+
     return children;
+  }
+}
+
+export class NodeServicesItem extends TreeItemBase {
+  constructor(private readonly serviceServers: ServiceServerInfo[]) {
+    super(`Services (${serviceServers.length})`, vscode.TreeItemCollapsibleState.Collapsed);
+    this.iconPath = new vscode.ThemeIcon('remote');
+    this.contextValue = 'nodeServices';
+  }
+
+  async getChildren(): Promise<TreeItemBase[]> {
+    return this.serviceServers.map(server => new LiveServiceItem(server));
+  }
+}
+
+export class LiveServiceItem extends TreeItemBase {
+  constructor(private readonly server: ServiceServerInfo) {
+    super(server.name, vscode.TreeItemCollapsibleState.None);
+    this.iconPath = new vscode.ThemeIcon('remote');
+    this.description = server.type ?? '';
+    this.contextValue = 'liveService';
+  }
+
+  getServiceName(): string {
+    return this.server.name;
+  }
+
+  getServiceType(): string | undefined {
+    return this.server.type;
+  }
+
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
+export class NodeParametersItem extends TreeItemBase {
+  constructor(
+    private readonly nodeName: string,
+    private readonly cli: Ros2CliService = Ros2CliService.getInstance()
+  ) {
+    super('Parameters', vscode.TreeItemCollapsibleState.Collapsed);
+    this.iconPath = new vscode.ThemeIcon('settings-gear');
+    this.contextValue = 'nodeParameters';
+  }
+
+  async getChildren(): Promise<TreeItemBase[]> {
+    const names = await this.cli.getParameterNames(this.nodeName);
+    if (names.length === 0) {
+      return [new NoEndpointsItem()];
+    }
+
+    const values = await Promise.all(
+      names.map(name => this.cli.getParameterValue(this.nodeName, name))
+    );
+
+    return names.map((name, index) => new LiveParameterItem(this.nodeName, name, values[index]));
+  }
+}
+
+export class LiveParameterItem extends TreeItemBase {
+  constructor(nodeName: string, paramName: string, private readonly value: string | null) {
+    super(paramName, vscode.TreeItemCollapsibleState.None);
+    this.iconPath = new vscode.ThemeIcon('symbol-parameter');
+    this.description = this.value ?? 'unknown';
+    this.contextValue = 'liveParameter';
+    this.command = {
+      command: 'ramros.live.setParameter',
+      title: 'Set Parameter',
+      arguments: [nodeName, paramName, this.value ?? '']
+    };
+  }
+
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
+export class LiveViewDisabledItem extends TreeItemBase {
+  constructor() {
+    super('Live view disabled — click to enable', vscode.TreeItemCollapsibleState.None);
+    this.iconPath = new vscode.ThemeIcon('eye-closed');
+    this.contextValue = 'liveDisabled';
+    this.command = {
+      command: 'ramros.live.toggleEnabled',
+      title: 'Enable Live View'
+    };
+  }
+
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
   }
 }
 

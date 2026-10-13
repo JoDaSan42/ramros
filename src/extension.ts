@@ -5,6 +5,8 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { RosEnvironmentService } from './core/ros-environment';
 import { WorkspaceDetector, WorkspaceInfo, findWorkspaceForPath } from './core/workspace-detector';
+import { getWorkspaceBagPaths, scanBagFolder } from './core/bag-discovery';
+import { WorkspaceConfigService } from './core/workspace-config-service';
 import { DuplicatePackageDetector } from './core/duplicate-package-detector';
 import { CacheManager } from './cache/cache-manager';
 import { RamrosTreeProvider } from './treeview/tree-provider';
@@ -13,19 +15,24 @@ import { LiveTreeProvider } from './treeview/live-tree-provider';
 import { TerminalManager } from './executor/terminal-manager';
 import { BagSessionService } from './executor/bag-session-service';
 import { PackageCreator } from './wizard/package-creator';
-import { NodeInfo, LaunchFileInfo, PackageDiscoveryService, PackageInfo } from './core/package-discovery';
+import { NodeInfo, LaunchFileInfo, PackageDiscoveryService, PackageInfo, InterfaceInfo } from './core/package-discovery';
 import { TreeItemBase } from './treeview/base-tree-item';
-import { BagPlayItem, BagPlayControlItem, BagLoopItem, BagRecordItem, BagFilesFolderItem } from './treeview/bag-items';
+import { BagPlayItem, BagPlayControlItem, BagLoopItem, BagRecordItem, BagFilesFolderItem, BagFileItem, ExternalBagFolderItem, BagEntriesProvider } from './treeview/bag-items';
 import { LaunchWizard } from './wizard/launch-wizard';
 import { runCreatePackageWizard, runAddToPackageWizard } from './wizard/package-wizard';
+import { RamrosDocProvider, showInReadonlyDoc } from './core/ramros-doc-provider';
+import { buildTopicPubCommand } from './core/command-builders';
+import { Ros2CliService, validateParameterValue } from './core/ros2-cli-service';
 
 let cacheManager: CacheManager;
+let ramrosDocProvider: RamrosDocProvider;
 let terminalManager: TerminalManager;
 let treeProvider: RamrosTreeProvider;
 let toolsTreeProvider: ToolsTreeProvider;
 let liveTreeProvider: LiveTreeProvider;
 let packageCreator: PackageCreator;
 let bagSession: BagSessionService;
+let workspaceConfigService: WorkspaceConfigService | undefined;
 
 const execAsync = promisify(exec);
 
@@ -64,6 +71,61 @@ function resolveTopicName(treeItem?: TreeItemBase | TreeItemBase[]): string | un
   return undefined;
 }
 
+function resolveTopicMessageType(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {
+  const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
+  if (item && 'getMessageType' in item && typeof (item as { getMessageType?: unknown }).getMessageType === 'function') {
+    return (item as unknown as { getMessageType: () => string }).getMessageType();
+  }
+  return undefined;
+}
+
+function resolveServiceItem(treeItem?: TreeItemBase | TreeItemBase[]): { name: string; type?: string } | undefined {
+  const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
+  if (
+    item &&
+    'getServiceName' in item && typeof (item as { getServiceName?: unknown }).getServiceName === 'function' &&
+    'getServiceType' in item && typeof (item as { getServiceType?: unknown }).getServiceType === 'function'
+  ) {
+    return {
+      name: (item as unknown as { getServiceName: () => string }).getServiceName(),
+      type: (item as unknown as { getServiceType: () => string | undefined }).getServiceType(),
+    };
+  }
+  return undefined;
+}
+
+function resolveBagFolderPath(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {
+  const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
+  if (item && 'getFolderPath' in item && typeof (item as { getFolderPath?: unknown }).getFolderPath === 'function') {
+    return (item as unknown as { getFolderPath: () => string }).getFolderPath();
+  }
+  return undefined;
+}
+
+function resolveBagPath(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {
+  const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
+  if (item && 'getBagPath' in item && typeof (item as { getBagPath?: unknown }).getBagPath === 'function') {
+    return (item as unknown as { getBagPath: () => string }).getBagPath();
+  }
+  return undefined;
+}
+
+function resolveInterfaceQualifiedName(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {
+  const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
+  if (item && 'getQualifiedName' in item && typeof (item as { getQualifiedName?: unknown }).getQualifiedName === 'function') {
+    return (item as unknown as { getQualifiedName: () => string }).getQualifiedName();
+  }
+  return undefined;
+}
+
+function resolveInterfacePath(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {
+  const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
+  if (item && 'getInterfaceInfo' in item && typeof (item as { getInterfaceInfo?: unknown }).getInterfaceInfo === 'function') {
+    return (item as unknown as { getInterfaceInfo: () => InterfaceInfo }).getInterfaceInfo().path;
+  }
+  return undefined;
+}
+
 async function pickTopic(): Promise<string | undefined> {
   const topics = await executeCommandAndGetOutput('ros2 topic list');
   if (topics.length === 0) {
@@ -91,13 +153,110 @@ async function discoverTopics(): Promise<string[]> {
 }
 
 export async function findWorkspaceBags(): Promise<string[]> {
-  const workspaces = treeProvider.getWorkspaces();
-  const uris = await vscode.workspace.findFiles('**/*.{db3,mcap}', '**/{node_modules,build,install,log}/**');
-  return uris.map(u => u.fsPath).filter(p => workspaces.some(w => p.startsWith(w.rootPath.fsPath)));
+  return getWorkspaceBagPaths(treeProvider.getWorkspaces());
+}
+
+function getWorkspaceConfigService(): WorkspaceConfigService {
+  if (!workspaceConfigService) {
+    workspaceConfigService = new WorkspaceConfigService(
+      () => treeProvider.getWorkspaces()[0]?.rootPath.fsPath
+    );
+  }
+  return workspaceConfigService;
+}
+
+async function composeBagEntries(): Promise<TreeItemBase[]> {
+  const workspaceBags = await getWorkspaceBagPaths(treeProvider.getWorkspaces());
+  const entries: TreeItemBase[] = workspaceBags.map(bag => new BagFileItem(bag));
+  for (const folder of await getWorkspaceConfigService().getBagFolders()) {
+    entries.push(new ExternalBagFolderItem(folder, scanBagFolder(folder)));
+  }
+  return entries;
+}
+
+const getBagEntries: BagEntriesProvider = async (): Promise<TreeItemBase[]> => {
+  try {
+    return await composeBagEntries();
+  } catch (error) {
+    console.error('RAMROS: failed to compose bag entries', error);
+    return [];
+  }
+};
+
+export async function getBagEntriesForTests(): Promise<TreeItemBase[]> {
+  return composeBagEntries();
+}
+
+export async function selectBagForPlayback(bagPath: string): Promise<void> {
+  bagSession.setSelectedBagPath(bagPath);
+  BagPlayItem.setSelectedBag(bagPath);
+
+  // Get bag info
+  try {
+    const { stdout: bagInfoOutput } = await execAsync(`ros2 bag info "${bagPath}"`, { encoding: 'utf-8' });
+
+    // Filter out "closing." lines from the output
+    const filteredOutput = bagInfoOutput.split('\n').filter(line => !line.includes('closing.')).join('\n');
+
+    // Update BagInfoItem with bag path and info
+    await toolsTreeProvider.setBagInfo(filteredOutput, bagPath);
+  } catch (error) {
+    void vscode.window.showErrorMessage(`Failed to get bag info: ${error}`);
+  }
+
+  // Refresh tree to show play controls and bag info
+  await toolsTreeProvider.refresh();
+
+  void vscode.window.showInformationMessage(`Bag file selected: ${path.basename(bagPath)}`);
 }
 
 export function __setTreeProviderForTests(provider: RamrosTreeProvider): void {
   treeProvider = provider;
+}
+
+export function __setDocProviderForTests(provider: RamrosDocProvider): void {
+  ramrosDocProvider = provider;
+}
+
+export async function showInterfaceDefinition(qualifiedName: string, interfacePath?: string): Promise<void> {
+  try {
+    const command = await buildInterfaceShowCommand(qualifiedName, interfacePath);
+    const { stdout } = await execAsync(command, { encoding: 'utf-8', timeout: 5000 });
+    await showInReadonlyDoc(ramrosDocProvider, `interface/${qualifiedName.replace(/\//g, '-')}`, stdout);
+  } catch {
+    void vscode.window.showErrorMessage(`Could not show interface ${qualifiedName}. Is the workspace built (colcon build)?`);
+  }
+}
+
+async function buildInterfaceShowCommand(qualifiedName: string, interfacePath?: string): Promise<string> {
+  if (!interfacePath) {
+    return `ros2 interface show ${qualifiedName}`;
+  }
+  const workspaces = treeProvider?.getWorkspaces() ?? [];
+  const workspace = findWorkspaceForPath(workspaces, interfacePath);
+  const setupBashPath = workspace?.installPath ? path.join(workspace.installPath.fsPath, 'setup.bash') : undefined;
+  if (!setupBashPath || !fs.existsSync(setupBashPath)) {
+    return `ros2 interface show ${qualifiedName}`;
+  }
+  return `source "${setupBashPath}" && ros2 interface show ${qualifiedName}`;
+}
+
+export async function runHealthCheck(provider: RamrosDocProvider): Promise<void> {
+  let stdout = '';
+  let stderr = '';
+  try {
+    ({ stdout, stderr } = await execAsync('ros2 doctor', { encoding: 'utf-8', timeout: 60000 }));
+  } catch (error) {
+    const err = error as Error & { stdout?: string; stderr?: string };
+    stdout = err.stdout ?? '';
+    stderr = err.stderr ?? '';
+  }
+  const combinedOutput = stdout + stderr;
+  if (combinedOutput.length === 0) {
+    void vscode.window.showWarningMessage('ros2 doctor returned no output');
+    return;
+  }
+  await showInReadonlyDoc(provider, 'ros2-doctor', combinedOutput);
 }
 
 export function resolveWorkspaceForLaunch(
@@ -111,6 +270,89 @@ export function resolveWorkspaceForLaunch(
   if (arg && 'getWorkspace' in arg && typeof (arg as unknown as Record<string, unknown>).getWorkspace === 'function') {
     const ws = (arg as unknown as { getWorkspace: () => WorkspaceInfo }).getWorkspace();
     return workspaces.find(w => w.id === ws.id) ?? undefined;
+  }
+  return undefined;
+}
+
+export async function publishToTopic(
+  topicName: string,
+  knownMessageType: string | undefined,
+  terminalManager: TerminalManager,
+  resolveWorkspace: () => Promise<WorkspaceInfo | undefined>,
+  cli: Ros2CliService
+): Promise<string | undefined> {
+  let messageType = knownMessageType ?? await cli.getTopicType(topicName) ?? undefined;
+  if (!messageType) {
+    const manualEntry = await vscode.window.showErrorMessage(
+      `Could not resolve the type of ${topicName}. Is a node publishing on it?`,
+      'Enter topic type manually'
+    );
+    if (!manualEntry) return undefined;
+    messageType = await vscode.window.showInputBox({
+      prompt: `Message type for ${topicName} (e.g. std_msgs/msg/String)`,
+      validateInput: value => (value && value.trim().length > 0 ? undefined : 'Message type is required')
+    });
+    if (!messageType) return undefined;
+  }
+
+  const modePick = await vscode.window.showQuickPick([
+    { label: 'once', description: 'Publish the message once' },
+    { label: 'rate', description: 'Publish repeatedly at a rate' }
+  ], { placeHolder: 'Select publish mode' });
+  if (!modePick) return undefined;
+
+  const mode = modePick.label as 'once' | 'rate';
+  let rate: number | undefined;
+  if (mode === 'rate') {
+    const rateInput = await vscode.window.showInputBox({
+      prompt: 'Publish rate (Hz)',
+      value: '1',
+      validateInput: value => {
+        if (!/^\d+(\.\d+)?$/.test(value)) {
+          return 'Rate must be a positive number';
+        }
+        if (!(parseFloat(value) > 0)) {
+          return 'Rate must be greater than 0';
+        }
+        return undefined;
+      }
+    });
+    if (rateInput === undefined) return undefined;
+    rate = parseFloat(rateInput);
+  }
+
+  const content = await vscode.window.showInputBox({
+    prompt: 'Message content (YAML)',
+    value: '{}',
+    validateInput: value => (value.trim().length > 0 ? undefined : 'Message content is required')
+  });
+  if (content === undefined || content.trim().length === 0) return undefined;
+
+  const workspace = await resolveWorkspace();
+  if (!workspace) return undefined;
+
+  const command = buildTopicPubCommand(topicName, messageType, content, mode, rate);
+  await terminalManager.executeInNewTerminal(command, workspace, `Pub: ${topicName}`);
+  return messageType;
+}
+
+async function pickTargetPackage(workspaces: WorkspaceInfo[]): Promise<PackageInfo | undefined> {
+  const packages = workspaces.flatMap(w => w.packages || []);
+  if (packages.length === 0) {
+    void vscode.window.showWarningMessage('No packages found');
+    return undefined;
+  }
+  const packageNames = packages.map(p => p.name);
+  const selected = await vscode.window.showQuickPick(packageNames, {
+    placeHolder: 'Select a package'
+  });
+  if (!selected) return undefined;
+  return packages.find(p => p.name === selected);
+}
+
+function resolvePresetPackageForLaunch(arg: TreeItemBase | undefined): PackageInfo | undefined {
+  if (arg && 'getPackageInfo' in arg && typeof (arg as unknown as Record<string, unknown>).getPackageInfo === 'function') {
+    return (arg as unknown as { getPackageInfo: () => PackageInfo }).getPackageInfo();
   }
   return undefined;
 }
@@ -137,10 +379,12 @@ export async function activate(context: vscode.ExtensionContext) {
   
    terminalManager = new TerminalManager();
    bagSession = BagSessionService.getInstance();
+   ramrosDocProvider = new RamrosDocProvider();
    
    treeProvider = new RamrosTreeProvider(workspaceDetector, duplicateDetector, packageDiscovery);
-  toolsTreeProvider = new ToolsTreeProvider();
-  liveTreeProvider = new LiveTreeProvider();
+   workspaceConfigService = getWorkspaceConfigService();
+   toolsTreeProvider = new ToolsTreeProvider(getBagEntries);
+   liveTreeProvider = new LiveTreeProvider(workspaceConfigService);
   
    packageCreator = new PackageCreator(context.extensionPath, rosEnvironmentService);
   
@@ -159,6 +403,25 @@ export async function activate(context: vscode.ExtensionContext) {
     showCollapseAll: false
   });
   
+   const ramrosConfigWatcher = vscode.workspace.createFileSystemWatcher('**/ramros.json');
+   ramrosConfigWatcher.onDidChange(() => {
+     void toolsTreeProvider.refresh();
+     void liveTreeProvider.reloadFromWorkspaceConfig();
+   });
+   ramrosConfigWatcher.onDidCreate(() => {
+     void toolsTreeProvider.refresh();
+     void liveTreeProvider.reloadFromWorkspaceConfig();
+   });
+   ramrosConfigWatcher.onDidDelete(() => {
+     void toolsTreeProvider.refresh();
+     void liveTreeProvider.reloadFromWorkspaceConfig();
+   });
+  
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider(RamrosDocProvider.scheme, ramrosDocProvider),
+    vscode.commands.registerCommand('ramros.openReadonlyDoc', (key: string, content: string) => showInReadonlyDoc(ramrosDocProvider, key, content))
+  );
+
   context.subscriptions.push(
     treeView,
     toolsTreeView,
@@ -167,6 +430,7 @@ export async function activate(context: vscode.ExtensionContext) {
     terminalManager,
     bagSession,
     liveTreeProvider,
+    ramrosConfigWatcher,
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       void treeProvider.onWorkspaceFoldersChanged();
     }),
@@ -516,6 +780,15 @@ export async function activate(context: vscode.ExtensionContext) {
       await terminalManager.openPackageTerminal(selectedWorkspace, packagePath);
     }),
     
+    vscode.commands.registerCommand('ramros.interface.showDefinition', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
+      const qualifiedName = resolveInterfaceQualifiedName(treeItem);
+      if (!qualifiedName) {
+        void vscode.window.showWarningMessage('No interface selected');
+        return;
+      }
+      await showInterfaceDefinition(qualifiedName, resolveInterfacePath(treeItem));
+    }),
+
     vscode.commands.registerCommand('ramros.createLaunchFile', async (arg?: TreeItemBase) => {
       const workspaces = treeProvider.getWorkspaces();
       if (workspaces.length === 0) {
@@ -523,12 +796,20 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const selectedWorkspace = resolveWorkspaceForLaunch(arg, workspaces) ?? await pickWorkspace();
+      let presetPackage = resolvePresetPackageForLaunch(arg);
+      if (!presetPackage && !resolveWorkspaceForLaunch(arg, workspaces)) {
+        presetPackage = await pickTargetPackage(workspaces);
+        if (!presetPackage) return;
+      }
+
+      const selectedWorkspace = presetPackage
+        ? findWorkspaceForPath(workspaces, presetPackage.path) ?? await pickWorkspace()
+        : resolveWorkspaceForLaunch(arg, workspaces) ?? await pickWorkspace();
       if (!selectedWorkspace) return;
 
       const workspacePath = selectedWorkspace.rootPath.fsPath;
 
-      const wizard = new LaunchWizard(workspacePath, packageDiscovery);
+      const wizard = new LaunchWizard(workspacePath, packageDiscovery, presetPackage);
       await wizard.run();
     }),
     
@@ -788,6 +1069,10 @@ export async function activate(context: vscode.ExtensionContext) {
       liveTreeProvider.openSettings();
     }),
     
+    vscode.commands.registerCommand('ramros.tools.healthCheck', async () => {
+      await runHealthCheck(ramrosDocProvider);
+    }),
+    
     vscode.commands.registerCommand('ramros.live.echoTopic', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
       const topicName = resolveTopicName(treeItem) ?? await pickTopic();
       if (!topicName) return;
@@ -806,6 +1091,98 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!workspace) return;
       
       await terminalManager.executeInNewTerminal(`ros2 topic hz "${topicName}"`, workspace, `Hz: ${topicName}`);
+    }),
+
+    vscode.commands.registerCommand('ramros.live.toggleEnabled', async () => {
+      await liveTreeProvider.setEnabled(!liveTreeProvider.isEnabled());
+    }),
+
+    vscode.commands.registerCommand('ramros.live.pubTopic', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
+      const cli = Ros2CliService.getInstance();
+      const topicName = resolveTopicName(treeItem) ?? await pickTopic();
+      if (!topicName) return;
+
+      await publishToTopic(
+        topicName,
+        resolveTopicMessageType(treeItem),
+        terminalManager,
+        pickWorkspace,
+        cli
+      );
+    }),
+    
+    vscode.commands.registerCommand('ramros.live.pubTopic', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
+      const cli = Ros2CliService.getInstance();
+      const topicName = resolveTopicName(treeItem) ?? await pickTopic();
+      if (!topicName) return;
+
+      await publishToTopic(
+        topicName,
+        resolveTopicMessageType(treeItem),
+        terminalManager,
+        pickWorkspace,
+        cli
+      );
+    }),
+
+    vscode.commands.registerCommand('ramros.live.callService', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
+      const cli = Ros2CliService.getInstance();
+      const serviceItem = resolveServiceItem(treeItem);
+      if (!serviceItem) {
+        void vscode.window.showWarningMessage('No service selected');
+        return;
+      }
+      
+      const serviceName = serviceItem.name;
+      const serviceType = serviceItem.type ?? await cli.getServiceType(serviceName) ?? undefined;
+      if (!serviceType) {
+        void vscode.window.showErrorMessage('Could not resolve service type');
+        return;
+      }
+      
+      const json = await vscode.window.showInputBox({
+        prompt: `Request JSON for ${serviceName}`,
+        value: '{}',
+        validateInput: value => {
+          try {
+            JSON.parse(value);
+            return undefined;
+          } catch {
+            return 'Request must be valid JSON';
+          }
+        }
+      });
+      if (json === undefined) return;
+      
+      const response = await cli.callService(serviceName, serviceType, json);
+      if (response === null) {
+        void vscode.window.showErrorMessage('Service call failed');
+        return;
+      }
+      
+      await showInReadonlyDoc(ramrosDocProvider, `service-call/${serviceName}`, response);
+      void vscode.window.showInformationMessage(`Service call to ${serviceName} completed`);
+    }),
+    
+    vscode.commands.registerCommand('ramros.live.setParameter', async (nodeName: string, paramName: string, currentValue?: string) => {
+      const cli = Ros2CliService.getInstance();
+      const { type } = await cli.getParameterValueWithType(nodeName, paramName);
+      const value = await vscode.window.showInputBox({
+        prompt: type
+          ? `Set parameter ${paramName} on ${nodeName} (${type})`
+          : `Set parameter ${paramName} on ${nodeName}`,
+        value: currentValue,
+        validateInput: value => validateParameterValue(value, type)
+      });
+      if (value === undefined) return;
+
+      const success = await cli.setParameterValue(nodeName, paramName, value);
+      if (success) {
+        void vscode.window.showInformationMessage(`Parameter ${paramName} set`);
+        await liveTreeProvider.refresh();
+      } else {
+        void vscode.window.showErrorMessage(`Failed to set parameter ${paramName}`);
+      }
     }),
     
     vscode.commands.registerCommand('ramros.bag.selectFile', async () => {
@@ -847,26 +1224,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
       if (!bagPath) return;
 
-      bagSession.setSelectedBagPath(bagPath);
-      BagPlayItem.setSelectedBag(bagPath);
-
-      // Get bag info
-      try {
-        const { stdout: bagInfoOutput } = await execAsync(`ros2 bag info "${bagPath}"`, { encoding: 'utf-8' });
-
-        // Filter out "closing." lines from the output
-        const filteredOutput = bagInfoOutput.split('\n').filter(line => !line.includes('closing.')).join('\n');
-
-        // Update BagInfoItem with bag path and info
-        await toolsTreeProvider.setBagInfo(filteredOutput, bagPath);
-      } catch (error) {
-        void vscode.window.showErrorMessage(`Failed to get bag info: ${error}`);
-      }
-
-      // Refresh tree to show play controls and bag info
-      await toolsTreeProvider.refresh();
-
-      void vscode.window.showInformationMessage(`Bag file selected: ${path.basename(bagPath)}`);
+      await selectBagForPlayback(bagPath);
     }),
     
     vscode.commands.registerCommand('ramros.bag.playPause', async () => {
@@ -942,10 +1300,56 @@ export async function activate(context: vscode.ExtensionContext) {
       } else {
         void vscode.window.showWarningMessage('No active bag playback');
       }
+    }),
+
+    vscode.commands.registerCommand('ramros.bag.addBagFolder', async () => {
+      if (!treeProvider.getWorkspaces()[0]) {
+        void vscode.window.showWarningMessage('No ROS2 workspace found');
+        return;
+      }
+
+      const selectedUris = await vscode.window.showOpenDialog({
+        canSelectFolders: true,
+        canSelectMany: false,
+        openLabel: 'Add Bag Folder'
+      });
+
+      if (!selectedUris || selectedUris.length === 0) return;
+
+      await getWorkspaceConfigService().addBagFolder(selectedUris[0].fsPath);
+      await toolsTreeProvider.refresh();
+      void vscode.window.showInformationMessage('Bag folder added');
+    }),
+
+    vscode.commands.registerCommand('ramros.bag.removeBagFolder', async (item?: TreeItemBase) => {
+      const folder = resolveBagFolderPath(item);
+      if (!folder) return;
+
+      await getWorkspaceConfigService().removeBagFolder(folder);
+      await toolsTreeProvider.refresh();
+    }),
+
+    vscode.commands.registerCommand('ramros.bag.openInRqtBag', async (item?: TreeItemBase) => {
+      const bagPath = resolveBagPath(item);
+      if (!bagPath) {
+        void vscode.window.showWarningMessage('No bag file selected');
+        return;
+      }
+
+      const workspace = await resolveWorkspaceForPath(bagPath);
+      if (!workspace) return;
+
+      await terminalManager.executeInNewTerminal(`rqt_bag "${bagPath}"`, workspace, `rqt_bag: ${path.basename(bagPath)}`);
+    }),
+
+    vscode.commands.registerCommand('ramros.bag.playBagByPath', async (bagPath: string) => {
+      if (!bagPath) return;
+      await selectBagForPlayback(bagPath);
     })
   );
   
   await treeProvider.refresh();
+  await liveTreeProvider.reloadFromWorkspaceConfig();
 }
 
 export function deactivate() {

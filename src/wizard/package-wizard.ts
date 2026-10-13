@@ -127,17 +127,38 @@ export async function runCreatePackageWizard(context: CreatePackageWizardContext
     value: template === 'interface' ? 'Interface package for ROS2 messages, services, and actions' : 'A ROS2 package'
   }) || '';
 
-  const authorName = await vscode.window.showInputBox({
-    prompt: 'Enter author name',
-    placeHolder: 'Your Name',
-    value: ''
-  }) || '';
+  const specifyMaintainerPick = await vscode.window.showQuickPick(
+    [
+      { label: 'yes', description: 'Specify maintainer name and email' },
+      { label: 'no', description: `Use ROS convention placeholders ('todo' / 'todo@todo.todo')` }
+    ],
+    { placeHolder: 'Specify maintainer and license in package.xml?' }
+  );
 
-  const authorEmail = await vscode.window.showInputBox({
-    prompt: 'Enter author email',
-    placeHolder: 'your.email@example.com',
-    value: ''
-  }) || '';
+  let authorName: string;
+  let authorEmail: string;
+
+  if (specifyMaintainerPick?.label === 'no') {
+    authorName = 'todo';
+    authorEmail = 'todo@todo.todo';
+  } else {
+    authorName = await vscode.window.showInputBox({
+      prompt: 'Enter author name',
+      placeHolder: 'Your Name',
+      value: ''
+    }) || '';
+
+    authorEmail = await vscode.window.showInputBox({
+      prompt: 'Enter author email',
+      placeHolder: 'your.email@example.com',
+      value: '',
+      validateInput: (value) => {
+        if (!value) return undefined;
+        const r = validator.validateEmail(value);
+        return r.isValid ? undefined : r.errors[0];
+      }
+    }) || '';
+  }
 
   const license = await vscode.window.showQuickPick(
     ['Apache-2.0', 'MIT', 'BSD-2-Clause', 'BSD-3-Clause', 'GPL-3.0'],

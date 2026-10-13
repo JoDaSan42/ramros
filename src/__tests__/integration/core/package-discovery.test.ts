@@ -129,6 +129,58 @@ describe('PackageDiscoveryService', () => {
       expect(pyNode?.serviceServers?.map(s => s.name)).not.toContain('/py_commented_service');
       expect(pyNode?.actionClients?.map(a => a.name)).not.toContain('/py_commented_action');
     });
+
+    it('should type C++ parameters from their default values', async () => {
+      const packages = await service.discoverPackages(testFixturesPath);
+      const pkg = packages.find((p: PackageInfo) => p.name === 'mixed_package_example');
+      const cppNode = pkg?.nodes.find((n: NodeInfo) => n.language === 'cpp');
+
+      const byName = new Map((cppNode?.parameters ?? []).map(p => [p.name, p]));
+      expect(byName.get('max_retries')?.type).toBe('int');
+      expect(byName.get('timeout')?.type).toBe('double');
+      expect(byName.get('enabled')?.type).toBe('bool');
+    });
+
+    it('should type C++ parameters with scientific-notation defaults as double', async () => {
+      const packages = await service.discoverPackages(testFixturesPath);
+      const pkg = packages.find((p: PackageInfo) => p.name === 'mixed_package_example');
+      const cppNode = pkg?.nodes.find((n: NodeInfo) => n.language === 'cpp');
+
+      const byName = new Map((cppNode?.parameters ?? []).map(p => [p.name, p]));
+      expect(byName.get('epsilon')?.type).toBe('double');
+      expect(byName.get('epsilon')?.defaultValue).toBe('1e-3');
+    });
+
+    it('should type C++ parameters with templated declare_parameter calls', async () => {
+      const packages = await service.discoverPackages(testFixturesPath);
+      const pkg = packages.find((p: PackageInfo) => p.name === 'mixed_package_example');
+      const cppNode = pkg?.nodes.find((n: NodeInfo) => n.language === 'cpp');
+
+      const byName = new Map((cppNode?.parameters ?? []).map(p => [p.name, p]));
+      expect(byName.get('rate')?.type).toBe('int');
+      expect(byName.get('rate')?.defaultValue).toBe('5');
+    });
+
+    it('should type C++ parameters whose declare_parameter has a trailing descriptor argument', async () => {
+      const packages = await service.discoverPackages(testFixturesPath);
+      const pkg = packages.find((p: PackageInfo) => p.name === 'mixed_package_example');
+      const cppNode = pkg?.nodes.find((n: NodeInfo) => n.language === 'cpp');
+
+      const byName = new Map((cppNode?.parameters ?? []).map(p => [p.name, p]));
+      expect(byName.get('gain')?.type).toBe('double');
+      expect(byName.get('gain')?.defaultValue).toBe('2.5');
+    });
+
+    it('should type Python parameters whose declare_parameter has a trailing descriptor argument', async () => {
+      const packages = await service.discoverPackages(testFixturesPath);
+      const pkg = packages.find((p: PackageInfo) => p.name === 'mixed_package_example');
+      const pyNode = pkg?.nodes.find((n: NodeInfo) => n.language === 'python');
+
+      const byName = new Map((pyNode?.parameters ?? []).map(p => [p.name, p]));
+      const timeout = byName.get('py_timeout');
+      expect(timeout?.type).toBe('double');
+      expect(timeout?.defaultValue).toBe('0.5');
+    });
   });
   
   describe('parsePackageXml', () => {

@@ -17,7 +17,7 @@ export interface LaunchNodeConfig {
   executableName: string;
   nodeName?: string;
   namespace?: string;
-  parameters?: Array<{ name: string; value: ParameterValue }>;
+  parameters?: Array<{ name: string; value: ParameterValue; type?: string }>;
   remappings?: Array<{ from: string; to: string }>;
   output?: 'screen' | 'log';
   useSimTime?: boolean;
@@ -89,7 +89,7 @@ export class LaunchGenerator {
       
       // Merge user parameters and use_sim_time into a single parameters dict
       // to avoid emitting duplicate parameters=[...] keys (Python SyntaxError)
-      const allParams: Array<{ name: string; value: ParameterValue }> = [];
+      const allParams: Array<{ name: string; value: ParameterValue; type?: string }> = [];
       if (nodeConfig.parameters && nodeConfig.parameters.length > 0) {
         allParams.push(...nodeConfig.parameters);
       }
@@ -101,7 +101,7 @@ export class LaunchGenerator {
         lines.push('        parameters=[{');
         const paramLines: string[] = [];
         for (const param of allParams) {
-          const valueStr = this.formatParameterValue(param.value);
+          const valueStr = this.formatParameterValue(param.value, param.type);
           paramLines.push(`'${param.name}': ${valueStr},`);
         }
         lines.push('            ' + paramLines.join('\n            '));
@@ -246,8 +246,8 @@ export class LaunchGenerator {
     return `${pkgPart}_${exePart}_node`;
   }
 
-  private formatParameterValue(value: ParameterValue): string {
-    return ParameterCoercer.formatPython(value);
+  private formatParameterValue(value: ParameterValue, type?: string): string {
+    return ParameterCoercer.formatPython(value, type);
   }
 
   async writeToFile(content: string, filePath: string): Promise<void> {

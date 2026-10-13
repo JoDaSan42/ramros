@@ -44,3 +44,7 @@ test-fixtures/workspace-valid/src/test_refresh_package
 # Cache
 .cache/
 .parcel-cache/
+
+# Git worktrees
+.worktrees/
+
