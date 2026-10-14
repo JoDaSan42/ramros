@@ -8,7 +8,7 @@ A VSCode extension for managing ROS2 workspaces efficiently.
 
 ### From GitHub Release
 1. Go to the [Releases page](https://github.com/JoDaSan42/ramros/releases)
-2. Download the latest `.vsix` file (e.g., `ramros-1.3.1.vsix`)
+2. Download the latest `.vsix` file (e.g., `ramros-1.3.2.vsix`)
 3. In VSCode, open Extensions (`Ctrl+Shift+X`)
 4. Click the "..." menu → "Install from VSIX"
 5. Select the downloaded `.vsix` file

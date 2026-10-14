@@ -12,6 +12,7 @@ import { CacheManager } from './cache/cache-manager';
 import { RamrosTreeProvider } from './treeview/tree-provider';
 import { ToolsTreeProvider } from './treeview/tools-tree-provider';
 import { LiveTreeProvider } from './treeview/live-tree-provider';
+import { LiveParameterItem, NodeParametersItem } from './treeview/live-items';
 import { TerminalManager } from './executor/terminal-manager';
 import { BagSessionService } from './executor/bag-session-service';
 import { PackageCreator } from './wizard/package-creator';
@@ -94,8 +95,15 @@ function resolveServiceItem(treeItem?: TreeItemBase | TreeItemBase[]): { name: s
   return undefined;
 }
 
-function resolveBagFolderPath(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {
+function resolveParametersItem(treeItem?: TreeItemBase | TreeItemBase[]): NodeParametersItem | undefined {
   const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
+  if (item instanceof NodeParametersItem) {
+    return item;
+  }
+  return undefined;
+}
+
+function resolveBagFolderPath(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {  const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
   if (item && 'getFolderPath' in item && typeof (item as { getFolderPath?: unknown }).getFolderPath === 'function') {
     return (item as unknown as { getFolderPath: () => string }).getFolderPath();
   }
@@ -1119,20 +1127,6 @@ export async function activate(context: vscode.ExtensionContext) {
       );
     }),
     
-    vscode.commands.registerCommand('ramros.live.pubTopic', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
-      const cli = Ros2CliService.getInstance();
-      const topicName = resolveTopicName(treeItem) ?? await pickTopic();
-      if (!topicName) return;
-
-      await publishToTopic(
-        topicName,
-        resolveTopicMessageType(treeItem),
-        terminalManager,
-        pickWorkspace,
-        cli
-      );
-    }),
-
     vscode.commands.registerCommand('ramros.live.callService', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
       const cli = Ros2CliService.getInstance();
       const serviceItem = resolveServiceItem(treeItem);
@@ -1172,27 +1166,56 @@ export async function activate(context: vscode.ExtensionContext) {
       void vscode.window.showInformationMessage(`Service call to ${serviceName} completed`);
     }),
     
-    vscode.commands.registerCommand('ramros.live.setParameter', async (nodeName: string, paramName: string, currentValue?: string) => {
+    vscode.commands.registerCommand('ramros.live.setParameter', async (itemOrNode: TreeItemBase | string, paramName?: string, currentValue?: string) => {
+      let nodeName: string;
+      let name: string;
+      let current: string | undefined;
+
+      if (typeof itemOrNode === 'string') {
+        nodeName = itemOrNode;
+        name = paramName ?? '';
+        current = currentValue;
+      } else if (itemOrNode instanceof LiveParameterItem) {
+        nodeName = itemOrNode.getNodeName();
+        name = itemOrNode.getParamName();
+        current = itemOrNode.getValue() ?? '';
+      } else {
+        void vscode.window.showWarningMessage('No parameter selected');
+        return;
+      }
+
       const cli = Ros2CliService.getInstance();
-      const { type } = await cli.getParameterValueWithType(nodeName, paramName);
+      const { value: freshValue, type } = await cli.getParameterValueWithType(nodeName, name);
       const value = await vscode.window.showInputBox({
         prompt: type
-          ? `Set parameter ${paramName} on ${nodeName} (${type})`
-          : `Set parameter ${paramName} on ${nodeName}`,
-        value: currentValue,
+          ? `Set parameter ${name} on ${nodeName} (${type})`
+          : `Set parameter ${name} on ${nodeName}`,
+        value: freshValue ?? current ?? '',
         validateInput: value => validateParameterValue(value, type)
       });
       if (value === undefined) return;
 
-      const success = await cli.setParameterValue(nodeName, paramName, value);
+      const success = await cli.setParameterValue(nodeName, name, value);
       if (success) {
-        void vscode.window.showInformationMessage(`Parameter ${paramName} set`);
+        NodeParametersItem.invalidateCache(nodeName);
+        void vscode.window.showInformationMessage(`Parameter ${name} set`);
         await liveTreeProvider.refresh();
       } else {
-        void vscode.window.showErrorMessage(`Failed to set parameter ${paramName}`);
+        void vscode.window.showErrorMessage(`Failed to set parameter ${name}`);
       }
     }),
-    
+
+    vscode.commands.registerCommand('ramros.live.updateParameters', async (item?: TreeItemBase | TreeItemBase[]) => {
+      const parametersItem = resolveParametersItem(item);
+      if (!parametersItem) {
+        void vscode.window.showWarningMessage('No parameters entry selected');
+        return;
+      }
+
+      NodeParametersItem.invalidateCache(parametersItem.getNodeName());
+      await liveTreeProvider.refresh();
+    }),
+
     vscode.commands.registerCommand('ramros.bag.selectFile', async () => {
       let bagPath: string | undefined;
 

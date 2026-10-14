@@ -119,6 +119,8 @@ export class LiveServiceItem extends TreeItemBase {
 }
 
 export class NodeParametersItem extends TreeItemBase {
+  private static readonly cache = new Map<string, { names: string[]; values: (string | null)[] }>();
+
   constructor(
     private readonly nodeName: string,
     private readonly cli: Ros2CliService = Ros2CliService.getInstance()
@@ -128,22 +130,49 @@ export class NodeParametersItem extends TreeItemBase {
     this.contextValue = 'nodeParameters';
   }
 
+  getNodeName(): string {
+    return this.nodeName;
+  }
+
+  static invalidateCache(nodeName?: string): void {
+    if (nodeName === undefined) {
+      NodeParametersItem.cache.clear();
+    } else {
+      NodeParametersItem.cache.delete(nodeName);
+    }
+  }
+
   async getChildren(): Promise<TreeItemBase[]> {
-    const names = await this.cli.getParameterNames(this.nodeName);
-    if (names.length === 0) {
+    let entry = NodeParametersItem.cache.get(this.nodeName);
+    if (!entry) {
+      const names = await this.cli.getParameterNames(this.nodeName);
+      if (names.length === 0) {
+        entry = { names: [], values: [] };
+      } else {
+        const values = await Promise.all(
+          names.map(name => this.cli.getParameterValue(this.nodeName, name))
+        );
+        entry = { names, values };
+      }
+      NodeParametersItem.cache.set(this.nodeName, entry);
+    }
+
+    if (entry.names.length === 0) {
       return [new NoEndpointsItem()];
     }
 
-    const values = await Promise.all(
-      names.map(name => this.cli.getParameterValue(this.nodeName, name))
+    return entry.names.map((name, index) =>
+      new LiveParameterItem(this.nodeName, name, entry.values[index])
     );
-
-    return names.map((name, index) => new LiveParameterItem(this.nodeName, name, values[index]));
   }
 }
 
 export class LiveParameterItem extends TreeItemBase {
-  constructor(nodeName: string, paramName: string, private readonly value: string | null) {
+  constructor(
+    private readonly nodeName: string,
+    private readonly paramName: string,
+    private readonly value: string | null
+  ) {
     super(paramName, vscode.TreeItemCollapsibleState.None);
     this.iconPath = new vscode.ThemeIcon('symbol-parameter');
     this.description = this.value ?? 'unknown';
@@ -153,6 +182,18 @@ export class LiveParameterItem extends TreeItemBase {
       title: 'Set Parameter',
       arguments: [nodeName, paramName, this.value ?? '']
     };
+  }
+
+  getNodeName(): string {
+    return this.nodeName;
+  }
+
+  getParamName(): string {
+    return this.paramName;
+  }
+
+  getValue(): string | null {
+    return this.value;
   }
 
   async getChildren(): Promise<TreeItemBase[]> {

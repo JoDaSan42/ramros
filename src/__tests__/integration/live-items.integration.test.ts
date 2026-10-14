@@ -48,7 +48,12 @@ describe('Live Items Integration Tests', () => {
       return cli;
     }
 
+    beforeEach(() => {
+      NodeParametersItem.invalidateCache();
+    });
+
     afterEach(() => {
+      NodeParametersItem.invalidateCache();
       jest.restoreAllMocks();
     });
 
@@ -72,6 +77,80 @@ describe('Live Items Integration Tests', () => {
 
       expect(children).toHaveLength(1);
       expect(children[0]).toBeInstanceOf(NoEndpointsItem);
+    });
+
+    it('exposes node name, parameter name and value for context-menu commands', () => {
+      const item = new LiveParameterItem('/talker', 'use_sim_time', 'False');
+
+      expect(item.getNodeName()).toBe('/talker');
+      expect(item.getParamName()).toBe('use_sim_time');
+      expect(item.getValue()).toBe('False');
+    });
+
+    it('provides the node name for the update command', () => {
+      const item = new NodeParametersItem('/talker');
+
+      expect(item.getNodeName()).toBe('/talker');
+    });
+  });
+
+  describe('NodeParametersItem parameter caching', () => {
+    function makeCountingCli(parameters: string[], value: string | null): Ros2CliService {
+      const cli = Ros2CliService.getInstance();
+      jest.spyOn(cli, 'getParameterNames').mockResolvedValue(parameters);
+      jest.spyOn(cli, 'getParameterValue').mockResolvedValue(value);
+      return cli;
+    }
+
+    beforeEach(() => {
+      NodeParametersItem.invalidateCache();
+    });
+
+    afterEach(() => {
+      NodeParametersItem.invalidateCache();
+      jest.restoreAllMocks();
+    });
+
+    it('fetches parameters once and serves repeated expansions from cache', async () => {
+      const cli = makeCountingCli(['use_sim_time'], 'False');
+
+      const first = await new NodeParametersItem('/talker', cli).getChildren();
+      const second = await new NodeParametersItem('/talker', cli).getChildren();
+
+      expect(cli.getParameterNames).toHaveBeenCalledTimes(1);
+      expect(cli.getParameterValue).toHaveBeenCalledTimes(1);
+      expect(second).toHaveLength(first.length);
+      expect((second[0] as LiveParameterItem).description).toBe('False');
+    });
+
+    it('caches the empty parameter list so param-less nodes are not polled', async () => {
+      const cli = makeCountingCli([], null);
+
+      await new NodeParametersItem('/talker', cli).getChildren();
+      await new NodeParametersItem('/talker', cli).getChildren();
+
+      expect(cli.getParameterNames).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-fetches a node after its cache entry is invalidated', async () => {
+      const cli = makeCountingCli(['use_sim_time'], 'False');
+
+      await new NodeParametersItem('/talker', cli).getChildren();
+      NodeParametersItem.invalidateCache('/talker');
+      await new NodeParametersItem('/talker', cli).getChildren();
+
+      expect(cli.getParameterNames).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps caches of other nodes when invalidating a single node', async () => {
+      const cli = makeCountingCli(['use_sim_time'], 'False');
+
+      await new NodeParametersItem('/talker', cli).getChildren();
+      await new NodeParametersItem('/listener', cli).getChildren();
+      NodeParametersItem.invalidateCache('/talker');
+      await new NodeParametersItem('/listener', cli).getChildren();
+
+      expect(cli.getParameterNames).toHaveBeenCalledTimes(2);
     });
   });
 

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-10-14
+
+### Fixed
+- Extension activation no longer aborts with
+  `command 'ramros.live.pubTopic' already exists`: the command was registered
+  twice in `activate()`, which crashed registration of every command declared
+  after it — including `ramros.live.setParameter` ("command not found" when
+  clicking a parameter) and `ramros.live.callService`.
+- "Set Parameter" now works when invoked from the parameter's context menu:
+  the handler resolves node name, parameter name and current value from the
+  tree item instead of expecting positional click arguments.
+
+### Changed
+- Unfolded parameter lists no longer re-run `ros2 param list`/`ros2 param get`
+  on every live view auto-refresh tick; values are cached per node and only
+  update on demand:
+  - "Update Parameters" (right-click context menu and inline refresh button
+    on the Parameters entry) re-fetches a node's parameters.
+  - After a successful "Set Parameter", that node's cached parameters are
+    invalidated and refreshed, so the new value shows immediately.
+
 ## [1.3.1] - 2026-10-13
 
 ### Fixed
