@@ -55,8 +55,8 @@ describe('package.json contract', () => {
     contextEntries = packageJson.contributes?.menus?.['view/item/context'] ?? [];
   });
 
-  it('declares version 1.3.1', () => {
-    expect(packageJson.version).toBe('1.3.1');
+  it('declares version 1.3.2', () => {
+    expect(packageJson.version).toBe('1.3.2');
   });
 
   it('registers every command referenced in menus', () => {
@@ -97,5 +97,21 @@ describe('package.json contract', () => {
 
   it('shows pubTopic inline on liveTopic', () => {
     expect(findInlineEntry(contextEntries, 'ramros.live.pubTopic', 'liveTopic')).toBeDefined();
+  });
+
+  it('declares the parameter update command', () => {
+    expect(registeredCommands.has('ramros.live.updateParameters')).toBe(true);
+  });
+
+  it('offers updateParameters in the context menu and inline on nodeParameters', () => {
+    expect(findInlineEntry(contextEntries, 'ramros.live.updateParameters', 'nodeParameters')).toBeDefined();
+
+    const contextEntry = contextEntries.find(
+      entry =>
+        entry.command === 'ramros.live.updateParameters' &&
+        viewItemOf(entry) === 'nodeParameters' &&
+        !isInline(entry)
+    );
+    expect(contextEntry).toBeDefined();
   });
 });
