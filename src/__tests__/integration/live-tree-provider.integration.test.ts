@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { exec } from 'child_process';
 import { LiveTreeProvider } from '../../treeview/live-tree-provider';
-import { LiveFolderItem, LiveNodeItem, LiveServiceItem, LiveTopicItem, LiveViewDisabledItem, NodeServicesItem } from '../../treeview/live-items';
+import { LiveFolderItem, LiveNodeItem, LiveServiceItem, LiveTopicItem, LiveViewDisabledItem, NodeServicesItem, NodePublishedTopicsItem, NodeParametersItem } from '../../treeview/live-items';
 import { Ros2CliService } from '../../core/ros2-cli-service';
 import { WorkspaceConfigService } from '../../core/workspace-config-service';
 
@@ -29,6 +29,12 @@ jest.mock('child_process', () => {
   });
   return { exec: execMock };
 });
+
+// Drains microtasks so the provider's internal lazy fetch resolves before
+// assertions (the tree re-read is synchronous from VSCode's view).
+function flushAsync(): Promise<void> {
+  return new Promise(resolve => setImmediate(resolve));
+}
 
 describe('LiveTreeProvider Integration Tests', () => {
   let provider: LiveTreeProvider;
@@ -251,6 +257,77 @@ describe('LiveTreeProvider Integration Tests', () => {
       const result = await cli.callService('/add_two_ints', 'example_interfaces/srv/AddTwoInts', '{}');
 
       expect(result).toBeNull();
+    });
+  });
+
+  describe('expansion wiring', () => {
+    let fired: unknown[];
+
+    beforeEach(() => {
+      fired = [];
+      provider.onDidChangeTreeData(e => fired.push(e));
+    });
+
+    it('auto-fetches node info on tree expansion (no manual call)', async () => {
+      const infoSpy = jest.spyOn(cli, 'getNodeInfo').mockResolvedValue({
+        name: '/talker',
+        publishedTopics: ['/chatter'],
+        subscribedTopics: [],
+      });
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/talker']);
+
+      const folders = await provider.getChildren();
+      const [node] = await provider.getChildren(folders[0]) as LiveNodeItem[];
+
+      // Simulate VSCode expanding the node: provider.getChildren(item)
+      await provider.getChildren(node);
+      await flushAsync();
+
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+      expect(fired).toContain(node); // per-element fire after fetch
+
+      const children = await node.getChildren();
+      expect(children.some(c => c instanceof NodePublishedTopicsItem)).toBe(true);
+      expect(children.some(c => c instanceof NodeParametersItem)).toBe(true);
+    });
+
+    it('re-reading expanded children after the fire does not refetch or refire', async () => {
+      jest.spyOn(cli, 'getNodeInfo').mockResolvedValue({
+        name: '/talker', publishedTopics: ['/chatter'], subscribedTopics: [],
+      });
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/talker']);
+
+      const folders = await provider.getChildren();
+      const [node] = await provider.getChildren(folders[0]) as LiveNodeItem[];
+
+      await provider.getChildren(node); // expansion -> fetch + fire
+      await flushAsync();
+      const fireCount = fired.length;
+
+      await provider.getChildren(node); // re-read after fire: cache hit, no fire
+      await flushAsync();
+
+      expect(fired.length).toBe(fireCount); // no loop
+      // Only the initial expansion fetch happened (cache hit after that)
+    });
+
+    it('auto-fetches topic info on tree expansion', async () => {
+      const infoSpy = jest.spyOn(cli, 'getTopicInfo').mockResolvedValue({
+        name: '/chatter',
+        messageType: 'std_msgs/msg/String',
+        publishers: ['/talker'],
+        subscribers: [],
+      });
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue(['/chatter']);
+
+      const folders = await provider.getChildren();
+      const [topic] = await provider.getChildren(folders[1]) as LiveTopicItem[];
+
+      await provider.getChildren(topic);
+      await flushAsync();
+
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+      expect(fired).toContain(topic);
     });
   });
 

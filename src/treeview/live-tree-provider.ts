@@ -140,7 +140,8 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
 
   /**
    * Lazily loads node info on expand: fetches once per tick (cache hit skips
-   * the call), applies it to the item and fires for that element only.
+   * the call), applies it to the item and — only after a real fetch — fires
+   * for that element so VSCode re-renders the updated description.
    */
   async ensureNodeExpanded(item: LiveNodeItem): Promise<void> {
     if (this.disposed) {
@@ -148,12 +149,16 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
     }
     const name = item.getNodeName();
     let info = this.nodeInfoCache.get(name);
+    let fetched = false;
     if (info === undefined) {
       info = await this.getNodeInfo(name);
       this.nodeInfoCache.set(name, info);
+      fetched = true;
     }
     item.applyInfo(info ?? {});
-    this._onDidChangeTreeData.fire(item);
+    if (fetched) {
+      this._onDidChangeTreeData.fire(item);
+    }
   }
 
   /**
@@ -165,12 +170,16 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
     }
     const name = item.getTopicName();
     let info = this.topicInfoCache.get(name);
+    let fetched = false;
     if (info === undefined) {
       info = await this.getTopicInfo(name);
       this.topicInfoCache.set(name, info);
+      fetched = true;
     }
     item.applyInfo(info ?? {});
-    this._onDidChangeTreeData.fire(item);
+    if (fetched) {
+      this._onDidChangeTreeData.fire(item);
+    }
   }
 
   getTreeItem(element: TreeItemBase): vscode.TreeItem {
@@ -203,6 +212,15 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
         }
         return topicNames.map(name => new LiveTopicItem(name));
       }
+    }
+
+    // If VSCode expands (or re-reads) a name-only item, trigger the lazy
+    // info fetch. The per-element fire updates the description once the
+    // info arrives; repeated re-reads within a tick are cache hits.
+    if (element instanceof LiveNodeItem) {
+      void this.ensureNodeExpanded(element);
+    } else if (element instanceof LiveTopicItem) {
+      void this.ensureTopicExpanded(element);
     }
 
     return element.getChildren();
