@@ -70,7 +70,7 @@ export function buildFormHtml(structure: InterfaceStructure, options: FormOption
 </head>
 <body>
 <h2>${escapeHtml(options.title)}</h2>
-<form id="form" onsubmit="return false;">
+<form id="form">
 ${body}
 <div class="actions">
 ${options.kind === 'topic'
@@ -84,6 +84,10 @@ ${options.kind === 'topic'
 </form>
 <script nonce="${options.nonce}">
   const vscode = acquireVsCodeApi();
+
+  // Prevent the browser's native submit (Enter key would clear the form);
+  // inline onsubmit is not an option under the nonce-only script CSP.
+  document.getElementById('form').addEventListener('submit', event => event.preventDefault());
 
   function collectValues() {
     const values = {};

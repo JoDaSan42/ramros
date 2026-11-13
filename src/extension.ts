@@ -363,7 +363,9 @@ async function buildInterfaceShowCommand(qualifiedName: string, interfacePath?: 
   if (!setupBashPath || !fs.existsSync(setupBashPath)) {
     return `ros2 interface show ${qualifiedName}`;
   }
-  return `source "${setupBashPath}" && ros2 interface show ${qualifiedName}`;
+  // POSIX dot sourcing: hidden execs run under /bin/sh (dash on Ubuntu),
+  // where the bashism `source` fails.
+  return `. "${setupBashPath}" && ros2 interface show ${qualifiedName}`;
 }
 
 /**
@@ -377,8 +379,10 @@ async function fetchInterfaceDefinition(
   cli: Ros2CliService
 ): Promise<string> {
   const setupBashPath = workspace.installPath ? path.join(workspace.installPath.fsPath, 'setup.bash') : undefined;
+  // POSIX dot sourcing: hidden execs run under /bin/sh (dash on Ubuntu),
+  // where the bashism `source` fails.
   const command = setupBashPath && fs.existsSync(setupBashPath)
-    ? `source "${setupBashPath}" && ros2 interface show ${qualifiedType}`
+    ? `. "${setupBashPath}" && ros2 interface show ${qualifiedType}`
     : `ros2 interface show ${qualifiedType}`;
   const result = await cli.executeRaw(command, { timeout: 5000 });
   if (!result.ok && result.output.length === 0) {
@@ -390,6 +394,31 @@ async function fetchInterfaceDefinition(
 /** Per-panel random nonce for the webview content security policy. */
 function createNonce(): string {
   return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+}
+
+/**
+ * Session-scoped interface loader: caches `ros2 interface show` results for
+ * the whole session (spec: "Die Struktur wird pro Session gecacht"). The
+ * fetch closure is provided at call time so the workspace overlay follows
+ * the workspace the flow resolved.
+ */
+let sessionInterfaceLoader: ReturnType<typeof createInterfaceLoader> | undefined;
+function getInterfaceLoader(cli: Ros2CliService): ReturnType<typeof createInterfaceLoader> {
+  if (!sessionInterfaceLoader) {
+    sessionInterfaceLoader = createInterfaceLoader(qualifiedType =>
+      fetchInterfaceDefinition(qualifiedType, lastResolvedWorkspace!, cli)
+    );
+  }
+  return sessionInterfaceLoader;
+}
+
+/** Workspace of the most recent structured-input flow (loader fetch closure). */
+let lastResolvedWorkspace: WorkspaceInfo | undefined;
+
+/** Test seam: forgets the session-scoped loader cache between tests. */
+export function __resetInterfaceLoaderForTests(): void {
+  sessionInterfaceLoader = undefined;
+  lastResolvedWorkspace = undefined;
 }
 
 export async function runHealthCheck(provider: RamrosDocProvider): Promise<void> {
@@ -445,9 +474,10 @@ export async function publishToTopic(
   const workspace = await resolveWorkspace();
   if (!workspace) return undefined;
 
-  const loader = createInterfaceLoader(qualifiedType =>
-    fetchInterfaceDefinition(qualifiedType, workspace, cli)
-  );
+  // The loader (and its cache) is session-scoped; the workspace feeds the
+  // fetch closure at call time.
+  lastResolvedWorkspace = workspace;
+  const loader = getInterfaceLoader(cli);
 
   let structure;
   try {
@@ -512,7 +542,9 @@ async function publishStructured(
 ): Promise<string | undefined> {
   const setupBashPath = workspace.installPath ? path.join(workspace.installPath.fsPath, 'setup.bash') : undefined;
   const hasSetup = setupBashPath !== undefined && fs.existsSync(setupBashPath);
-  const sourcePrefix = hasSetup ? `source "${setupBashPath}" && ` : '';
+  // POSIX dot sourcing: hidden execs run under /bin/sh (dash on Ubuntu),
+  // where the bashism `source` fails.
+  const sourcePrefix = hasSetup ? `. "${setupBashPath}" && ` : '';
   const { buildFormHtml } = await import('./core/form-html');
   const formKind = 'topic' as const;
 
@@ -555,7 +587,10 @@ async function handleStructuredPublish(
   const yaml = valuesToYaml(fields, { ...fieldDefaults(fields), ...message.values });
   const command = `${sourcePrefix}${buildTopicPubCommand(topicName, messageType, yaml, 'once')}`;
   try {
-    await cli.executeRaw(command, { timeout: 10000 });
+    const result = await cli.executeRaw(command, { timeout: 10000 });
+    if (!result.ok) {
+      throw new Error(result.stderr || 'ros2 topic pub failed');
+    }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`Publish failed: ${reason}`);
@@ -1482,15 +1517,14 @@ export async function activate(context: vscode.ExtensionContext) {
       const workspace = await pickWorkspace();
       
       if (workspace) {
-        const loader = createInterfaceLoader(qualifiedType =>
-          fetchInterfaceDefinition(qualifiedType, workspace, cli)
-        );
+        lastResolvedWorkspace = workspace;
+        const loader = getInterfaceLoader(cli);
         try {
           const structure = await loader.loadStructure(serviceType);
           const { buildFormHtml } = await import('./core/form-html');
           const setupBashPath = workspace.installPath ? path.join(workspace.installPath.fsPath, 'setup.bash') : undefined;
           const hasSetup = setupBashPath !== undefined && fs.existsSync(setupBashPath);
-          const sourcePrefix = hasSetup ? `source "${setupBashPath}" && ` : '';
+          const sourcePrefix = hasSetup ? `. "${setupBashPath}" && ` : '';
           const html = buildFormHtml(structure, {
             nonce: createNonce(),
             cspSource: '',

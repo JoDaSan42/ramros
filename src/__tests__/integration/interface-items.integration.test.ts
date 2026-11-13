@@ -163,10 +163,13 @@ describe('showInterfaceDefinition', () => {
 
     await showInterfaceDefinition('my_pkg/srv/Reset', `${tmpRoot}/src/my_pkg/msg/Reset.msg`);
 
-    const expectedCommand = `source "${path.join(tmpRoot, 'install', 'setup.bash')}" && ros2 interface show my_pkg/srv/Reset`;
+    // POSIX dot sourcing: hidden execs run under /bin/sh (dash), where the
+    // bashism `source` fails.
+    const expectedCommand = `. "${path.join(tmpRoot, 'install', 'setup.bash')}" && ros2 interface show my_pkg/srv/Reset`;
     const calls = (exec as unknown as jest.Mock).mock.calls as unknown[][];
-    const withSource = calls.find(call => String(call[0]).includes('source'));
-    expect(withSource?.[0]).toBe(expectedCommand);
+    const withDot = calls.find(call => String(call[0]).includes('. "'));
+    expect(withDot?.[0]).toBe(expectedCommand);
+    expect(withDot?.[0]).not.toContain('source "');
     await fs.promises.rm(tmpRoot, { recursive: true, force: true });
   });
 

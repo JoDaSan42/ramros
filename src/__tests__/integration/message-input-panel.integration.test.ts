@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { activate, publishToTopic, __setDocProviderForTests, __setTreeProviderForTests } from '../../extension';
+import { activate, publishToTopic, __setDocProviderForTests, __setTreeProviderForTests, __resetInterfaceLoaderForTests } from '../../extension';
 import { __resetMessageInputPanelForTests } from '../../webview/message-input-panel';
 import { RamrosDocProvider } from '../../core/ramros-doc-provider';
 import { Ros2CliService } from '../../core/ros2-cli-service';
@@ -111,6 +111,7 @@ describe('structured message input panel', () => {
     }
     createTreeView.mockClear();
     __resetMessageInputPanelForTests();
+    __resetInterfaceLoaderForTests();
     jest.restoreAllMocks();
     fs.rmSync(tempDir, { recursive: true, force: true });
   });

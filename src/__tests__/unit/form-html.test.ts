@@ -86,8 +86,17 @@ describe('form html builder', () => {
     expect(html).toContain('vscode.postMessage');
   });
 
-  it('prefills inputs with the neutral defaults', () => {
-    const fields: InterfaceField[] = [
+  it('does not use inline event handler attributes (blocked by nonce-only CSP)', () => {
+    const html = buildFormHtml(makeStructure(STRING_FIELD), baseOptions);
+
+    // Inline `onsubmit="return false;"` would be blocked by the nonce-only
+    // script CSP (Enter key would clear the form instead).
+    expect(html).not.toContain('onsubmit=');
+    const script = html.split('<script')[1] ?? '';
+    expect(script).toContain("addEventListener('submit'");
+  });
+
+  it('prefills inputs with the neutral defaults', () => {    const fields: InterfaceField[] = [
       { name: 'count', type: 'int32', isArray: false },
       { name: 'flag', type: 'bool', isArray: false },
       { name: 'label', type: 'string', isArray: false }
