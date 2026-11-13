@@ -12,9 +12,11 @@ import { Ros2CliService } from '../../core/ros2-cli-service';
 describe('Live Items Integration Tests', () => {
   describe('LiveNodeItem with service servers', () => {
     it('exposes a services folder and a parameters folder', async () => {
-      const item = new LiveNodeItem('/talker', ['/chatter'], [], [
-        { name: '/reset', type: 'std_srvs/srv/Trigger' }
-      ]);
+      const item = new LiveNodeItem('/talker', {
+        publishedTopics: ['/chatter'],
+        subscribedTopics: [],
+        serviceServers: [{ name: '/reset', type: 'std_srvs/srv/Trigger' }]
+      });
 
       const children = await item.getChildren();
 

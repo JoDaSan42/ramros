@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { TreeItemBase } from './base-tree-item';
 import { LiveFolderItem, LiveNodeItem, LiveTopicItem, LiveViewDisabledItem } from './live-items';
-import { Ros2CliService } from '../core/ros2-cli-service';
+import { Ros2CliService, NodeInfo, TopicInfo } from '../core/ros2-cli-service';
+import { LiveInfoCache } from '../core/live-info-cache';
 import { WorkspaceConfigService } from '../core/workspace-config-service';
 
 export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
@@ -16,6 +17,8 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   private disposed: boolean = false;
   private hideSystemTopics: boolean;
   private readonly cli = Ros2CliService.getInstance();
+  private readonly nodeInfoCache = new LiveInfoCache<NodeInfo | null>();
+  private readonly topicInfoCache = new LiveInfoCache<TopicInfo | null>();
 
   private readonly SYSTEM_TOPICS = ['/parameter_events', '/rosout', '/clock'];
 
@@ -116,13 +119,58 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
     }
     if (this.autoRefreshEnabled) {
       this.autoRefreshInterval = setInterval(() => {
-        this._onDidChangeTreeData.fire(null);
+        this.tick();
       }, this.getEffectiveRefreshRate() * 1000);
     }
   }
 
+  /**
+   * One auto-refresh tick: lazy info caches are only valid until the next
+   * tick, so they are cleared before the tree re-reads its folders.
+   */
+  tick(): void {
+    this.nodeInfoCache.newTick();
+    this.topicInfoCache.newTick();
+    this._onDidChangeTreeData.fire(null);
+  }
+
   async refresh(): Promise<void> {
-    this._onDidChangeTreeData.fire(undefined);
+    this.tick();
+  }
+
+  /**
+   * Lazily loads node info on expand: fetches once per tick (cache hit skips
+   * the call), applies it to the item and fires for that element only.
+   */
+  async ensureNodeExpanded(item: LiveNodeItem): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
+    const name = item.getNodeName();
+    let info = this.nodeInfoCache.get(name);
+    if (info === undefined) {
+      info = await this.getNodeInfo(name);
+      this.nodeInfoCache.set(name, info);
+    }
+    item.applyInfo(info ?? {});
+    this._onDidChangeTreeData.fire(item);
+  }
+
+  /**
+   * Lazily loads topic info on expand. See ensureNodeExpanded.
+   */
+  async ensureTopicExpanded(item: LiveTopicItem): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
+    const name = item.getTopicName();
+    let info = this.topicInfoCache.get(name);
+    if (info === undefined) {
+      info = await this.getTopicInfo(name);
+      this.topicInfoCache.set(name, info);
+    }
+    item.applyInfo(info ?? {});
+    this._onDidChangeTreeData.fire(item);
   }
 
   getTreeItem(element: TreeItemBase): vscode.TreeItem {
@@ -142,44 +190,18 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
 
     if (element instanceof LiveFolderItem) {
       const folderType = element.getFolderType();
-      
+
       if (folderType === 'active-nodes') {
         const nodes = await this.getActiveNodes();
-        const items: TreeItemBase[] = [];
-        for (const name of nodes) {
-          const info = await this.getNodeInfo(name);
-          if (info) {
-            items.push(new LiveNodeItem(
-              info.name,
-              info.publishedTopics,
-              info.subscribedTopics,
-              info.serviceServers
-            ));
-          } else {
-            items.push(new LiveNodeItem(name));
-          }
-        }
-        return items;
+        // Lazy: items are name-only here; info loads on expand
+        // (ensureNodeExpanded) and is cached until the next tick.
+        return nodes.map(name => new LiveNodeItem(name));
       } else if (folderType === 'active-topics') {
         let topicNames = await this.getActiveTopics();
         if (this.hideSystemTopics) {
           topicNames = topicNames.filter(name => !this.isSystemTopic(name));
         }
-        const items: TreeItemBase[] = [];
-        for (const name of topicNames) {
-          const info = await this.getTopicInfo(name);
-          if (info) {
-            items.push(new LiveTopicItem(
-              info.name,
-              info.messageType,
-              info.publishers,
-              info.subscribers
-            ));
-          } else {
-            items.push(new LiveTopicItem(name));
-          }
-        }
-        return items;
+        return topicNames.map(name => new LiveTopicItem(name));
       }
     }
 

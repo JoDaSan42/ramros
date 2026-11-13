@@ -100,6 +100,8 @@ describe('LiveTreeProvider Integration Tests', () => {
       const node = nodes[0] as LiveNodeItem;
       expect(node.getNodeName()).toBe('/add_two_ints');
 
+      await provider.ensureNodeExpanded(node); // lazy fetch now
+
       const nodeChildren = await node.getChildren();
       const services = nodeChildren.find(c => c instanceof NodeServicesItem);
       expect(services).toBeInstanceOf(NodeServicesItem);
@@ -152,6 +154,9 @@ describe('LiveTreeProvider Integration Tests', () => {
       expect(topics).toHaveLength(1);
       expect(topics[0]).toBeInstanceOf(LiveTopicItem);
       const topic = topics[0] as LiveTopicItem;
+
+      await provider.ensureTopicExpanded(topic); // lazy fetch now
+
       expect(topic.getMessageType()).toBe('std_msgs/msg/String');
       expect(topic.getPublishers()).toEqual(['/talker']);
       expect(topic.getSubscribers()).toEqual(['/listener']);
@@ -260,6 +265,155 @@ describe('LiveTreeProvider Integration Tests', () => {
 
     it('refresh resolves without throwing', async () => {
       await expect(provider.refresh()).resolves.toBeUndefined();
+    });
+  });
+
+  describe('refresh loop guard', () => {
+    it('a refresh cycle keeps the total call budget at the expanded items only', async () => {
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/a', '/b', '/c']);
+      const infoSpy = jest.spyOn(cli, 'getNodeInfo').mockResolvedValue(null);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+      jest.spyOn(cli, 'getTopicInfo').mockResolvedValue(null);
+
+      const folders = await provider.getChildren();
+      const nodes = await provider.getChildren(folders[0]);
+      const nodeA = nodes[0] as LiveNodeItem;
+
+      await provider.ensureNodeExpanded(nodeA); // 1 info call
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+
+      await provider.refresh();                  // tick: cache invalidated
+      const folders2 = await provider.getChildren();  // root rebuild: no info calls
+      await provider.getChildren(folders2[0]);   // folder rebuild: no info calls
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+
+      const nodeA2 = (await provider.getChildren(folders2[0]))[0] as LiveNodeItem;
+      await provider.ensureNodeExpanded(nodeA2); // new tick -> refetch allowed
+      expect(infoSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('ensureNodeExpanded twice within one tick fetches only once (no loop)', async () => {
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/a']);
+      const infoSpy = jest.spyOn(cli, 'getNodeInfo').mockResolvedValue(null);
+
+      const folders = await provider.getChildren();
+      const [node] = await provider.getChildren(folders[0]) as LiveNodeItem[];
+
+      await provider.ensureNodeExpanded(node);
+      await provider.ensureNodeExpanded(node);
+      await provider.ensureNodeExpanded(node);
+
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('the auto-refresh tick invalidates the info cache', async () => {
+      jest.useFakeTimers();
+      try {
+        jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/a']);
+        const infoSpy = jest.spyOn(cli, 'getNodeInfo').mockResolvedValue(null);
+
+        // Construct under fake timers so the interval is controllable.
+        const tickingProvider = new LiveTreeProvider();
+        try {
+          const folders = await tickingProvider.getChildren();
+          const [node] = await tickingProvider.getChildren(folders[0]) as LiveNodeItem[];
+          await tickingProvider.ensureNodeExpanded(node);
+          expect(infoSpy).toHaveBeenCalledTimes(1);
+
+          jest.advanceTimersByTime(tickingProvider.getEffectiveRefreshRate() * 1000);
+          const folders2 = await tickingProvider.getChildren();
+          const [node2] = await tickingProvider.getChildren(folders2[0]) as LiveNodeItem[];
+          await tickingProvider.ensureNodeExpanded(node2);
+          expect(infoSpy).toHaveBeenCalledTimes(2);
+        } finally {
+          tickingProvider.dispose();
+        }
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+  });
+  describe('lazy loading', () => {
+    it('folder children make exactly 1 list call and 0 info calls', async () => {
+      const nodesSpy = jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/a', '/b']);
+      const infoSpy = jest.spyOn(cli, 'getNodeInfo').mockResolvedValue(null);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+      jest.spyOn(cli, 'getTopicInfo').mockResolvedValue(null);
+
+      const folders = await provider.getChildren();
+      await provider.getChildren(folders[0]); // nodes folder
+
+      expect(nodesSpy).toHaveBeenCalledTimes(1);
+      expect(infoSpy).not.toHaveBeenCalled();
+    });
+
+    it('node item expand fetches info once and updates description', async () => {
+      const infoSpy = jest.spyOn(cli, 'getNodeInfo').mockResolvedValue({
+        name: '/talker',
+        publishedTopics: ['/chatter'],
+        subscribedTopics: [],
+      });
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/talker']);
+
+      const folders = await provider.getChildren();
+      const nodes = await provider.getChildren(folders[0]);
+      const node = nodes[0] as LiveNodeItem;
+      expect(node.description).toBe('running');
+
+      await provider.ensureNodeExpanded(node); // simulate expand
+
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+      expect(node.description).toBe('1 pub / 0 sub');
+    });
+
+    it('expanded node refetches fresh info on the next tick', async () => {
+      const infoSpy = jest.spyOn(cli, 'getNodeInfo')
+        .mockResolvedValueOnce({ name: '/talker', publishedTopics: ['/a'], subscribedTopics: [] })
+        .mockResolvedValueOnce({ name: '/talker', publishedTopics: ['/a', '/b'], subscribedTopics: [] });
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/talker']);
+
+      const folders = await provider.getChildren();
+      const [node] = await provider.getChildren(folders[0]) as LiveNodeItem[];
+
+      await provider.ensureNodeExpanded(node); // tick 1: fetch #1
+      provider.tick();                          // newTick invalidates the cache
+      await provider.ensureNodeExpanded(node); // fetch #2
+
+      expect(infoSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('system topics are excluded from lazy node info counts', async () => {
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/talker']);
+      jest.spyOn(cli, 'getNodeInfo').mockResolvedValue({
+        name: '/talker',
+        publishedTopics: ['/chatter', '/rosout'],
+        subscribedTopics: ['/parameter_events'],
+      });
+
+      const folders = await provider.getChildren();
+      const [node] = await provider.getChildren(folders[0]) as LiveNodeItem[];
+      await provider.ensureNodeExpanded(node);
+
+      expect(node.description).toBe('1 pub / 0 sub');
+    });
+
+    it('topic item expand fetches info and sets message type', async () => {
+      const infoSpy = jest.spyOn(cli, 'getTopicInfo').mockResolvedValue({
+        name: '/chatter',
+        messageType: 'std_msgs/msg/String',
+        publishers: ['/talker'],
+        subscribers: [],
+      });
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue(['/chatter']);
+
+      const folders = await provider.getChildren();
+      const [topic] = await provider.getChildren(folders[1]) as LiveTopicItem[];
+      expect(topic.description).toBe('');
+
+      await provider.ensureTopicExpanded(topic);
+
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+      expect(topic.getMessageType()).toBe('std_msgs/msg/String');
     });
   });
 

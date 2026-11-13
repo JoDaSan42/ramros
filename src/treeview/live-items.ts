@@ -23,15 +23,39 @@ export class LiveFolderItem extends TreeItemBase {
 }
 
 export class LiveNodeItem extends TreeItemBase {
+  private publishedTopics?: string[];
+  private subscribedTopics?: string[];
+  private serviceServers?: ServiceServerInfo[];
+
   constructor(
     private readonly nodeName: string,
-    private readonly publishedTopics?: string[],
-    private readonly subscribedTopics?: string[],
-    private readonly serviceServers?: ServiceServerInfo[]
+    info?: {
+      publishedTopics?: string[];
+      subscribedTopics?: string[];
+      serviceServers?: ServiceServerInfo[];
+    }
   ) {
     super(nodeName, vscode.TreeItemCollapsibleState.Collapsed);
     this.iconPath = new vscode.ThemeIcon('broadcast', new vscode.ThemeColor('charts.green'));
     this.contextValue = 'liveNode';
+    this.publishedTopics = info?.publishedTopics;
+    this.subscribedTopics = info?.subscribedTopics;
+    this.serviceServers = info?.serviceServers;
+    this.updateDisplay();
+  }
+
+  /**
+   * Updates the info shown by this item (description + children source)
+   * after a lazy fetch. Called by the tree provider, not by the item itself.
+   */
+  applyInfo(info: {
+    publishedTopics?: string[];
+    subscribedTopics?: string[];
+    serviceServers?: ServiceServerInfo[];
+  }): void {
+    this.publishedTopics = info.publishedTopics;
+    this.subscribedTopics = info.subscribedTopics;
+    this.serviceServers = info.serviceServers;
     this.updateDisplay();
   }
 
@@ -273,15 +297,39 @@ export class NoEndpointsItem extends TreeItemBase {
 }
 
 export class LiveTopicItem extends TreeItemBase {
+  private messageType?: string;
+  private publishers?: string[];
+  private subscribers?: string[];
+
   constructor(
     private readonly topicName: string,
-    private readonly messageType?: string,
-    private readonly publishers?: string[],
-    private readonly subscribers?: string[]
+    info?: {
+      messageType?: string;
+      publishers?: string[];
+      subscribers?: string[];
+    }
   ) {
     super(topicName, vscode.TreeItemCollapsibleState.Collapsed);
     this.iconPath = new vscode.ThemeIcon('symbol-event');
     this.contextValue = 'liveTopic';
+    this.messageType = info?.messageType;
+    this.publishers = info?.publishers;
+    this.subscribers = info?.subscribers;
+    this.updateDisplay();
+  }
+
+  /**
+   * Updates the info shown by this item (description + children source)
+   * after a lazy fetch. Called by the tree provider, not by the item itself.
+   */
+  applyInfo(info: {
+    messageType?: string;
+    publishers?: string[];
+    subscribers?: string[];
+  }): void {
+    this.messageType = info.messageType;
+    this.publishers = info.publishers;
+    this.subscribers = info.subscribers;
     this.updateDisplay();
   }
   
