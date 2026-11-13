@@ -91,10 +91,7 @@
       {
         "command": "ramros.runNodeWithOptions",
         "title": "Run Node with Options…",
-        "icon": {
-          "light": "media/run-with-options.svg",
-          "dark": "media/run-with-options.svg"
-        }
+        "icon": "$(settings-gear)"
       },
       {
         "command": "ramros.debugNode",
@@ -124,10 +121,7 @@
       {
         "command": "ramros.launchTool.rviz2WithOptions",
         "title": "Launch RVIZ2 with Options…",
-        "icon": {
-          "light": "media/run-with-options.svg",
-          "dark": "media/run-with-options.svg"
-        }
+        "icon": "$(settings-gear)"
       },
       {
         "command": "ramros.launchTool.rqt_graph",
@@ -137,10 +131,7 @@
       {
         "command": "ramros.launchTool.rqtGraphWithOptions",
         "title": "Launch rqt_graph with Options…",
-        "icon": {
-          "light": "media/run-with-options.svg",
-          "dark": "media/run-with-options.svg"
-        }
+        "icon": "$(settings-gear)"
       },
       {
         "command": "ramros.bag.startRecording",

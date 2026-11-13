@@ -135,16 +135,8 @@ describe('package.json contract', () => {
     expect(rqtWhen).toContain('toolRqtGraph');
   });
 
-  it('uses a combined play-with-gear icon for the node options command', () => {
+  it('uses the gear codicon for the node options command', () => {
     const command = (packageJson.contributes?.commands ?? []).find(c => c.command === 'ramros.runNodeWithOptions');
-    expect(command?.icon).toBeDefined();
-    // A custom SVG (play + small gear) lives in media/ and is referenced
-    // light/dark — the icon string must point at the media file, not a
-    // codicon (combined glyphs do not exist as a single codicon).
-    const icon = command!.icon as unknown;
-    expect(typeof icon === 'string' || typeof icon === 'object').toBe(true);
-    const iconString = typeof icon === 'string' ? icon : JSON.stringify(icon);
-    expect(iconString).toContain('media/');
-    expect(iconString).not.toContain('settings-gear');
+    expect(command?.icon).toBe('$(settings-gear)');
   });
 });
