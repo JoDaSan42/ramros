@@ -87,8 +87,14 @@ export class TerminalManager implements vscode.Disposable {
     return terminal;
   }
 
-  async executeInNewTerminal(command: string, workspace: WorkspaceInfo, terminalName?: string): Promise<vscode.Terminal> {
+  async executeInNewTerminal(
+    command: string,
+    workspace: WorkspaceInfo,
+    terminalName?: string,
+    options?: { source?: boolean }
+  ): Promise<vscode.Terminal> {
     const name = terminalName || `ROS Run: ${new Date().toLocaleTimeString()}`;
+    const shouldSource = options?.source !== false;
 
     const terminal = vscode.window.createTerminal({
       name
@@ -96,7 +102,7 @@ export class TerminalManager implements vscode.Disposable {
 
     terminal.show();
 
-    const setupBashPath = this.resolveSetupBash(workspace);
+    const setupBashPath = shouldSource ? this.resolveSetupBash(workspace) : undefined;
     if (setupBashPath) {
       terminal.sendText(`source "${setupBashPath}" && ${command}`);
     } else {

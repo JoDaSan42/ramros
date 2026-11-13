@@ -61,6 +61,80 @@ async function pickWorkspace(): Promise<WorkspaceInfo | undefined> {
   return workspaces.find(w => w.name === selected);
 }
 
+interface OverlayWorkspacePickItem extends vscode.QuickPickItem {
+  workspace?: WorkspaceInfo;
+  noSourcing?: boolean;
+}
+
+/**
+ * Workspace selection for overlay-sourcing GUI tools (rviz2, rqt_graph).
+ * Single workspace: no prompt at all. Multiple: quick pick with the last
+ * used overlay workspace marked "(last used)" at the top, plus a
+ * "Start without sourcing" escape hatch.
+ */
+async function pickWorkspaceForOverlayTool(
+  context: vscode.ExtensionContext
+): Promise<{ workspace?: WorkspaceInfo; source: boolean } | undefined> {
+  const workspaces = treeProvider.getWorkspaces();
+
+  if (workspaces.length === 0) {
+    void vscode.window.showWarningMessage('No ROS2 workspaces found');
+    return undefined;
+  }
+
+  if (workspaces.length === 1) {
+    return { workspace: workspaces[0], source: true };
+  }
+
+  const lastUsedPath = context.workspaceState.get<string>('ramros.lastOverlayWorkspace');
+  const items: OverlayWorkspacePickItem[] = [];
+
+  if (lastUsedPath) {
+    const lastUsed = workspaces.find(w => w.rootPath.fsPath === lastUsedPath);
+    if (lastUsed) {
+      items.push({
+        label: `${lastUsed.name} (last used)`,
+        description: lastUsed.rootPath.fsPath,
+        alwaysShow: true,
+        workspace: lastUsed
+      });
+    }
+  }
+
+  for (const workspace of workspaces) {
+    if (lastUsedPath && workspace.rootPath.fsPath === lastUsedPath) {
+      continue;
+    }
+    items.push({
+      label: workspace.name,
+      description: workspace.rootPath.fsPath,
+      workspace
+    });
+  }
+
+  items.push({ label: 'Start without sourcing', noSourcing: true });
+
+  const picked = await vscode.window.showQuickPick(items, {
+    placeHolder: 'Select an overlay workspace (sourcing brings your messages/types into the tool)'
+  });
+
+  if (!picked) {
+    return undefined;
+  }
+
+  if (picked.noSourcing) {
+    // Raw tool start: the workspace is irrelevant (nothing is sourced), the
+    // first one only provides the terminal context.
+    return { workspace: workspaces[0], source: false };
+  }
+
+  const workspace = (picked as OverlayWorkspacePickItem).workspace;
+  if (workspace) {
+    await context.workspaceState.update('ramros.lastOverlayWorkspace', workspace.rootPath.fsPath);
+  }
+  return { workspace, source: true };
+}
+
 async function resolveWorkspaceForPath(fsPath: string): Promise<WorkspaceInfo | undefined> {
   const workspaces = treeProvider.getWorkspaces();
   return findWorkspaceForPath(workspaces, fsPath) ?? await pickWorkspace();
@@ -1051,15 +1125,15 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
     
     vscode.commands.registerCommand('ramros.launchTool.rviz2', async () => {
-      const workspace = await pickWorkspace();
-      if (!workspace) return;
-      await terminalManager.executeInNewTerminal('rviz2', workspace, 'RVIZ2');
+      const picked = await pickWorkspaceForOverlayTool(context);
+      if (!picked?.workspace) return;
+      await terminalManager.executeInNewTerminal('rviz2', picked.workspace, 'RVIZ2', { source: picked.source });
     }),
     
     vscode.commands.registerCommand('ramros.launchTool.rqt_graph', async () => {
-      const workspace = await pickWorkspace();
-      if (!workspace) return;
-      await terminalManager.executeInNewTerminal('rqt_graph', workspace, 'rqt_graph');
+      const picked = await pickWorkspaceForOverlayTool(context);
+      if (!picked?.workspace) return;
+      await terminalManager.executeInNewTerminal('rqt_graph', picked.workspace, 'rqt_graph', { source: picked.source });
     }),
     
     vscode.commands.registerCommand('ramros.bag.startRecording', async () => {
