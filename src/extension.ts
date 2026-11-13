@@ -26,6 +26,10 @@ import { runCreatePackageWizard, runAddToPackageWizard } from './wizard/package-
 import { RamrosDocProvider, showInReadonlyDoc } from './core/ramros-doc-provider';
 import { buildTopicPubCommand } from './core/command-builders';
 import { Ros2CliService, validateParameterValue } from './core/ros2-cli-service';
+import { createInterfaceLoader } from './core/interface-loader';
+import { InterfaceField, InterfaceStructure } from './core/interface-parser';
+import { valuesToYaml, valuesToJson, fieldDefaults } from './core/message-serializer';
+import { showMessageInputPanel, MessageInputCommand, __resetMessageInputPanelForTests } from './webview/message-input-panel';
 
 let cacheManager: CacheManager;
 let ramrosDocProvider: RamrosDocProvider;
@@ -362,6 +366,32 @@ async function buildInterfaceShowCommand(qualifiedName: string, interfacePath?: 
   return `source "${setupBashPath}" && ros2 interface show ${qualifiedName}`;
 }
 
+/**
+ * Fetches an interface definition for the structured input loader, sourcing
+ * the given workspace overlay when its setup.bash exists (un-sourced
+ * fallback otherwise).
+ */
+async function fetchInterfaceDefinition(
+  qualifiedType: string,
+  workspace: WorkspaceInfo,
+  cli: Ros2CliService
+): Promise<string> {
+  const setupBashPath = workspace.installPath ? path.join(workspace.installPath.fsPath, 'setup.bash') : undefined;
+  const command = setupBashPath && fs.existsSync(setupBashPath)
+    ? `source "${setupBashPath}" && ros2 interface show ${qualifiedType}`
+    : `ros2 interface show ${qualifiedType}`;
+  const result = await cli.executeRaw(command, { timeout: 5000 });
+  if (!result.ok && result.output.length === 0) {
+    throw new Error(result.stderr ?? `ros2 interface show ${qualifiedType} failed`);
+  }
+  return result.output;
+}
+
+/** Per-panel random nonce for the webview content security policy. */
+function createNonce(): string {
+  return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+}
+
 export async function runHealthCheck(provider: RamrosDocProvider): Promise<void> {
   const result = await Ros2CliService.getInstance().executeRaw('ros2 doctor', { timeout: 60000 });
   const stdout = result.output;
@@ -410,6 +440,26 @@ export async function publishToTopic(
     if (!messageType) return undefined;
   }
 
+  // Workspace resolution happens before the structure loading so the
+  // interface show fetch can source the workspace overlay.
+  const workspace = await resolveWorkspace();
+  if (!workspace) return undefined;
+
+  const loader = createInterfaceLoader(qualifiedType =>
+    fetchInterfaceDefinition(qualifiedType, workspace, cli)
+  );
+
+  let structure;
+  try {
+    structure = await loader.loadStructure(messageType);
+  } catch {
+    structure = undefined; // Top-level failure: fall back to the raw flow.
+  }
+
+  if (structure) {
+    return publishStructured(topicName, messageType, workspace, structure, terminalManager, cli);
+  }
+  // --- Raw fallback flow (unchanged) ---
   const modePick = await vscode.window.showQuickPick([
     { label: 'once', description: 'Publish the message once' },
     { label: 'rate', description: 'Publish repeatedly at a rate' }
@@ -443,12 +493,74 @@ export async function publishToTopic(
   });
   if (content === undefined || content.trim().length === 0) return undefined;
 
-  const workspace = await resolveWorkspace();
-  if (!workspace) return undefined;
-
   const command = buildTopicPubCommand(topicName, messageType, content, mode, rate);
   await terminalManager.executeInNewTerminal(command, workspace, `Pub: ${topicName}`);
   return messageType;
+}
+
+/**
+ * Publish flow with the structured webview form. Publish-once runs as a
+ * hidden exec (10s subscriber timeout); rate publishing opens a terminal.
+ */
+async function publishStructured(
+  topicName: string,
+  messageType: string,
+  workspace: WorkspaceInfo,
+  structure: InterfaceStructure,
+  terminalManager: TerminalManager,
+  cli: Ros2CliService
+): Promise<string | undefined> {
+  const setupBashPath = workspace.installPath ? path.join(workspace.installPath.fsPath, 'setup.bash') : undefined;
+  const hasSetup = setupBashPath !== undefined && fs.existsSync(setupBashPath);
+  const sourcePrefix = hasSetup ? `source "${setupBashPath}" && ` : '';
+  const { buildFormHtml } = await import('./core/form-html');
+  const formKind = 'topic' as const;
+
+  const html = buildFormHtml(structure, {
+    nonce: createNonce(),
+    cspSource: '',
+    title: `Publish ${topicName} (${messageType})`,
+    kind: formKind
+  });
+  showMessageInputPanel({
+    key: `topic:${topicName}`,
+    title: `Pub: ${topicName}`,
+    kind: formKind,
+    html,
+    onMessage: (message: MessageInputCommand) => handleStructuredPublish(
+      topicName, messageType, workspace, sourcePrefix, structure.fields, terminalManager, cli, message
+    )
+  });
+  return messageType;
+}
+
+async function handleStructuredPublish(
+  topicName: string,
+  messageType: string,
+  workspace: WorkspaceInfo,
+  sourcePrefix: string,
+  fields: InterfaceField[],
+  terminalManager: TerminalManager,
+  cli: Ros2CliService,
+  message: MessageInputCommand
+): Promise<{ type: string; ok: boolean; message: string }> {
+  if (message.type === 'publishRate') {
+    const yaml = valuesToYaml(fields, { ...fieldDefaults(fields), ...message.values });
+    const command = `${sourcePrefix}${buildTopicPubCommand(topicName, messageType, yaml, 'rate', message.rate ?? 1)}`;
+    await terminalManager.executeInNewTerminal(command, workspace, `Pub: ${topicName}`);
+    return { type: 'result', ok: true, message: `Publishing at ${message.rate ?? 1} Hz in a terminal` };
+  }
+
+  // publishOnce (default): hidden exec with a 10s subscriber timeout.
+  const yaml = valuesToYaml(fields, { ...fieldDefaults(fields), ...message.values });
+  const command = `${sourcePrefix}${buildTopicPubCommand(topicName, messageType, yaml, 'once')}`;
+  try {
+    await cli.executeRaw(command, { timeout: 10000 });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Publish failed: ${reason}`);
+  }
+  return { type: 'result', ok: true, message: 'Message published' };
 }
 
 async function pickTargetPackage(workspaces: WorkspaceInfo[]): Promise<PackageInfo | undefined> {
@@ -1364,6 +1476,47 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!serviceType) {
         void vscode.window.showErrorMessage('Could not resolve service type');
         return;
+      }
+      
+      // Workspace resolution before structure loading (overlay sourcing).
+      const workspace = await pickWorkspace();
+      
+      if (workspace) {
+        const loader = createInterfaceLoader(qualifiedType =>
+          fetchInterfaceDefinition(qualifiedType, workspace, cli)
+        );
+        try {
+          const structure = await loader.loadStructure(serviceType);
+          const { buildFormHtml } = await import('./core/form-html');
+          const setupBashPath = workspace.installPath ? path.join(workspace.installPath.fsPath, 'setup.bash') : undefined;
+          const hasSetup = setupBashPath !== undefined && fs.existsSync(setupBashPath);
+          const sourcePrefix = hasSetup ? `source "${setupBashPath}" && ` : '';
+          const html = buildFormHtml(structure, {
+            nonce: createNonce(),
+            cspSource: '',
+            title: `Call ${serviceName} (${serviceType})`,
+            kind: 'service'
+          });
+          showMessageInputPanel({
+            key: `service:${serviceName}`,
+            title: `Call: ${serviceName}`,
+            kind: 'service',
+            html,
+            onMessage: async (message: MessageInputCommand) => {
+              const json = valuesToJson(structure.fields, { ...fieldDefaults(structure.fields), ...message.values });
+              const response = await cli.callService(serviceName, serviceType, json);
+              if (response === null) {
+                throw new Error(`Service call to ${serviceName} failed`);
+              }
+              await showInReadonlyDoc(ramrosDocProvider, `service-call/${serviceName}`, response);
+              void vscode.window.showInformationMessage(`Service call to ${serviceName} completed`);
+              return { type: 'result', ok: true, message: 'Service called' };
+            }
+          });
+          return;
+        } catch {
+          // Structure loading failed: raw JSON input flow below.
+        }
       }
       
       const json = await vscode.window.showInputBox({

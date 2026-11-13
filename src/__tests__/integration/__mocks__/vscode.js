@@ -17,6 +17,7 @@ module.exports = {
       get: jest.fn((_key, defaultValue) => defaultValue)
     }),
     registerTextDocumentContentProvider: jest.fn(),
+    openTextDocument: jest.fn().mockResolvedValue({}),
     onDidChangeConfiguration: jest.fn().mockReturnValue({ dispose: jest.fn() }),
     onDidChangeWorkspaceFolders: jest.fn().mockReturnValue({ dispose: jest.fn() })
   },
@@ -39,6 +40,24 @@ module.exports = {
     showOpenDialog: jest.fn(),
     showTextDocument: jest.fn().mockResolvedValue({}),
     withProgress: jest.fn(),
+    createWebviewPanel: jest.fn((viewType, title) => {
+      const panel = {
+        viewType,
+        title,
+        webview: {
+          html: '',
+          postMessage: jest.fn().mockResolvedValue(true),
+          onDidReceiveMessage: jest.fn().mockReturnValue({ dispose: jest.fn() }),
+          cspSource: 'vscode-webview://test'
+        },
+        reveal: jest.fn(),
+        onDidDispose: jest.fn().mockReturnValue({ dispose: jest.fn() }),
+        dispose: jest.fn(),
+        visible: true
+      };
+      createWebviewPanel.lastPanel = panel;
+      return panel;
+    }),
     createTreeView: jest.fn(() => ({
       onDidCollapseElement: jest.fn().mockReturnValue({ dispose: jest.fn() }),
       onDidExpandElement: jest.fn().mockReturnValue({ dispose: jest.fn() })
@@ -92,6 +111,12 @@ module.exports = {
     Directory: 2,
     SymbolicLink: 64
   },
+  ViewColumn: {
+    Active: -1,
+    Beside: -2,
+    One: 1,
+    Two: 2
+  },
   EventEmitter: class EventEmitter {
     constructor() {
       this._listeners = [];
@@ -114,3 +139,23 @@ module.exports = {
     }
   }
 };
+
+// Capture the most recent webview panel for integration tests.
+module.exports.window.createWebviewPanel.mockImplementation((viewType, title) => {
+  const panel = {
+    viewType,
+    title,
+    webview: {
+      html: '',
+      postMessage: jest.fn().mockResolvedValue(true),
+      onDidReceiveMessage: jest.fn().mockReturnValue({ dispose: jest.fn() }),
+      cspSource: 'vscode-webview://test'
+    },
+    reveal: jest.fn(),
+    onDidDispose: jest.fn().mockReturnValue({ dispose: jest.fn() }),
+    dispose: jest.fn(),
+    visible: true
+  };
+  module.exports.window.createWebviewPanel.lastPanel = panel;
+  return panel;
+});
