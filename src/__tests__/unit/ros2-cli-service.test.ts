@@ -216,4 +216,85 @@ describe('Ros2CliService exec-backed methods', () => {
   it('callService returns null when the command fails', async () => {
     await expect(cli.callService('/add_two_ints', 'example_interfaces/srv/AddTwoInts', '{"a": 1, "b": 2}')).resolves.toBeNull();
   });
+
+  describe('ROS_DOMAIN_ID injection', () => {
+    afterEach(() => {
+      cli.setDomainId(undefined);
+    });
+
+    function lastExecOptions(): Record<string, unknown> | undefined {
+      const calls = (exec as unknown as jest.Mock).mock.calls;
+      return calls[calls.length - 1]?.[1] as Record<string, unknown> | undefined;
+    }
+
+    it('executes without a ROS_DOMAIN_ID env key when unset', async () => {
+      cli.setDomainId(undefined);
+      mockStdout('/talker\n');
+      await cli.getActiveNodes();
+
+      const options = lastExecOptions();
+      const env = options?.env as Record<string, string | undefined> | undefined;
+      expect(env).toBeDefined();
+      expect(env?.ROS_DOMAIN_ID).toBeUndefined();
+      expect(env?.PATH).toBe(process.env.PATH);
+    });
+
+    it('injects env.ROS_DOMAIN_ID on every exec when set', async () => {
+      cli.setDomainId(2);
+      mockStdout('/talker\n');
+      await cli.getActiveNodes();
+      mockStdout('/chatter\n');
+      await cli.getActiveTopics();
+      mockStdout('Type: std_msgs/msg/String\nPublisher count: 0\nSubscription count: 0\n');
+      await cli.getTopicInfo('/chatter');
+      mockStdout('/talker\n publishers:\n');
+      await cli.getNodeInfo('/talker');
+      mockStdout('/chatter\n');
+      await cli.getParameterNames('/talker');
+
+      const calls = (exec as unknown as jest.Mock).mock.calls;
+      expect(calls.length).toBe(5);
+      for (const call of calls) {
+        const env = (call[1] as { env?: Record<string, string | undefined> }).env;
+        expect(env?.ROS_DOMAIN_ID).toBe('2');
+        expect(env?.PATH).toBe(process.env.PATH);
+      }
+    });
+
+    it('reverts to unmodified env after setDomainId(undefined)', async () => {
+      cli.setDomainId(5);
+      cli.setDomainId(undefined);
+      mockStdout('/talker\n');
+      await cli.getActiveNodes();
+
+      const options = (exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string | undefined> };
+      expect(options.env.ROS_DOMAIN_ID).toBeUndefined();
+    });
+
+    it('getActiveNodesForDomain uses the given domain regardless of the global default', async () => {
+      cli.setDomainId(2);
+      mockStdout('/n7\n');
+      await cli.getActiveNodesForDomain(7);
+      const env = ((exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string> }).env;
+      expect(env.ROS_DOMAIN_ID).toBe('7');
+      cli.setDomainId(undefined);
+    });
+
+    it('getActiveTopicsForDomain uses the given domain regardless of the global default', async () => {
+      cli.setDomainId(undefined);
+      mockStdout('/t7\n');
+      await cli.getActiveTopicsForDomain(7);
+      const env = ((exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string> }).env;
+      expect(env.ROS_DOMAIN_ID).toBe('7');
+    });
+
+    it('executeLines routes a raw command through the central env injection', async () => {
+      cli.setDomainId(3);
+      mockStdout('/a\n/b\n');
+      await expect(cli.executeLines('ros2 topic list')).resolves.toEqual(['/a', '/b']);
+      const env = ((exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string> }).env;
+      expect(env.ROS_DOMAIN_ID).toBe('3');
+      cli.setDomainId(undefined);
+    });
+  });
 });

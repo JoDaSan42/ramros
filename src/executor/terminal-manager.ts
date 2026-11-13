@@ -21,6 +21,31 @@ function delay(ms: number): Promise<void> {
 
 export class TerminalManager implements vscode.Disposable {
   private readonly terminals = new Map<string, vscode.Terminal>();
+  private domainId?: number;
+
+  /**
+   * Sets the ROS_DOMAIN_ID exported in new terminals (see
+   * executeInNewTerminal). `undefined` stops exporting the variable.
+   */
+  setDomainId(domainId: number | undefined): void {
+    this.domainId = domainId;
+  }
+
+  /**
+   * Builds the command line for a new terminal: optional overlay source,
+   * optional ROS_DOMAIN_ID export, then the command itself.
+   */
+  private buildTerminalCommand(command: string, setupBashPath?: string): string {
+    const parts: string[] = [];
+    if (setupBashPath) {
+      parts.push(`source "${setupBashPath}"`);
+    }
+    if (this.domainId !== undefined) {
+      parts.push(`export ROS_DOMAIN_ID=${this.domainId}`);
+    }
+    parts.push(command);
+    return parts.join(' && ');
+  }
 
   async focusAndWait(terminal: vscode.Terminal): Promise<void> {
     terminal.show(true);
@@ -103,11 +128,7 @@ export class TerminalManager implements vscode.Disposable {
     terminal.show();
 
     const setupBashPath = shouldSource ? this.resolveSetupBash(workspace) : undefined;
-    if (setupBashPath) {
-      terminal.sendText(`source "${setupBashPath}" && ${command}`);
-    } else {
-      terminal.sendText(command);
-    }
+    terminal.sendText(this.buildTerminalCommand(command, setupBashPath));
 
     return terminal;
   }

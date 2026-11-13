@@ -211,7 +211,7 @@ describe('setParameterValue command quoting', () => {
     expect(result).toBe(true);
     expect(exec).toHaveBeenCalledWith(
       'ros2 param set "/my node" "my param" "hello world"',
-      { encoding: 'utf-8', timeout: 10000 },
+      expect.objectContaining({ encoding: 'utf-8', timeout: 10000 }),
       expect.any(Function)
     );
   });
@@ -223,7 +223,7 @@ describe('setParameterValue command quoting', () => {
 
     expect(exec).toHaveBeenCalledWith(
       'ros2 param set "/talker" "greeting" "\\$(reboot) \\`touch /tmp/pwned\\`"',
-      { encoding: 'utf-8', timeout: 10000 },
+      expect.objectContaining({ encoding: 'utf-8', timeout: 10000 }),
       expect.any(Function)
     );
   });

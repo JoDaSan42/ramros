@@ -243,7 +243,7 @@ describe('LiveTreeProvider Integration Tests', () => {
       expect(result).toBe('response');
       expect(exec).toHaveBeenCalledWith(
         'ros2 service call "/add_two_ints" "example_interfaces/srv/AddTwoInts" \'{a: 1, b: 2}\'',
-        { encoding: 'utf-8', timeout: 30000 },
+        expect.objectContaining({ encoding: 'utf-8', timeout: 30000 }),
         expect.any(Function)
       );
     });

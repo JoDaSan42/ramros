@@ -135,7 +135,7 @@ describe('showInterfaceDefinition', () => {
     expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
     expect(exec).toHaveBeenCalledWith(
       'ros2 interface show my_pkg/srv/Reset',
-      { encoding: 'utf-8', timeout: 5000 },
+      expect.objectContaining({ encoding: 'utf-8', timeout: 5000 }),
       expect.any(Function)
     );
   });
@@ -188,7 +188,7 @@ describe('showInterfaceDefinition', () => {
 
     expect(exec).toHaveBeenCalledWith(
       'ros2 interface show my_pkg/srv/Reset',
-      { encoding: 'utf-8', timeout: 5000 },
+      expect.objectContaining({ encoding: 'utf-8', timeout: 5000 }),
       expect.any(Function)
     );
   });
@@ -244,7 +244,7 @@ describe('runHealthCheck', () => {
     expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
     expect(exec).toHaveBeenCalledWith(
       'ros2 doctor',
-      { encoding: 'utf-8', timeout: 60000 },
+      expect.objectContaining({ encoding: 'utf-8', timeout: 60000 }),
       expect.any(Function)
     );
   });

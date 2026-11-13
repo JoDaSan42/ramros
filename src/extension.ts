@@ -256,13 +256,7 @@ async function pickTopic(): Promise<string | undefined> {
 }
 
 async function executeCommandAndGetOutput(command: string): Promise<string[]> {
-  try {
-    const { stdout } = await execAsync(command, { encoding: 'utf-8' });
-    return stdout.split('\n').filter(line => line.trim().length > 0);
-  } catch (error) {
-    console.error(`Failed to execute command: ${command}`, error);
-    return [];
-  }
+  return Ros2CliService.getInstance().executeLines(command);
 }
 
 async function discoverTopics(): Promise<string[]> {
@@ -311,7 +305,11 @@ export async function selectBagForPlayback(bagPath: string): Promise<void> {
 
   // Get bag info
   try {
-    const { stdout: bagInfoOutput } = await execAsync(`ros2 bag info "${bagPath}"`, { encoding: 'utf-8' });
+    const bagInfo = await Ros2CliService.getInstance().executeRaw(`ros2 bag info "${bagPath}"`);
+    const bagInfoOutput = bagInfo.output;
+    if (!bagInfo.ok && bagInfoOutput.length === 0) {
+      throw new Error(bagInfo.stderr ?? 'ros2 bag info failed');
+    }
 
     // Filter out "closing." lines from the output
     const filteredOutput = bagInfoOutput.split('\n').filter(line => !line.includes('closing.')).join('\n');
@@ -339,8 +337,11 @@ export function __setDocProviderForTests(provider: RamrosDocProvider): void {
 export async function showInterfaceDefinition(qualifiedName: string, interfacePath?: string): Promise<void> {
   try {
     const command = await buildInterfaceShowCommand(qualifiedName, interfacePath);
-    const { stdout } = await execAsync(command, { encoding: 'utf-8', timeout: 5000 });
-    await showInReadonlyDoc(ramrosDocProvider, `interface/${qualifiedName.replace(/\//g, '-')}`, stdout);
+    const result = await Ros2CliService.getInstance().executeRaw(command, { timeout: 5000 });
+    if (!result.ok && result.output.length === 0) {
+      throw new Error(result.stderr ?? 'ros2 interface show failed');
+    }
+    await showInReadonlyDoc(ramrosDocProvider, `interface/${qualifiedName.replace(/\//g, '-')}`, result.output);
   } catch {
     void vscode.window.showErrorMessage(`Could not show interface ${qualifiedName}. Is the workspace built (colcon build)?`);
   }
@@ -360,15 +361,9 @@ async function buildInterfaceShowCommand(qualifiedName: string, interfacePath?: 
 }
 
 export async function runHealthCheck(provider: RamrosDocProvider): Promise<void> {
-  let stdout = '';
-  let stderr = '';
-  try {
-    ({ stdout, stderr } = await execAsync('ros2 doctor', { encoding: 'utf-8', timeout: 60000 }));
-  } catch (error) {
-    const err = error as Error & { stdout?: string; stderr?: string };
-    stdout = err.stdout ?? '';
-    stderr = err.stderr ?? '';
-  }
+  const result = await Ros2CliService.getInstance().executeRaw('ros2 doctor', { timeout: 60000 });
+  const stdout = result.output;
+  const stderr = result.stderr ?? '';
   const combinedOutput = stdout + stderr;
   if (combinedOutput.length === 0) {
     void vscode.window.showWarningMessage('ros2 doctor returned no output');
@@ -500,7 +495,10 @@ export async function activate(context: vscode.ExtensionContext) {
    terminalManager = new TerminalManager();
    bagSession = BagSessionService.getInstance();
    ramrosDocProvider = new RamrosDocProvider();
-   
+
+   const configuredDomainId = vscode.workspace.getConfiguration('ramros.ros').get<number | undefined>('domainId', undefined);
+   Ros2CliService.getInstance().setDomainId(configuredDomainId);
+   terminalManager.setDomainId(configuredDomainId);
    treeProvider = new RamrosTreeProvider(workspaceDetector, duplicateDetector, packageDiscovery);
    workspaceConfigService = getWorkspaceConfigService();
    toolsTreeProvider = new ToolsTreeProvider(getBagEntries);
@@ -551,6 +549,12 @@ export async function activate(context: vscode.ExtensionContext) {
         const newRoot = vscode.workspace.getConfiguration('ramros.ros').get<string>('rosRoot', '/opt/ros');
         rosEnvironmentService.setRosRoot(newRoot);
         void treeProvider.refresh();
+      }
+      if (e.affectsConfiguration('ramros.ros.domainId')) {
+        const newDomain = vscode.workspace.getConfiguration('ramros.ros').get<number | undefined>('domainId', undefined);
+        Ros2CliService.getInstance().setDomainId(newDomain);
+        terminalManager.setDomainId(newDomain);
+        void toolsTreeProvider.refresh();
       }
     })
   );

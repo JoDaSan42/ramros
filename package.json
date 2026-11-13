@@ -573,6 +573,10 @@
           "default": "/opt/ros",
           "description": "Root directory of your ROS 2 installation (contains the distro folders like humble/, jazzy/)"
         },
+        "ramros.ros.domainId": {
+          "type": "number",
+          "description": "ROS_DOMAIN_ID applied to all ros2 CLI calls and new terminals (unset = use the environment's domain)"
+        },
         "ramros.liveView.refreshRate": {
           "type": "number",
           "default": 5,
