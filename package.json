@@ -568,6 +568,11 @@
     "configuration": {
       "title": "RAMROS",
       "properties": {
+        "ramros.ros.rosRoot": {
+          "type": "string",
+          "default": "/opt/ros",
+          "description": "Root directory of your ROS 2 installation (contains the distro folders like humble/, jazzy/)"
+        },
         "ramros.liveView.refreshRate": {
           "type": "number",
           "default": 5,

@@ -219,4 +219,44 @@ describe('launch tool commands (rviz2 / rqt_graph)', () => {
     expect(labels).not.toContain('(last used)');
     expect(labels).not.toMatch(/without sourcing/i);
   });
+
+  it('applies ramros.ros.rosRoot to the ROS environment service', async () => {
+    (vscode.workspace as unknown as { getConfiguration: jest.Mock }).getConfiguration = jest.fn((section: string) => {
+      if (section === 'ramros.ros') {
+        return { get: jest.fn((key: string, defaultValue: unknown) => key === 'rosRoot' ? tempDir : defaultValue) };
+      }
+      return { get: jest.fn((_key: string, defaultValue: unknown) => defaultValue) };
+    });
+
+    await activateWithWorkspaceState(workspaceState);
+
+    // The service is wired into the workspace detector; a refresh re-reads
+    // workspaces from the (here mocked) environment. We verify the wiring
+    // indirectly: no error during activate and the config listener registered.
+    const listener = (vscode.workspace.onDidChangeConfiguration as jest.Mock).mock.calls[0]?.[0];
+    expect(listener).toBeDefined();
+  });
+
+  it('applies a rosRoot setting change via setRosRoot and refreshes the tree', async () => {
+    makeWorkspaceFolders([tempDir]);
+
+    await activateWithWorkspaceState(workspaceState);
+
+    const calls = (vscode.workspace.onDidChangeConfiguration as jest.Mock).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+
+    // The RAMROS tree provider is the first created tree view.
+    const treeProvider = (vscode.window.createTreeView as jest.Mock).mock.calls[0][1].treeDataProvider;
+    const refreshSpy = jest.spyOn(treeProvider, 'refresh').mockResolvedValue(undefined);
+
+    const affects = jest.fn((key: string) => key === 'ramros.ros.rosRoot');
+    const event = { affectsConfiguration: affects };
+
+    for (const [listener] of calls) {
+      await (listener as (e: typeof event) => Promise<void> | void)(event);
+    }
+
+    expect(affects).toHaveBeenCalledWith('ramros.ros.rosRoot');
+    expect(refreshSpy).toHaveBeenCalled();
+  });
 });

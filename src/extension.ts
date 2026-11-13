@@ -478,7 +478,9 @@ function resolvePresetPackageForLaunch(arg: TreeItemBase | undefined): PackageIn
 export async function activate(context: vscode.ExtensionContext) {
   console.log('RAMROS Extension activated');
   
-  const rosEnvironmentService = new RosEnvironmentService();
+  const rosEnvironmentService = new RosEnvironmentService(
+    vscode.workspace.getConfiguration('ramros.ros').get<string>('rosRoot', '/opt/ros')
+  );
   
   cacheManager = new CacheManager({
     onFileChange: (message) => {
@@ -530,8 +532,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   });
   
-   const ramrosConfigWatcher = vscode.workspace.createFileSystemWatcher('**/ramros.json');
-   ramrosConfigWatcher.onDidChange(() => {
+   const ramrosConfigWatcher = vscode.workspace.createFileSystemWatcher('**/ramros.json');   ramrosConfigWatcher.onDidChange(() => {
      void toolsTreeProvider.refresh();
      void liveTreeProvider.reloadFromWorkspaceConfig();
    });
@@ -543,6 +544,16 @@ export async function activate(context: vscode.ExtensionContext) {
      void toolsTreeProvider.refresh();
      void liveTreeProvider.reloadFromWorkspaceConfig();
    });
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (e.affectsConfiguration('ramros.ros.rosRoot')) {
+        const newRoot = vscode.workspace.getConfiguration('ramros.ros').get<string>('rosRoot', '/opt/ros');
+        rosEnvironmentService.setRosRoot(newRoot);
+        void treeProvider.refresh();
+      }
+    })
+  );
   
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(RamrosDocProvider.scheme, ramrosDocProvider),
