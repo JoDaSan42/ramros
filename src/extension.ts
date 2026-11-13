@@ -16,7 +16,7 @@ import { LiveParameterItem, LiveNodeItem, LiveTopicItem, NodeParametersItem } fr
 import { TerminalManager } from './executor/terminal-manager';
 import { BagSessionService } from './executor/bag-session-service';
 import { PackageCreator } from './wizard/package-creator';
-import { runNodeOptionsWizard } from './wizard/run-node-options-wizard';
+import { runNodeOptionsWizard, pickDomain } from './wizard/run-node-options-wizard';
 import { RunArgsBuilder } from './core/run-args-builder';
 import { NodeInfo, LaunchFileInfo, PackageDiscoveryService, PackageInfo, InterfaceInfo } from './core/package-discovery';
 import { TreeItemBase } from './treeview/base-tree-item';
@@ -171,7 +171,9 @@ async function startNodeWithOptions(nodeToRun: NodeInfo): Promise<void> {
   const terminalTitle = options.nodeName
     ? `Node: ${options.nodeName} (${nodeToRun.name})`
     : `Node: ${nodeToRun.name}`;
-  await terminalManager.executeInNewTerminal(runCommand, selectedWorkspace, terminalTitle);
+  await terminalManager.executeInNewTerminal(runCommand, selectedWorkspace, terminalTitle, {
+    domainId: options.domainId,
+  });
 }
 
 function resolveTopicName(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {
@@ -1160,11 +1162,39 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!picked?.workspace) return;
       await terminalManager.executeInNewTerminal('rviz2', picked.workspace, 'RVIZ2', { source: picked.source });
     }),
-    
+
+    vscode.commands.registerCommand('ramros.launchTool.rviz2WithOptions', async () => {
+      const picked = await pickWorkspaceForOverlayTool(context);
+      if (!picked?.workspace) return;
+      const domain = await pickDomain();
+      if (domain === undefined) {
+        return; // aborted: start nothing
+      }
+      await terminalManager.executeInNewTerminal('rviz2', picked.workspace, 'RVIZ2', {
+        source: picked.source,
+        domainId: domain.useDomain,
+      });
+    }),
+
     vscode.commands.registerCommand('ramros.launchTool.rqt_graph', async () => {
       const picked = await pickWorkspaceForOverlayTool(context);
       if (!picked?.workspace) return;
-      await terminalManager.executeInNewTerminal('rqt_graph', picked.workspace, 'rqt_graph', { source: picked.source });
+      // ros2 run is the canonical, distro-independent entry point (the bare
+      // rqt_graph binary is not on PATH in newer distros like lyrical).
+      await terminalManager.executeInNewTerminal('ros2 run rqt_graph rqt_graph', picked.workspace, 'rqt_graph', { source: picked.source });
+    }),
+
+    vscode.commands.registerCommand('ramros.launchTool.rqtGraphWithOptions', async () => {
+      const picked = await pickWorkspaceForOverlayTool(context);
+      if (!picked?.workspace) return;
+      const domain = await pickDomain();
+      if (domain === undefined) {
+        return; // aborted: start nothing
+      }
+      await terminalManager.executeInNewTerminal('ros2 run rqt_graph rqt_graph', picked.workspace, 'rqt_graph', {
+        source: picked.source,
+        domainId: domain.useDomain,
+      });
     }),
     
     vscode.commands.registerCommand('ramros.bag.startRecording', async () => {

@@ -112,6 +112,7 @@ describe('run node with options terminal seam', () => {
 
     showQuickPick
       .mockResolvedValueOnce([])                                              // no parameters
+      .mockResolvedValueOnce({ label: 'Use environment domain', isEnv: true }) // domain pick
       .mockResolvedValueOnce({ label: 'Done', isDone: true });                // remaps done
     showInputBox
       .mockResolvedValueOnce('renamed_node');                                 // node name
@@ -131,6 +132,7 @@ describe('run node with options terminal seam', () => {
 
     showQuickPick
       .mockResolvedValueOnce([{ label: 'greeting', parameter: pythonNode.parameters![0] }])
+      .mockResolvedValueOnce({ label: 'Use environment domain', isEnv: true }) // domain pick
       .mockResolvedValueOnce({ label: 'Done', isDone: true });
     showInputBox
       .mockResolvedValueOnce('hello world')    // parameter value
@@ -158,6 +160,7 @@ describe('run node with options terminal seam', () => {
 
     showQuickPick
       .mockResolvedValueOnce([])                                 // no parameters
+      .mockResolvedValueOnce({ label: 'Use environment domain', isEnv: true }) // domain pick
       .mockResolvedValueOnce({ label: 'Done', isDone: true });   // remaps done
     showInputBox.mockResolvedValueOnce('renamed_node');
 

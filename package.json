@@ -90,7 +90,8 @@
       },
       {
         "command": "ramros.runNodeWithOptions",
-        "title": "Run Node with Options…"
+        "title": "Run Node with Options…",
+        "icon": "$(settings-gear)"
       },
       {
         "command": "ramros.debugNode",
@@ -118,9 +119,19 @@
         "icon": "$(vm)"
       },
       {
+        "command": "ramros.launchTool.rviz2WithOptions",
+        "title": "Launch RVIZ2 with Options…",
+        "icon": "$(settings-gear)"
+      },
+      {
         "command": "ramros.launchTool.rqt_graph",
         "title": "Launch rqt_graph",
         "icon": "$(git-compare)"
+      },
+      {
+        "command": "ramros.launchTool.rqtGraphWithOptions",
+        "title": "Launch rqt_graph with Options…",
+        "icon": "$(settings-gear)"
       },
       {
         "command": "ramros.bag.startRecording",
@@ -347,6 +358,16 @@
         },
         {
           "command": "ramros.runNodeWithOptions",
+          "when": "view == ramrosExplorer && viewItem == node",
+          "group": "inline@2"
+        },
+        {
+          "command": "ramros.debugNode",
+          "when": "view == ramrosExplorer && viewItem == node",
+          "group": "inline@3"
+        },
+        {
+          "command": "ramros.runNodeWithOptions",
           "when": "view == ramrosExplorer && viewItem == node"
         },
         {
@@ -452,8 +473,18 @@
           "when": "view == ramrosTools && viewItem == tool"
         },
         {
+          "command": "ramros.launchTool.rviz2WithOptions",
+          "when": "view == ramrosTools && viewItem == tool",
+          "group": "inline@1"
+        },
+        {
           "command": "ramros.launchTool.rqt_graph",
           "when": "view == ramrosTools && viewItem == tool"
+        },
+        {
+          "command": "ramros.launchTool.rqtGraphWithOptions",
+          "when": "view == ramrosTools && viewItem == tool",
+          "group": "inline@1"
         },
         {
           "command": "ramros.bag.startRecording",

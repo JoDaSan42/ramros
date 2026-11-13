@@ -87,6 +87,16 @@ describe('extension command registration', () => {
     expect(ids).toContain('ramros.live.updateParameters');
   });
 
+  it('registers the tool with-options commands', async () => {
+    await activate(makeExtensionContext());
+
+    const ids = (vscode.commands.registerCommand as jest.Mock).mock.calls.map(
+      ([id]) => id as string
+    );
+    expect(ids).toContain('ramros.launchTool.rviz2WithOptions');
+    expect(ids).toContain('ramros.launchTool.rqtGraphWithOptions');
+  });
+
   it('resolves a LiveParameterItem argument of setParameter from the context menu', async () => {
     await activate(makeExtensionContext());
 

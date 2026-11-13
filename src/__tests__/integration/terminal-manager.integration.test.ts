@@ -193,6 +193,23 @@ describe('TerminalManager Integration Tests', () => {
         expect(sent).not.toContain('ROS_DOMAIN_ID');
         expect(sent).toContain('rviz2');
       });
+
+      it('options.domainId overrides the global domain for this terminal', async () => {
+        terminalManager.setDomainId(1);
+        const terminal = await terminalManager.executeInNewTerminal('rviz2', workspace, 'RVIZ2', { domainId: 5 });
+        const sent = (terminal.sendText as jest.Mock).mock.calls.map(call => call[0]).join('\n');
+        expect(sent).toContain('export ROS_DOMAIN_ID=5 &&');
+        expect(sent).not.toContain('ROS_DOMAIN_ID=1');
+        terminalManager.setDomainId(undefined);
+      });
+
+      it('options.domainId undefined falls back to the global domain', async () => {
+        terminalManager.setDomainId(1);
+        const terminal = await terminalManager.executeInNewTerminal('rviz2', workspace, 'RVIZ2', { source: true });
+        const sent = (terminal.sendText as jest.Mock).mock.calls.map(call => call[0]).join('\n');
+        expect(sent).toContain('export ROS_DOMAIN_ID=1 &&');
+        terminalManager.setDomainId(undefined);
+      });
     });
 
     it('build command execution', async () => {

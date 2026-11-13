@@ -8,6 +8,8 @@ export interface RunNodeOptions {
   parameters: RunParameter[];
   remaps: RunRemap[];
   nodeName?: string;
+  /** Specific ROS domain for this start (export ROS_DOMAIN_ID). */
+  domainId?: number;
 }
 
 const CUSTOM_PARAMETER_TYPES = ['string', 'int', 'float', 'bool', 'string[]', 'int[]', 'float[]', 'bool[]'];
@@ -124,6 +126,12 @@ export async function runNodeOptionsWizard(node: NodeInfo): Promise<RunNodeOptio
   }
   const renamed = nodeName !== node.name ? nodeName : undefined;
 
+  // --- ROS domain (between name and remaps; env domain = default) ---
+  const domain = await pickDomain();
+  if (domain === undefined) {
+    return undefined;
+  }
+
   // --- Remaps ---
   // Offer the node's statically analyzed endpoints as remap sources so the
   // user does not have to remember exact original names. Works for Python
@@ -133,7 +141,55 @@ export async function runNodeOptionsWizard(node: NodeInfo): Promise<RunNodeOptio
     return undefined;
   }
 
-  return { parameters, remaps, nodeName: renamed };
+  return { parameters, remaps, nodeName: renamed, domainId: domain.useDomain };
+}
+
+export interface DomainPickResult {
+  /** Specific domain to export; undefined = use the environment domain. */
+  useDomain?: number;
+}
+
+/**
+ * ROS domain prompt: environment domain (default) or a specific one.
+ * Resolves `undefined` on Esc — the caller aborts in that case.
+ * Exported for reuse by the tool "start with options" flows.
+ */
+export async function pickDomain(): Promise<DomainPickResult | undefined> {
+  interface DomainPickItem {
+    label: string;
+    isEnv?: boolean;
+    isSpecific?: boolean;
+  }
+
+  const picked = await vscode.window.showQuickPick<DomainPickItem>(
+    [
+      { label: 'Use environment domain', isEnv: true },
+      { label: 'Use a specific domain…', isSpecific: true },
+    ],
+    { placeHolder: 'ROS domain for this start (ROS_DOMAIN_ID)' }
+  );
+  if (picked === undefined) {
+    return undefined;
+  }
+  if (picked.isEnv) {
+    return { useDomain: undefined };
+  }
+
+  const domainInput = await vscode.window.showInputBox({
+    prompt: 'ROS domain id (ROS_DOMAIN_ID)',
+    placeHolder: '0',
+    validateInput: value => {
+      const trimmed = (value ?? '').trim();
+      if (!/^\d+$/.test(trimmed)) {
+        return 'Domain must be a non-negative integer';
+      }
+      return undefined;
+    },
+  });
+  if (domainInput === undefined) {
+    return undefined;
+  }
+  return { useDomain: parseInt(domainInput.trim(), 10) };
 }
 
 /**

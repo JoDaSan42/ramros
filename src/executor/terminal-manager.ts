@@ -33,15 +33,17 @@ export class TerminalManager implements vscode.Disposable {
 
   /**
    * Builds the command line for a new terminal: optional overlay source,
-   * optional ROS_DOMAIN_ID export, then the command itself.
+   * optional ROS_DOMAIN_ID export (per-start override wins over the global
+   * domain), then the command itself.
    */
-  private buildTerminalCommand(command: string, setupBashPath?: string): string {
+  private buildTerminalCommand(command: string, setupBashPath?: string, options?: { domainId?: number }): string {
     const parts: string[] = [];
     if (setupBashPath) {
       parts.push(`source "${setupBashPath}"`);
     }
-    if (this.domainId !== undefined) {
-      parts.push(`export ROS_DOMAIN_ID=${this.domainId}`);
+    const effectiveDomain = options?.domainId ?? this.domainId;
+    if (effectiveDomain !== undefined) {
+      parts.push(`export ROS_DOMAIN_ID=${effectiveDomain}`);
     }
     parts.push(command);
     return parts.join(' && ');
@@ -116,7 +118,7 @@ export class TerminalManager implements vscode.Disposable {
     command: string,
     workspace: WorkspaceInfo,
     terminalName?: string,
-    options?: { source?: boolean }
+    options?: { source?: boolean; domainId?: number }
   ): Promise<vscode.Terminal> {
     const name = terminalName || `ROS Run: ${new Date().toLocaleTimeString()}`;
     const shouldSource = options?.source !== false;
@@ -128,7 +130,7 @@ export class TerminalManager implements vscode.Disposable {
     terminal.show();
 
     const setupBashPath = shouldSource ? this.resolveSetupBash(workspace) : undefined;
-    terminal.sendText(this.buildTerminalCommand(command, setupBashPath));
+    terminal.sendText(this.buildTerminalCommand(command, setupBashPath, options));
 
     return terminal;
   }

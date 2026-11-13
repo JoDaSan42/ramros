@@ -3,6 +3,8 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { activate } from '../../extension';
+import { NodeItem } from '../../treeview/workspace-items';
+import { NodeInfo } from '../../core/package-discovery';
 
 function makeExtensionContext(): vscode.ExtensionContext {
   return {
@@ -25,6 +27,7 @@ describe('launch tool commands (rviz2 / rqt_graph)', () => {
   let tempDir: string;
   let tempDir2: string;
   let showQuickPick: jest.Mock;
+  let showInputBox: jest.Mock;
   let createTerminal: jest.Mock;
   let workspaceState: { get: jest.Mock; update: jest.Mock };
 
@@ -55,6 +58,17 @@ describe('launch tool commands (rviz2 / rqt_graph)', () => {
     return call?.[1] as ((...args: unknown[]) => unknown) | undefined;
   }
 
+  function makeNodeItem(): NodeItem {
+    const node: NodeInfo = {
+      name: 'talker_node',
+      path: tempDir,
+      packageName: 'my_pkg',
+      language: 'python',
+      isExecutable: true,
+    };
+    return new NodeItem(node);
+  }
+
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ramros-launch-a-'));
     tempDir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'ramros-launch-b-'));
@@ -75,8 +89,10 @@ describe('launch tool commands (rviz2 / rqt_graph)', () => {
     (vscode.commands.executeCommand as jest.Mock).mockClear();
 
     showQuickPick = vscode.window.showQuickPick as jest.Mock;
+    showInputBox = vscode.window.showInputBox as jest.Mock;
     createTerminal = vscode.window.createTerminal as jest.Mock;
     showQuickPick.mockReset();
+    showInputBox.mockReset();
     createTerminal.mockReset();
     createTerminal.mockImplementation((options: { name?: string }) => ({
       name: options?.name,
@@ -136,7 +152,7 @@ describe('launch tool commands (rviz2 / rqt_graph)', () => {
 
     expect(showQuickPick).not.toHaveBeenCalled();
     const terminal = createTerminal.mock.results[0].value;
-    expect(terminal.sendText).toHaveBeenCalledWith(`source "${path.join(tempDir, 'install', 'setup.bash')}" && rqt_graph`);
+    expect(terminal.sendText).toHaveBeenCalledWith(`source "${path.join(tempDir, 'install', 'setup.bash')}" && ros2 run rqt_graph rqt_graph`);
   });
 
   it('offers a last-used marked workspace pick and a no-sourcing option in multi-workspace setups', async () => {
@@ -257,6 +273,94 @@ describe('launch tool commands (rviz2 / rqt_graph)', () => {
 
     const toolsView = (vscode.window.createTreeView as jest.Mock).mock.results[1].value as { description?: string };
     expect(toolsView.description).toBeUndefined();
+  });
+
+  it('starts rqt_graph via ros2 run (binary is not on PATH in newer distros)', async () => {
+    await activateWithWorkspaceState(workspaceState);
+
+    const handler = getHandler('ramros.launchTool.rqt_graph');
+    await handler!();
+
+    const terminal = createTerminal.mock.results[0].value;
+    expect(terminal.sendText).toHaveBeenCalledWith(`source "${path.join(tempDir, 'install', 'setup.bash')}" && ros2 run rqt_graph rqt_graph`);
+  });
+
+  it('launches rviz2 with a per-start domain via the with-options flow', async () => {
+    await activateWithWorkspaceState(workspaceState);
+
+    // With-options flow: workspace pick -> domain pick ("specific" + number)
+    const workspaceHandler = getHandler('ramros.launchTool.rviz2WithOptions');
+    expect(workspaceHandler).toBeDefined();
+
+    const pickItems = [
+      { label: path.basename(tempDir), workspace: { rootPath: { fsPath: tempDir }, name: path.basename(tempDir) }, source: true }
+    ];
+    showQuickPick.mockResolvedValueOnce(pickItems[0]);      // workspace pick (item shape: implementation detail)
+    showQuickPick.mockResolvedValueOnce({ label: 'Use a specific domain…', isSpecific: true });
+    showInputBox.mockResolvedValueOnce('5');
+
+    await workspaceHandler!();
+
+    expect(createTerminal).toHaveBeenCalledTimes(1);
+    const terminal = createTerminal.mock.results[0].value;
+    const sent = (terminal.sendText as jest.Mock).mock.calls[0][0] as string;
+    expect(sent).toContain('export ROS_DOMAIN_ID=5 &&');
+    expect(sent).toContain('rviz2');
+    expect(sent).toContain('source');
+  });
+
+  it('launches rqt_graph with ros2 run in the with-options flow', async () => {
+    await activateWithWorkspaceState(workspaceState);
+
+    const handler = getHandler('ramros.launchTool.rqtGraphWithOptions');
+    expect(handler).toBeDefined();
+
+    showQuickPick.mockResolvedValueOnce({ label: 'Use environment domain', isEnv: true });
+    await handler!();
+
+    const terminal = createTerminal.mock.results[0].value;
+    const sent = (terminal.sendText as jest.Mock).mock.calls[0][0] as string;
+    expect(sent).toContain('ros2 run rqt_graph rqt_graph');
+  });
+
+  it('starts nothing when the tool with-options domain pick is aborted', async () => {
+    await activateWithWorkspaceState(workspaceState);
+
+    const handler = getHandler('ramros.launchTool.rviz2WithOptions');
+    showQuickPick.mockResolvedValueOnce(undefined); // Esc at domain pick
+
+    await handler!();
+
+    expect(createTerminal).not.toHaveBeenCalled();
+  });
+
+  it('passes the wizard domain through to the terminal in runNodeWithOptions', async () => {
+    makeWorkspaceFolders([tempDir]);
+
+    await activateWithWorkspaceState(workspaceState);
+
+    const handler = getHandler('ramros.runNodeWithOptions');
+    const nodeItem = makeNodeItem();
+    const wizardResult = {
+      parameters: [],
+      remaps: [],
+      domainId: 3
+    };
+    // Wizard runs inside the handler; mock the pick sequence: params [], domain env, remaps done
+    showQuickPick
+      .mockResolvedValueOnce([])                                              // parameters
+      .mockResolvedValueOnce({ label: 'Use a specific domain…', isSpecific: true })
+      .mockResolvedValueOnce({ label: 'Done', isDone: true });
+    showInputBox
+      .mockResolvedValueOnce('talker_node')
+      .mockResolvedValueOnce('3');
+
+    await handler!(nodeItem);
+
+    expect(createTerminal).toHaveBeenCalledTimes(1);
+    const terminal = createTerminal.mock.results[0].value;
+    const sent = (terminal.sendText as jest.Mock).mock.calls[0][0] as string;
+    expect(sent).toContain('export ROS_DOMAIN_ID=3 &&');
   });
 
   it('applies a rosRoot setting change via setRosRoot and refreshes the tree', async () => {    makeWorkspaceFolders([tempDir]);

@@ -32,7 +32,8 @@ describe('run node options wizard', () => {
         { label: 'speed', parameter: pythonNode.parameters![0] },
         { label: 'count', parameter: pythonNode.parameters![1] },
       ])                                  // 1: parameter multi-select
-      .mockResolvedValueOnce({ label: 'Done', isDone: true }); // 2: remap pick
+      .mockResolvedValueOnce({ label: 'Use environment domain', isEnv: true }) // 2: domain pick
+      .mockResolvedValueOnce({ label: 'Done', isDone: true }); // 3: remap pick
 
     showInputBox
       .mockResolvedValueOnce('1.0')       // speed value
@@ -63,6 +64,7 @@ describe('run node options wizard', () => {
     showQuickPick
       .mockResolvedValueOnce([{ label: 'Add custom parameter…', isCustom: true }]) // multi-select
       .mockResolvedValueOnce('float')     // type pick
+      .mockResolvedValueOnce({ label: 'Use environment domain', isEnv: true }) // domain pick
       .mockResolvedValueOnce({ label: 'Done', isDone: true }); // remap pick
 
     showInputBox
@@ -79,6 +81,7 @@ describe('run node options wizard', () => {
   it('marks a changed node name as nodeName', async () => {
     showQuickPick
       .mockResolvedValueOnce([])             // no parameters picked
+      .mockResolvedValueOnce({ label: 'Use environment domain', isEnv: true }) // domain pick
       .mockResolvedValueOnce({ label: 'Done', isDone: true }); // remaps done
 
     showInputBox
@@ -93,6 +96,7 @@ describe('run node options wizard', () => {
   it('keeps an unchanged node name silent (no nodeName)', async () => {
     showQuickPick
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ label: 'Use environment domain', isEnv: true }) // domain pick
       .mockResolvedValueOnce({ label: 'Done', isDone: true });
 
     showInputBox.mockResolvedValueOnce('talker_node');
@@ -106,6 +110,7 @@ describe('run node options wizard', () => {
   it('collects remaps from the remap loop', async () => {
     showQuickPick
       .mockResolvedValueOnce([])                       // no parameters
+      .mockResolvedValueOnce({ label: 'Use environment domain', isEnv: true }) // domain pick
       .mockResolvedValueOnce({ label: 'Add remap', isAdd: true })
       .mockResolvedValueOnce({ label: 'Done', isDone: true });
 
@@ -132,6 +137,84 @@ describe('run node options wizard', () => {
     expect(options).toBeUndefined();
   });
 
+  describe('domain step', () => {
+    it('sits between node name and remaps: env domain default requires no extra input', async () => {
+      showQuickPick
+        .mockResolvedValueOnce([])                                              // parameters: none
+        .mockResolvedValueOnce({ label: 'Use environment domain', isEnv: true }) // domain pick
+        .mockResolvedValueOnce({ label: 'Done', isDone: true });                 // remap pick
+
+      showInputBox.mockResolvedValueOnce('talker_node');
+
+      const options = await runNodeOptionsWizard(pythonNode);
+
+      expect(options).toBeDefined();
+      expect(options!.domainId).toBeUndefined();
+    });
+
+    it('collects a specific domain as domainId', async () => {
+      showQuickPick
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce({ label: 'Use a specific domain…', isSpecific: true })
+        .mockResolvedValueOnce({ label: 'Done', isDone: true });
+
+      showInputBox
+        .mockResolvedValueOnce('talker_node')
+        .mockResolvedValueOnce('2');                     // domain number
+
+      const options = await runNodeOptionsWizard(pythonNode);
+
+      expect(options).toBeDefined();
+      expect(options!.domainId).toBe(2);
+    });
+
+    it('aborts on Esc at the domain pick', async () => {
+      showQuickPick
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce(undefined);               // Esc at domain pick
+
+      showInputBox.mockResolvedValueOnce('talker_node');
+
+      const options = await runNodeOptionsWizard(pythonNode);
+
+      expect(options).toBeUndefined();
+    });
+
+    it('aborts on Esc at the domain number input', async () => {
+      showQuickPick
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce({ label: 'Use a specific domain…', isSpecific: true })
+        .mockResolvedValueOnce({ label: 'Done', isDone: true });
+
+      showInputBox
+        .mockResolvedValueOnce('talker_node')
+        .mockResolvedValueOnce(undefined);               // Esc at domain input
+
+      const options = await runNodeOptionsWizard(pythonNode);
+
+      expect(options).toBeUndefined();
+    });
+
+    it('rejects non-integer domain input', async () => {
+      showQuickPick
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce({ label: 'Use a specific domain…', isSpecific: true })
+        .mockResolvedValueOnce({ label: 'Done', isDone: true });
+
+      let validation: string | undefined | null = null;
+      showInputBox.mockImplementation(async (options?: { validateInput?: (v: string) => string | undefined }) => {
+        if (options?.validateInput) {
+          validation = options.validateInput('abc') ?? null;
+        }
+        return '2';
+      });
+
+      await runNodeOptionsWizard(pythonNode);
+
+      expect(validation).toBe('Domain must be a non-negative integer');
+    });
+  });
+
   describe('remap suggestions from static node analysis', () => {
     it('offers analyzed topics/services as remap sources (python)', async () => {
       const node: NodeInfo = {
@@ -142,6 +225,7 @@ describe('run node options wizard', () => {
 
       showQuickPick
         .mockResolvedValueOnce([])                     // no parameters
+        .mockResolvedValueOnce({ label: 'Use environment domain', isEnv: true }) // domain pick
         // remap action loop: add first
         .mockResolvedValueOnce({ label: 'Add remap', isAdd: true })
         // remap source: pick the subscription from the suggestion list
@@ -156,8 +240,8 @@ describe('run node options wizard', () => {
 
       expect(options).toBeDefined();
       expect(options!.remaps).toEqual([{ from: '/commands', to: '/new_commands' }]);
-      // The remap-source quick pick (3rd call) must contain the suggestions
-      const sourcePickOptions = showQuickPick.mock.calls[2][0] as Array<{ label: string }>;
+      // The remap-source quick pick (4th call) must contain the suggestions
+      const sourcePickOptions = showQuickPick.mock.calls[3][0] as Array<{ label: string }>;
       expect(sourcePickOptions.map(item => item.label)).toEqual(
         expect.arrayContaining(['/commands', 'Enter manually…'])
       );
@@ -185,6 +269,7 @@ describe('run node options wizard', () => {
     it('falls back to raw input when the node has no analyzed endpoints', async () => {
       showQuickPick
         .mockResolvedValueOnce([])                     // no parameters
+        .mockResolvedValueOnce({ label: 'Use environment domain', isEnv: true }) // domain pick
         .mockResolvedValueOnce({ label: 'Add remap', isAdd: true })
         .mockResolvedValueOnce({ label: 'Done', isDone: true });
 
@@ -196,8 +281,8 @@ describe('run node options wizard', () => {
       const options = await runNodeOptionsWizard(pythonNode); // no endpoints
 
       expect(options!.remaps).toEqual([{ from: '/manual_from', to: '/manual_to' }]);
-      // No suggestion quick pick was shown (only param pick + 2 action picks)
-      expect(showQuickPick).toHaveBeenCalledTimes(3);
+      // No suggestion quick pick was shown (param pick + domain + 2 action picks)
+      expect(showQuickPick).toHaveBeenCalledTimes(4);
     });
   });
 });
