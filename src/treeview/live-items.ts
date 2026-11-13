@@ -3,8 +3,37 @@ import { TopicEndpointInfo } from '../core/package-discovery';
 import { Ros2CliService, ServiceServerInfo } from '../core/ros2-cli-service';
 import { TreeItemBase } from './base-tree-item';
 
-export class LiveFolderItem extends TreeItemBase {
+/**
+ * A labeled group of nodes or topics for one ROS domain
+ * (e.g. "Nodes (domain 2)"). Members are regular LiveNodeItem/LiveTopicItem
+ * instances backed by domain-scoped CLI calls.
+ */
+export class LiveDomainGroupItem extends TreeItemBase {
   constructor(
+    label: string,
+    private readonly domainId: number,
+    private readonly groupKind: 'nodes' | 'topics'
+  ) {
+    super(label, vscode.TreeItemCollapsibleState.Collapsed);
+    this.iconPath = new vscode.ThemeIcon(groupKind === 'nodes' ? 'broadcast' : 'symbol-event');
+    this.contextValue = 'liveDomainGroup';
+    this.description = `ROS_DOMAIN_ID=${domainId}`;
+  }
+
+  getDomainId(): number {
+    return this.domainId;
+  }
+
+  getGroupKind(): 'nodes' | 'topics' {
+    return this.groupKind;
+  }
+
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
+export class LiveFolderItem extends TreeItemBase {  constructor(
     label: string,
     private readonly folderType: string
   ) {

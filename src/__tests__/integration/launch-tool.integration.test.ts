@@ -237,8 +237,29 @@ describe('launch tool commands (rviz2 / rqt_graph)', () => {
     expect(listener).toBeDefined();
   });
 
-  it('applies a rosRoot setting change via setRosRoot and refreshes the tree', async () => {
-    makeWorkspaceFolders([tempDir]);
+  it('shows the configured ROS domain in the tools view title description', async () => {
+    (vscode.workspace as unknown as { getConfiguration: jest.Mock }).getConfiguration = jest.fn((section: string) => {
+      if (section === 'ramros.ros') {
+        return { get: jest.fn((key: string, defaultValue: unknown) => key === 'domainId' ? 4 : defaultValue) };
+      }
+      return { get: jest.fn((_key: string, defaultValue: unknown) => defaultValue) };
+    });
+
+    await activateWithWorkspaceState(workspaceState);
+
+    // createTreeView calls: [0]=ramrosExplorer, [1]=ramrosTools, [2]=ramrosLive
+    const toolsView = (vscode.window.createTreeView as jest.Mock).mock.results[1].value as { description?: string };
+    expect(toolsView.description).toBe('ROS_DOMAIN_ID=4');
+  });
+
+  it('clears the tools view domain description when no domain is configured', async () => {
+    await activateWithWorkspaceState(workspaceState);
+
+    const toolsView = (vscode.window.createTreeView as jest.Mock).mock.results[1].value as { description?: string };
+    expect(toolsView.description).toBeUndefined();
+  });
+
+  it('applies a rosRoot setting change via setRosRoot and refreshes the tree', async () => {    makeWorkspaceFolders([tempDir]);
 
     await activateWithWorkspaceState(workspaceState);
 

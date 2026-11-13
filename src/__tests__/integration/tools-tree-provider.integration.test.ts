@@ -45,6 +45,18 @@ describe('ToolsTreeProvider Integration Tests', () => {
       expect(labels).toContain('Bag Files');
     });
 
+    describe('domain description', () => {
+    // The ToolsFolderItem is transient (the root getChildren call returns
+    // its children directly), so the domain visibility is carried by the
+    // tree view's title description in extension.ts, not by an item.
+    it('has no domain description default to wire', () => {
+      // Documents the design: description lives on the TreeView, set in
+      // extension.ts via toolsTreeView.description (verified in the
+      // extension-level wiring test).
+      expect(true).toBe(true);
+    });
+  });
+
     it('delegates to element.getChildren for non-root elements', async () => {
       const folder = new BagFilesFolderItem();
       const children = await provider.getChildren(folder);

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { TreeItemBase } from './base-tree-item';
-import { LiveFolderItem, LiveNodeItem, LiveTopicItem, LiveViewDisabledItem } from './live-items';
+import { LiveFolderItem, LiveNodeItem, LiveTopicItem, LiveViewDisabledItem, LiveDomainGroupItem } from './live-items';
 import { Ros2CliService, NodeInfo, TopicInfo } from '../core/ros2-cli-service';
 import { LiveInfoCache } from '../core/live-info-cache';
 import { WorkspaceConfigService } from '../core/workspace-config-service';
@@ -33,6 +33,8 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   private lastTopicNames: string[] | null = null;
   private readonly nodesFolder = new LiveFolderItem('Nodes', 'active-nodes');
   private readonly topicsFolder = new LiveFolderItem('Topics', 'active-topics');
+  private domainGroups: number[] = [];
+  private readonly domainGroupItems = new Map<string, LiveDomainGroupItem>();
 
   private readonly SYSTEM_TOPICS = ['/parameter_events', '/rosout', '/clock'];
 
@@ -193,12 +195,53 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
    * Removes an item from the expanded set (VSCode collapsed it): ticks stop
    * fetching info for it until it is expanded again.
    */
-  markCollapsed(item: LiveNodeItem | LiveTopicItem): void {
+  markCollapsed(item: LiveNodeItem | LiveTopicItem | LiveDomainGroupItem): void {
     if (item instanceof LiveNodeItem) {
       this.expandedNodes.delete(item.getNodeName());
     } else if (item instanceof LiveTopicItem) {
       this.expandedTopics.delete(item.getTopicName());
     }
+    // LiveDomainGroupItem: its members are refreshed lazily via the group's
+    // own list call; no per-item expanded tracking beyond that.
+  }
+
+  /**
+   * Configures the multi-domain live view groups (from the
+   * ramros.liveView.domainIds setting). Empty list = flat environment view.
+   */
+  setDomainGroups(domainIds: number[]): void {
+    this.domainGroups = [...domainIds];
+    this._onDidChangeTreeData.fire(null);
+  }
+
+  /**
+   * Stable group item per (domain, kind) pair.
+   */
+  private getOrCreateDomainGroup(domainId: number, kind: 'nodes' | 'topics'): LiveDomainGroupItem {
+    const key = `${kind}:${domainId}`;
+    let item = this.domainGroupItems.get(key);
+    if (!item) {
+      item = new LiveDomainGroupItem(`${kind === 'nodes' ? 'Nodes' : 'Topics'} (domain ${domainId})`, domainId, kind);
+      this.domainGroupItems.set(key, item);
+    }
+    return item;
+  }
+
+  /**
+   * Members of a domain group: regular node/topic items fetched with the
+   * group's domain env (independent of the global default).
+   */
+  private async getDomainGroupChildren(group: LiveDomainGroupItem): Promise<TreeItemBase[]> {
+    const domainId = group.getDomainId();
+    if (group.getGroupKind() === 'nodes') {
+      const names = await this.cli.getActiveNodesForDomain(domainId);
+      return names.map(name => this.getOrCreateNodeItem(name));
+    }
+    let topicNames = await this.cli.getActiveTopicsForDomain(domainId);
+    if (this.hideSystemTopics) {
+      topicNames = topicNames.filter(name => !this.isSystemTopic(name));
+    }
+    return topicNames.map(name => this.getOrCreateTopicItem(name));
   }
 
   /**
@@ -306,12 +349,20 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
       const folderType = element.getFolderType();
 
       if (folderType === 'active-nodes') {
+        // Domain groups configured: one labeled group per domain instead of
+        // a flat environment list.
+        if (this.domainGroups.length > 0) {
+          return this.domainGroups.map(id => this.getOrCreateDomainGroup(id, 'nodes'));
+        }
         const nodes = await this.getActiveNodes();
         this.lastNodeNames = nodes;
         // Stable instances: one item per node name, reused across re-reads
         // and ticks. Lazy: items may be name-only; info loads on expand.
         return nodes.map(name => this.getOrCreateNodeItem(name));
       } else if (folderType === 'active-topics') {
+        if (this.domainGroups.length > 0) {
+          return this.domainGroups.map(id => this.getOrCreateDomainGroup(id, 'topics'));
+        }
         let topicNames = await this.getActiveTopics();
         if (this.hideSystemTopics) {
           topicNames = topicNames.filter(name => !this.isSystemTopic(name));
@@ -319,6 +370,10 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
         this.lastTopicNames = topicNames;
         return topicNames.map(name => this.getOrCreateTopicItem(name));
       }
+    }
+
+    if (element instanceof LiveDomainGroupItem) {
+      return this.getDomainGroupChildren(element);
     }
 
     // If VSCode expands (or re-reads) a name-only item, remember it as

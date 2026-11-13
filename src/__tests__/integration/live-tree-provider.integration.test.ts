@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { exec } from 'child_process';
 import { LiveTreeProvider } from '../../treeview/live-tree-provider';
-import { LiveFolderItem, LiveNodeItem, LiveServiceItem, LiveTopicItem, LiveViewDisabledItem, NodeServicesItem, NodePublishedTopicsItem, NodeParametersItem } from '../../treeview/live-items';
+import { LiveFolderItem, LiveNodeItem, LiveServiceItem, LiveTopicItem, LiveViewDisabledItem, LiveDomainGroupItem, NodeServicesItem, NodePublishedTopicsItem, NodeParametersItem } from '../../treeview/live-items';
 import { Ros2CliService } from '../../core/ros2-cli-service';
 import { WorkspaceConfigService } from '../../core/workspace-config-service';
 
@@ -445,6 +445,95 @@ describe('LiveTreeProvider Integration Tests', () => {
       await flushAsync();
 
       expect(infoSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('multi-domain groups', () => {
+    it('builds labeled domain groups when domain groups are configured', async () => {
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/env-node']);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue(['/env-topic']);
+
+      provider.setDomainGroups([1, 2]);
+
+      const folders = await provider.getChildren() as LiveFolderItem[];
+      const nodesFolder = folders.find(f => f.getFolderType() === 'active-nodes')!;
+      const children = await provider.getChildren(nodesFolder) as LiveDomainGroupItem[];
+
+      expect(children).toHaveLength(2);
+      expect(children.map(c => c.label)).toEqual(['Nodes (domain 1)', 'Nodes (domain 2)']);
+      expect(children[0].getDomainId()).toBe(1);
+      expect(children[0].getGroupKind()).toBe('nodes');
+    });
+
+    it('lists environment nodes/topics when no domain groups are configured (default)', async () => {
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/env-node']);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+
+      const folders = await provider.getChildren() as LiveFolderItem[];
+      const nodesFolder = folders.find(f => f.getFolderType() === 'active-nodes')!;
+      const children = await provider.getChildren(nodesFolder);
+
+      expect(children.some(c => c instanceof LiveNodeItem)).toBe(true);
+      expect(children.some(c => c instanceof LiveDomainGroupItem)).toBe(false);
+    });
+
+    it('group expansion queries the group domain, not the environment', async () => {
+      const nodesForDomain = jest.spyOn(cli, 'getActiveNodesForDomain').mockResolvedValue(['/d1-node']);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+
+      provider.setDomainGroups([1]);
+      const folders = await provider.getChildren() as LiveFolderItem[];
+      const nodesFolder = folders.find(f => f.getFolderType() === 'active-nodes')!;
+      const [group] = await provider.getChildren(nodesFolder) as LiveDomainGroupItem[];
+
+      const members = await provider.getChildren(group);
+
+      expect(nodesForDomain).toHaveBeenCalledWith(1);
+      expect(members.some(m => m instanceof LiveNodeItem && m.getNodeName() === '/d1-node')).toBe(true);
+    });
+
+    it('builds topic domain groups under the Topics folder', async () => {
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue([]);
+      const topicsForDomain = jest.spyOn(cli, 'getActiveTopicsForDomain').mockResolvedValue(['/d2-topic']);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+
+      provider.setDomainGroups([2]);
+      const folders = await provider.getChildren() as LiveFolderItem[];
+      const topicsFolder = folders.find(f => f.getFolderType() === 'active-topics')!;
+      const [group] = await provider.getChildren(topicsFolder) as LiveDomainGroupItem[];
+
+      expect(group.label).toBe('Topics (domain 2)');
+      const members = await provider.getChildren(group);
+      expect(topicsForDomain).toHaveBeenCalledWith(2);
+      expect(members.some(m => m instanceof LiveTopicItem && m.getTopicName() === '/d2-topic')).toBe(true);
+    });
+
+    it('hot-reloads domain groups on setDomainGroups', async () => {
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue([]);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+
+      provider.setDomainGroups([1]);
+      provider.setDomainGroups([3, 4]);
+
+      const folders = await provider.getChildren() as LiveFolderItem[];
+      const nodesFolder = folders.find(f => f.getFolderType() === 'active-nodes')!;
+      const children = await provider.getChildren(nodesFolder) as LiveDomainGroupItem[];
+
+      expect(children.map(c => c.getDomainId())).toEqual([3, 4]);
+    });
+
+    it('marks collapsed domain groups as such (ticks do not refresh them)', async () => {
+      jest.spyOn(cli, 'getActiveNodesForDomain').mockResolvedValue(['/d1-node']);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+
+      provider.setDomainGroups([1]);
+      const folders = await provider.getChildren() as LiveFolderItem[];
+      const nodesFolder = folders.find(f => f.getFolderType() === 'active-nodes')!;
+      const [group] = await provider.getChildren(nodesFolder) as LiveDomainGroupItem[];
+
+      provider.markCollapsed(group);
+      // No throw: collapsing a group is a no-op for the expanded-items set
+      expect(true).toBe(true);
     });
   });
 

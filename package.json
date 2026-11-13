@@ -577,6 +577,13 @@
           "type": "number",
           "description": "ROS_DOMAIN_ID applied to all ros2 CLI calls and new terminals (unset = use the environment's domain)"
         },
+        "ramros.liveView.domainIds": {
+          "type": "array",
+          "items": { "type": "number" },
+          "default": [],
+          "description": "Additional ROS domains shown as labeled groups in the Live view (e.g. [1, 2] adds 'Nodes (domain 1)' and 'Nodes (domain 2)')",
+          "uniqueItems": true
+        },
         "ramros.liveView.refreshRate": {
           "type": "number",
           "default": 5,

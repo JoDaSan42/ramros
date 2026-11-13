@@ -529,6 +529,16 @@ export async function activate(context: vscode.ExtensionContext) {
       liveTreeProvider.markCollapsed(element);
     }
   });
+
+  // Domain visibility: a configured ROS_DOMAIN_ID must be visible (anti
+  // silent-confusion), carried by the tools view title description.
+  const applyDomainVisibility = (domainId: number | undefined) => {
+    toolsTreeView.description = domainId !== undefined ? `ROS_DOMAIN_ID=${domainId}` : undefined;
+    liveTreeProvider.setDomainGroups(
+      vscode.workspace.getConfiguration('ramros.liveView').get<number[]>('domainIds', [])
+    );
+  };
+  applyDomainVisibility(configuredDomainId);
   
    const ramrosConfigWatcher = vscode.workspace.createFileSystemWatcher('**/ramros.json');   ramrosConfigWatcher.onDidChange(() => {
      void toolsTreeProvider.refresh();
@@ -554,7 +564,13 @@ export async function activate(context: vscode.ExtensionContext) {
         const newDomain = vscode.workspace.getConfiguration('ramros.ros').get<number | undefined>('domainId', undefined);
         Ros2CliService.getInstance().setDomainId(newDomain);
         terminalManager.setDomainId(newDomain);
+        applyDomainVisibility(newDomain);
         void toolsTreeProvider.refresh();
+      }
+      if (e.affectsConfiguration('ramros.liveView.domainIds')) {
+        applyDomainVisibility(
+          vscode.workspace.getConfiguration('ramros.ros').get<number | undefined>('domainId', undefined)
+        );
       }
     })
   );
