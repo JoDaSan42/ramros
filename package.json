@@ -89,6 +89,10 @@
         "icon": "$(play)"
       },
       {
+        "command": "ramros.runNodeWithOptions",
+        "title": "Run Node with Options…"
+      },
+      {
         "command": "ramros.debugNode",
         "title": "Debug Node",
         "icon": "$(debug)"
@@ -339,6 +343,10 @@
         },
         {
           "command": "ramros.runNode",
+          "when": "view == ramrosExplorer && viewItem == node"
+        },
+        {
+          "command": "ramros.runNodeWithOptions",
           "when": "view == ramrosExplorer && viewItem == node"
         },
         {

@@ -16,6 +16,8 @@ import { LiveParameterItem, NodeParametersItem } from './treeview/live-items';
 import { TerminalManager } from './executor/terminal-manager';
 import { BagSessionService } from './executor/bag-session-service';
 import { PackageCreator } from './wizard/package-creator';
+import { runNodeOptionsWizard } from './wizard/run-node-options-wizard';
+import { RunArgsBuilder } from './core/run-args-builder';
 import { NodeInfo, LaunchFileInfo, PackageDiscoveryService, PackageInfo, InterfaceInfo } from './core/package-discovery';
 import { TreeItemBase } from './treeview/base-tree-item';
 import { BagPlayItem, BagPlayControlItem, BagLoopItem, BagRecordItem, BagFilesFolderItem, BagFileItem, ExternalBagFolderItem, BagEntriesProvider } from './treeview/bag-items';
@@ -62,6 +64,40 @@ async function pickWorkspace(): Promise<WorkspaceInfo | undefined> {
 async function resolveWorkspaceForPath(fsPath: string): Promise<WorkspaceInfo | undefined> {
   const workspaces = treeProvider.getWorkspaces();
   return findWorkspaceForPath(workspaces, fsPath) ?? await pickWorkspace();
+}
+
+/**
+ * Runs the node options wizard and starts the node with the collected
+ * options in a sourced terminal. Aborted wizard -> nothing starts.
+ */
+async function startNodeWithOptions(nodeToRun: NodeInfo): Promise<void> {
+  const options = await runNodeOptionsWizard(nodeToRun);
+  if (!options) {
+    return; // aborted: start nothing
+  }
+
+  const selectedWorkspace = await resolveWorkspaceForPath(nodeToRun.path);
+  if (!selectedWorkspace) {
+    return;
+  }
+
+  const setupBashPath = path.join(selectedWorkspace.rootPath.fsPath, 'install', 'setup.bash');
+  const args = RunArgsBuilder.build(options);
+
+  let runCommand: string;
+  if (fs.existsSync(setupBashPath)) {
+    runCommand = `source "${setupBashPath}" && ros2 run ${nodeToRun.packageName} ${nodeToRun.name}`;
+  } else {
+    runCommand = `ros2 run ${nodeToRun.packageName} ${nodeToRun.name}`;
+  }
+  if (args) {
+    runCommand += ` ${args}`;
+  }
+
+  const terminalTitle = options.nodeName
+    ? `Node: ${options.nodeName} (${nodeToRun.name})`
+    : `Node: ${nodeToRun.name}`;
+  await terminalManager.executeInNewTerminal(runCommand, selectedWorkspace, terminalTitle);
 }
 
 function resolveTopicName(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {
@@ -661,31 +697,44 @@ export async function activate(context: vscode.ExtensionContext) {
         void vscode.window.showWarningMessage('No ROS2 workspaces found');
         return;
       }
-      
+
       let nodeToRun: NodeInfo | undefined;
-      
+
       if (treeItem && 'getNodeInfo' in treeItem && typeof treeItem.getNodeInfo === 'function') {
         nodeToRun = treeItem.getNodeInfo();
       } else {
         const allNodes = workspaces
           .flatMap(w => w.packages || [])
           .flatMap(p => p.nodes);
-        
+
         if (allNodes.length === 0) {
           void vscode.window.showWarningMessage('No nodes found in workspace');
           return;
         }
-        
+
         const nodeNames = allNodes.map(n => `${n.name} (${n.path})`);
         const selected = await vscode.window.showQuickPick(nodeNames, {
           placeHolder: 'Select a node to run'
         });
-        
+
         if (!selected) return;
-        
+
         nodeToRun = allNodes.find(n => `${n.name} (${n.path})` === selected);
+
+        if (!nodeToRun) return;
+
+        // Palette invocation: offer the options wizard; the tree play button
+        // above stays a zero-extra-keystroke direct start.
+        const startMode = await vscode.window.showQuickPick(['Start', 'Start with options…'], {
+          placeHolder: `Run ${nodeToRun.name}`
+        });
+        if (!startMode) return;
+        if (startMode === 'Start with options…') {
+          await startNodeWithOptions(nodeToRun);
+          return;
+        }
       }
-      
+
       if (!nodeToRun) return;
 
       const selectedWorkspace = await resolveWorkspaceForPath(nodeToRun.path);
@@ -701,6 +750,37 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       await terminalManager.executeInNewTerminal(runCommand, selectedWorkspace, `Node: ${nodeToRun.name}`);
+    }),
+
+    vscode.commands.registerCommand('ramros.runNodeWithOptions', async (treeItem?: TreeItemBase) => {
+      const workspaces = treeProvider.getWorkspaces();
+      if (workspaces.length === 0) {
+        void vscode.window.showWarningMessage('No ROS2 workspaces found');
+        return;
+      }
+
+      let nodeToRun: NodeInfo | undefined;
+
+      if (treeItem && 'getNodeInfo' in treeItem && typeof treeItem.getNodeInfo === 'function') {
+        nodeToRun = treeItem.getNodeInfo();
+      } else {
+        const allNodes = workspaces
+          .flatMap(w => w.packages || [])
+          .flatMap(p => p.nodes);
+        if (allNodes.length === 0) {
+          void vscode.window.showWarningMessage('No nodes found in workspace');
+          return;
+        }
+        const nodeNames = allNodes.map(n => `${n.name} (${n.path})`);
+        const selected = await vscode.window.showQuickPick(nodeNames, {
+          placeHolder: 'Select a node to run with options'
+        });
+        if (!selected) return;
+        nodeToRun = allNodes.find(n => `${n.name} (${n.path})` === selected);
+      }
+
+      if (!nodeToRun) return;
+      await startNodeWithOptions(nodeToRun);
     }),
     
     vscode.commands.registerCommand('ramros.debugNode', async (treeItem?: TreeItemBase) => {
