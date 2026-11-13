@@ -1,4 +1,4 @@
-import { analyzeWorkspace, AnalyzerPackageInput } from '../../core/workspace-analyzer';
+import { analyzeWorkspace, renderAnalysisReport, AnalyzerPackageInput } from '../../core/workspace-analyzer';
 
 const ROS_PACKAGES = new Set(['rclpy', 'rclcpp', 'std_msgs', 'geometry_msgs']);
 
@@ -187,5 +187,202 @@ describe('workspace analyzer — dependency usage', () => {
     );
 
     expect(report.findings[0].line).toBe(3);
+  });
+});
+
+describe('workspace analyzer — entry points, rosidl and unused deps', () => {
+  it('errors on a node file without a console_scripts entry point', () => {
+    const report = analyzeWorkspace(
+      [
+        pythonPackage({
+          declaredDependencies: ['rclpy'],
+          pythonFiles: [
+            { relativePath: 'demo_pkg/demo.py', content: 'def main():\n    pass\n' },
+            { relativePath: 'demo_pkg/copied_node.py', content: 'import rclpy\nrclpy.init()\n' }
+          ],
+          setupPyContent: "entry_points={'console_scripts': ['demo = demo_pkg.demo:main']}"
+        })
+      ],
+      ROS_PACKAGES
+    );
+
+    expect(report.findings).toHaveLength(1);
+    const finding = report.findings[0];
+    expect(finding.severity).toBe('error');
+    expect(finding.kind).toBe('unregistered-node');
+    expect(finding.file).toBe('demo_pkg/copied_node.py');
+  });
+
+  it('errors on an entry point whose module does not exist', () => {
+    const report = analyzeWorkspace(
+      [
+        pythonPackage({
+          declaredDependencies: [],
+          pythonFiles: [
+            { relativePath: 'demo_pkg/other.py', content: 'def main():\n    pass\n' }
+          ],
+          setupPyContent: "entry_points={'console_scripts': ['demo_node = demo_pkg.demo:main']}"
+        })
+      ],
+      ROS_PACKAGES
+    );
+
+    expect(report.findings).toHaveLength(1);
+    expect(report.findings[0].severity).toBe('error');
+    expect(report.findings[0].kind).toBe('missing-entry-point-module');
+  });
+
+  it('accepts entry point modules as files or package directories', () => {
+    const asFile = analyzeWorkspace(
+      [
+        pythonPackage({
+          declaredDependencies: [],
+          pythonFiles: [{ relativePath: 'demo_pkg/demo.py', content: 'def main():\n    pass\n' }],
+          setupPyContent: "entry_points={'console_scripts': ['demo = demo_pkg.demo:main']}"
+        })
+      ],
+      ROS_PACKAGES
+    );
+    const asDirectory = analyzeWorkspace(
+      [
+        pythonPackage({
+          declaredDependencies: [],
+          pythonFiles: [{ relativePath: 'demo_pkg/demo/__init__.py', content: '' }],
+          setupPyContent: "entry_points={'console_scripts': ['demo = demo_pkg.demo:main']}"
+        })
+      ],
+      ROS_PACKAGES
+    );
+
+    expect(asFile.findings).toEqual([]);
+    expect(asDirectory.findings).toEqual([]);
+  });
+
+  it('errors on interface files missing from rosidl_generate_interfaces', () => {
+    const report = analyzeWorkspace(
+      [
+        pythonPackage({
+          name: 'iface_pkg',
+          buildType: 'ament_cmake',
+          declaredDependencies: [],
+          cppFiles: [],
+          interfaceFiles: ['msg/MyMessage.msg', 'msg/Other.msg'],
+          cmakeContent: 'rosidl_generate_interfaces(${PROJECT_NAME}\n  "msg/Other.msg"\n)\n'
+        })
+      ],
+      ROS_PACKAGES
+    );
+
+    expect(report.findings).toHaveLength(1);
+    const finding = report.findings[0];
+    expect(finding.severity).toBe('error');
+    expect(finding.kind).toBe('unregistered-interface');
+    expect(finding.file).toBe('msg/MyMessage.msg');
+  });
+
+  it('skips the rosidl check for packages without interface files', () => {
+    const report = analyzeWorkspace(
+      [
+        pythonPackage({
+          name: 'iface_pkg',
+          buildType: 'ament_cmake',
+          declaredDependencies: [],
+          cppFiles: [],
+          interfaceFiles: [],
+          cmakeContent: 'ament_target_dependencies(node rclcpp)\n'
+        })
+      ],
+      ROS_PACKAGES
+    );
+
+    expect(report.findings).toEqual([]);
+  });
+
+  it('does not flag test-only dependencies as unused', () => {
+    const report = analyzeWorkspace(
+      [
+        pythonPackage({
+          declaredDependencies: ['rclpy', 'std_msgs'],
+          declaredDependencyKinds: { rclpy: ['exec'], std_msgs: ['test'] },
+          pythonFiles: [
+            { relativePath: 'demo_pkg/node.py', content: 'import rclpy\n' }
+          ]
+        })
+      ],
+      ROS_PACKAGES
+    );
+
+    // rclpy is used; std_msgs is test-only so it is not flagged as unused.
+    expect(report.findings).toEqual([]);
+  });
+
+  it('reports a truly unused dependency as info', () => {
+    const report = analyzeWorkspace(
+      [
+        pythonPackage({
+          declaredDependencies: ['rclpy', 'geometry_msgs'],
+          declaredDependencyKinds: { rclpy: ['exec'], geometry_msgs: ['exec'] },
+          pythonFiles: [
+            { relativePath: 'demo_pkg/node.py', content: 'import rclpy\n' }
+          ]
+        })
+      ],
+      ROS_PACKAGES
+    );
+
+    expect(report.findings).toHaveLength(1);
+    const finding = report.findings[0];
+    expect(finding.severity).toBe('info');
+    expect(finding.kind).toBe('unused-dependency');
+    expect(finding.dependency).toBe('geometry_msgs');
+  });
+});
+
+describe('workspace analyzer — report rendering', () => {
+  it('renders a hint line when there are no findings', () => {
+    const report = analyzeWorkspace([], ROS_PACKAGES);
+
+    const markdown = renderAnalysisReport(report);
+    expect(markdown).toContain('No completeness issues found.');
+  });
+
+  it('groups findings by package with severity tags and file locations', () => {
+    const report = analyzeWorkspace(
+      [
+        pythonPackage({
+          declaredDependencies: [],
+          pythonFiles: [
+            { relativePath: 'demo_pkg/node.py', content: 'from geometry_msgs.msg import Pose\n' }
+          ]
+        })
+      ],
+      ROS_PACKAGES
+    );
+
+    const markdown = renderAnalysisReport(report);
+    expect(markdown).toContain('## demo_pkg');
+    expect(markdown).toContain('[warning]');
+    expect(markdown).toContain('missing-dependency');
+    expect(markdown).toContain('demo_pkg/node.py:1');
+  });
+
+  it('lists unknown imports in a skipped section without findings', () => {
+    const report = analyzeWorkspace(
+      [
+        pythonPackage({
+          declaredDependencies: [],
+          pythonFiles: [
+            { relativePath: 'demo_pkg/node.py', content: 'import numpy\nimport os\n' }
+          ]
+        })
+      ],
+      ROS_PACKAGES
+    );
+
+    expect(report.findings).toEqual([]);
+    const markdown = renderAnalysisReport(report);
+    expect(markdown).toContain('Unknown imports (skipped)');
+    expect(markdown).toContain('numpy');
+    expect(markdown).toContain('os');
   });
 });

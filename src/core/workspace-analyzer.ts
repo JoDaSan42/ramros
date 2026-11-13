@@ -187,6 +187,52 @@ export function analyzeWorkspace(
   return { findings, unknownImports };
 }
 
+const SEVERITY_ORDER: Record<AnalysisSeverity, number> = { error: 0, warning: 1, info: 2 };
+
+/**
+ * Renders the analysis report as a markdown document (read-only doc pattern
+ * shared with `ros2 doctor` and interface definitions).
+ */
+export function renderAnalysisReport(report: AnalysisReport): string {
+  const lines: string[] = ['# Workspace Completeness Analysis', ''];
+
+  if (report.findings.length === 0) {
+    lines.push('No completeness issues found.', '');
+  } else {
+    const byPackage = new Map<string, AnalysisFinding[]>();
+    for (const finding of [...report.findings].sort((a, b) => {
+      const severity = SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
+      if (severity !== 0) {
+        return severity;
+      }
+      return a.packageName.localeCompare(b.packageName);
+    })) {
+      const bucket = byPackage.get(finding.packageName) ?? [];
+      bucket.push(finding);
+      byPackage.set(finding.packageName, bucket);
+    }
+
+    for (const [packageName, packageFindings] of byPackage) {
+      lines.push(`## ${packageName}`, '');
+      for (const finding of packageFindings) {
+        const location = finding.file !== undefined ? ` (${finding.file}${finding.line !== undefined ? `:${finding.line}` : ''})` : '';
+        lines.push(`- **[${finding.severity}]** ${finding.kind}${location}: ${finding.message}`);
+      }
+      lines.push('');
+    }
+  }
+
+  if (report.unknownImports.length > 0) {
+    lines.push('Unknown imports (skipped):', '');
+    for (const name of report.unknownImports) {
+      lines.push(`- ${name}`);
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
 function collectPythonUsages(pkg: AnalyzerPackageInput): UsedImport[] {
   return collectPythonImports(pkg.pythonFiles);
 }
