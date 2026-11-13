@@ -17,13 +17,14 @@
     "Programming Languages"
   ],
   "main": "./dist/extension.js",
+  "icon": "img/RAMROS_logo_vsix.png",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
         {
           "id": "ramros-container",
           "title": "RAMROS",
-          "icon": "img/RAMROS_Logo.png"
+          "icon": "img/RAMROS_logo_sidebar.png"
         }
       ]
     },
