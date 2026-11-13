@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { runNodeOptionsWizard } from '../../wizard/run-node-options-wizard';
+import { runNodeOptionsWizard, buildRemapSuggestions } from '../../wizard/run-node-options-wizard';
 import { NodeInfo } from '../../core/package-discovery';
 
 describe('run node options wizard', () => {
@@ -130,5 +130,74 @@ describe('run node options wizard', () => {
     const options = await runNodeOptionsWizard(pythonNode);
 
     expect(options).toBeUndefined();
+  });
+
+  describe('remap suggestions from static node analysis', () => {
+    it('offers analyzed topics/services as remap sources (python)', async () => {
+      const node: NodeInfo = {
+        ...pythonNode,
+        publishers: [{ topicName: '/chatter', messageType: 'std_msgs/msg/String' }],
+        subscriptions: [{ topicName: '/commands', messageType: 'std_msgs/msg/Int32' }],
+      };
+
+      showQuickPick
+        .mockResolvedValueOnce([])                     // no parameters
+        // remap action loop: add first
+        .mockResolvedValueOnce({ label: 'Add remap', isAdd: true })
+        // remap source: pick the subscription from the suggestion list
+        .mockResolvedValueOnce({ label: '/commands', description: 'subscription • std_msgs/msg/Int32' })
+        .mockResolvedValueOnce({ label: 'Done', isDone: true });
+
+      showInputBox
+        .mockResolvedValueOnce('talker_node')          // node name unchanged
+        .mockResolvedValueOnce('/new_commands');       // remap target
+
+      const options = await runNodeOptionsWizard(node);
+
+      expect(options).toBeDefined();
+      expect(options!.remaps).toEqual([{ from: '/commands', to: '/new_commands' }]);
+      // The remap-source quick pick (3rd call) must contain the suggestions
+      const sourcePickOptions = showQuickPick.mock.calls[2][0] as Array<{ label: string }>;
+      expect(sourcePickOptions.map(item => item.label)).toEqual(
+        expect.arrayContaining(['/commands', 'Enter manually…'])
+      );
+    });
+
+    it('offers analyzed topics/services as remap sources (cpp)', async () => {
+      const cppNode: NodeInfo = {
+        name: 'talker_node',
+        path: '/ws/src/my_pkg/my_pkg/talker.cpp',
+        packageName: 'my_pkg',
+        language: 'cpp',
+        isExecutable: true,
+        publishers: [{ topicName: '/chatter', messageType: 'std_msgs/msg/String' }],
+        serviceClients: [{ name: '/add_two_ints', serviceType: 'example_interfaces/srv/AddTwoInts' }],
+        actionServers: [{ name: '/fibonacci', actionType: 'example_interfaces/action/Fibonacci' }],
+      };
+
+      const suggestions = buildRemapSuggestions(cppNode);
+      expect(suggestions.map(s => s.label)).toEqual(['/chatter', '/add_two_ints', '/fibonacci']);
+      expect(suggestions[0].description).toBe('publisher • std_msgs/msg/String');
+      expect(suggestions[1].description).toContain('service client');
+      expect(suggestions[2].description).toContain('action server');
+    });
+
+    it('falls back to raw input when the node has no analyzed endpoints', async () => {
+      showQuickPick
+        .mockResolvedValueOnce([])                     // no parameters
+        .mockResolvedValueOnce({ label: 'Add remap', isAdd: true })
+        .mockResolvedValueOnce({ label: 'Done', isDone: true });
+
+      showInputBox
+        .mockResolvedValueOnce('talker_node')
+        .mockResolvedValueOnce('/manual_from')         // raw source input
+        .mockResolvedValueOnce('/manual_to');
+
+      const options = await runNodeOptionsWizard(pythonNode); // no endpoints
+
+      expect(options!.remaps).toEqual([{ from: '/manual_from', to: '/manual_to' }]);
+      // No suggestion quick pick was shown (only param pick + 2 action picks)
+      expect(showQuickPick).toHaveBeenCalledTimes(3);
+    });
   });
 });

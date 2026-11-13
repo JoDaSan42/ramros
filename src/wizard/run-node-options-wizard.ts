@@ -125,8 +125,54 @@ export async function runNodeOptionsWizard(node: NodeInfo): Promise<RunNodeOptio
   const renamed = nodeName !== node.name ? nodeName : undefined;
 
   // --- Remaps ---
+  // Offer the node's statically analyzed endpoints as remap sources so the
+  // user does not have to remember exact original names. Works for Python
+  // and C++ nodes alike (both run static source analysis).
+  const remaps = await collectRemaps(node);
+  if (remaps === undefined) {
+    return undefined;
+  }
+
+  return { parameters, remaps, nodeName: renamed };
+}
+
+/**
+ * Builds remap source suggestions from statically analyzed node endpoints:
+ * published/subscribed topics first, then service and action names. Each
+ * suggestion is labeled with its kind and message/service type.
+ */
+export function buildRemapSuggestions(node: NodeInfo): Array<{ label: string; description?: string; name: string }> {
+  const suggestions: Array<{ label: string; description?: string; name: string }> = [];
+
+  for (const pub of node.publishers ?? []) {
+    suggestions.push({ label: pub.topicName, description: `publisher • ${pub.messageType}`, name: pub.topicName });
+  }
+  for (const sub of node.subscriptions ?? []) {
+    suggestions.push({ label: sub.topicName, description: `subscription • ${sub.messageType}`, name: sub.topicName });
+  }
+  for (const srv of node.serviceServers ?? []) {
+    suggestions.push({ label: srv.name, description: `service server • ${srv.serviceType}`, name: srv.name });
+  }
+  for (const client of node.serviceClients ?? []) {
+    suggestions.push({ label: client.name, description: `service client • ${client.serviceType}`, name: client.name });
+  }
+  for (const action of node.actionServers ?? []) {
+    suggestions.push({ label: action.name, description: `action server • ${action.actionType}`, name: action.name });
+  }
+  for (const action of node.actionClients ?? []) {
+    suggestions.push({ label: action.name, description: `action client • ${action.actionType}`, name: action.name });
+  }
+
+  return suggestions;
+}
+
+async function collectRemaps(node: NodeInfo): Promise<Array<{ from: string; to: string }> | undefined> {
   const remaps: RunRemap[] = [];
+  const suggestions = buildRemapSuggestions(node);
+
   for (;;) {
+    // With known endpoints: pick the source from a list, plus a free-entry row.
+    // Without: plain add/done loop as before.
     const action = await vscode.window.showQuickPick<RemapPickItem>(
       [
         { label: 'Add remap', isAdd: true },
@@ -138,13 +184,9 @@ export async function runNodeOptionsWizard(node: NodeInfo): Promise<RunNodeOptio
       return undefined;
     }
     if (action.isDone) {
-      break;
+      return remaps;
     }
-    const from = await vscode.window.showInputBox({
-      prompt: 'Remap source (from)',
-      placeHolder: '/original/topic_or_name',
-      validateInput: validateRemapName,
-    });
+    const from = await promptRemapSource(suggestions);
     if (from === undefined) {
       return undefined;
     }
@@ -158,8 +200,47 @@ export async function runNodeOptionsWizard(node: NodeInfo): Promise<RunNodeOptio
     }
     remaps.push({ from: from.trim(), to: to.trim() });
   }
+}
 
-  return { parameters, remaps, nodeName: renamed };
+/**
+ * Remap source prompt: quick pick from the node's analyzed endpoints when
+ * available (with a free-entry row), raw input box otherwise.
+ */
+async function promptRemapSource(
+  suggestions: Array<{ label: string; description?: string; name: string }>
+): Promise<string | undefined> {
+  if (suggestions.length === 0) {
+    return vscode.window.showInputBox({
+      prompt: 'Remap source (from)',
+      placeHolder: '/original/topic_or_name',
+      validateInput: validateRemapName,
+    });
+  }
+
+  interface SourcePickItem {
+    label: string;
+    description?: string;
+    isFreeEntry?: boolean;
+  }
+
+  const picked = await vscode.window.showQuickPick<SourcePickItem>(
+    [
+      ...suggestions.map(s => ({ label: s.label, description: s.description })),
+      { label: 'Enter manually…', isFreeEntry: true },
+    ],
+    { placeHolder: 'Remap source — pick an endpoint of this node or enter manually' }
+  );
+  if (picked === undefined) {
+    return undefined;
+  }
+  if (!picked.isFreeEntry) {
+    return picked.label;
+  }
+  return vscode.window.showInputBox({
+    prompt: 'Remap source (from)',
+    placeHolder: '/original/topic_or_name',
+    validateInput: validateRemapName,
+  });
 }
 
 function validateRemapName(value: string): string | undefined {
