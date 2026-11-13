@@ -1,8 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { RosEnvironmentService } from './core/ros-environment';
 import { WorkspaceDetector, WorkspaceInfo, findWorkspaceForPath } from './core/workspace-detector';
 import { getWorkspaceBagPaths, scanBagFolder } from './core/bag-discovery';
@@ -29,7 +27,8 @@ import { Ros2CliService, validateParameterValue } from './core/ros2-cli-service'
 import { createInterfaceLoader } from './core/interface-loader';
 import { InterfaceField, InterfaceStructure } from './core/interface-parser';
 import { valuesToYaml, valuesToJson, fieldDefaults } from './core/message-serializer';
-import { showMessageInputPanel, MessageInputCommand, __resetMessageInputPanelForTests } from './webview/message-input-panel';
+import { showMessageInputPanel, MessageInputCommand } from './webview/message-input-panel';
+import { analyzeWorkspace, renderAnalysisReport, AnalyzerPackageInput } from './core/workspace-analyzer';
 
 let cacheManager: CacheManager;
 let ramrosDocProvider: RamrosDocProvider;
@@ -40,8 +39,6 @@ let liveTreeProvider: LiveTreeProvider;
 let packageCreator: PackageCreator;
 let bagSession: BagSessionService;
 let workspaceConfigService: WorkspaceConfigService | undefined;
-
-const execAsync = promisify(exec);
 
 async function pickWorkspace(): Promise<WorkspaceInfo | undefined> {
   const workspaces = treeProvider.getWorkspaces();
@@ -431,6 +428,133 @@ export async function runHealthCheck(provider: RamrosDocProvider): Promise<void>
     return;
   }
   await showInReadonlyDoc(provider, 'ros2-doctor', combinedOutput);
+}
+
+/**
+ * Collects the file inputs for the workspace completeness analyzer: python
+ * files under the package module folder, C++ sources/headers under src/ and
+ * include/, interface files (msg/srv/action), setup.py and CMakeLists.txt.
+ * The analyzer itself stays pure — it only receives file contents.
+ */
+export function collectAnalyzerPackageInput(
+  pkg: PackageInfo,
+  readFileSync: (filePath: string) => string
+): AnalyzerPackageInput {
+  const pkgRoot = pkg.path;
+  const pythonFiles: Array<{ relativePath: string; content: string }> = [];
+  const cppFiles: Array<{ relativePath: string; content: string }> = [];
+  const interfaceFiles: string[] = [];
+  let setupPyContent: string | undefined;
+  let cmakeContent: string | undefined;
+
+  const moduleRoot = path.join(pkgRoot, pkg.name);
+
+  const walk = (dir: string): void => {
+    if (!fs.existsSync(dir)) {
+      return;
+    }
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = path.join(dir, entry.name);
+      const relativePath = path.relative(pkgRoot, fullPath).split(path.sep).join('/');
+      if (entry.isDirectory()) {
+        // Skip build artifacts, logs and hidden directories.
+        if (entry.name.startsWith('.') || entry.name === 'install' || entry.name === 'build' || entry.name === 'log') {
+          continue;
+        }
+        walk(fullPath);
+        continue;
+      }
+      if (relativePath === 'setup.py') {
+        try {
+          setupPyContent = readFileSync(fullPath);
+        } catch {
+          setupPyContent = undefined;
+        }
+        continue;
+      }
+      if (relativePath === 'CMakeLists.txt') {
+        try {
+          cmakeContent = readFileSync(fullPath);
+        } catch {
+          cmakeContent = undefined;
+        }
+        continue;
+      }
+      const ext = path.extname(entry.name);
+      if (ext === '.py' && fullPath.startsWith(moduleRoot + path.sep)) {
+        try {
+          pythonFiles.push({ relativePath, content: readFileSync(fullPath) });
+        } catch {
+          // Unreadable file: skip silently.
+        }
+      } else if (['.cpp', '.hpp', '.h', '.cc', '.hh'].includes(ext)
+        && (relativePath.startsWith('src/') || relativePath.startsWith('include/'))) {
+        try {
+          cppFiles.push({ relativePath, content: readFileSync(fullPath) });
+        } catch {
+          // Unreadable file: skip silently.
+        }
+      } else {
+        const segments = relativePath.split('/');
+        if (segments.length === 2 && ['msg', 'srv', 'action'].includes(segments[0])) {
+          interfaceFiles.push(relativePath);
+        }
+      }
+    }
+  };
+
+  walk(pkgRoot);
+  return {
+    name: pkg.name,
+    buildType: pkg.buildType,
+    path: pkgRoot,
+    declaredDependencies: [...new Set(pkg.dependencies.map(dep => dep.name))],
+    declaredDependencyKinds: pkg.dependencies.reduce<Record<string, Array<'build' | 'exec' | 'test'>>>((acc, dep) => {
+      (acc[dep.name] ??= []).push(dep.type);
+      return acc;
+    }, {}),
+    pythonFiles,
+    cppFiles,
+    setupPyContent,
+    cmakeContent,
+    interfaceFiles
+  };
+}
+
+/**
+ * Fetches the set of known ROS package names (`ros2 pkg list`). A failed
+ * call (no sourced environment, no ROS installation) yields an empty set —
+ * mappings then fall to "unknown" instead of false-positive warnings.
+ */
+export async function fetchKnownRosPackages(cli: Ros2CliService): Promise<Set<string>> {
+  const result = await cli.executeRaw('ros2 pkg list', { timeout: 30000 });
+  if (!result.ok) {
+    return new Set();
+  }
+  return new Set(
+    result.output
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+  );
+}
+
+/**
+ * Runs the completeness analysis for one workspace and shows the markdown
+ * report as a read-only document (ros2 doctor / interface definition
+ * pattern).
+ */
+export async function analyzeWorkspaceCompleteness(
+  workspace: WorkspaceInfo,
+  provider: RamrosDocProvider,
+  cli: Ros2CliService
+): Promise<void> {
+  const packages = workspace.packages ?? [];
+  const knownRosPackages = await fetchKnownRosPackages(cli);
+  const inputs = packages.map(pkg => collectAnalyzerPackageInput(pkg, filePath => fs.readFileSync(filePath, 'utf8')));
+  const report = analyzeWorkspace(inputs, knownRosPackages);
+  const markdown = renderAnalysisReport(report);
+  await showInReadonlyDoc(provider, `workspace-analysis/${workspace.name}`, markdown);
 }
 
 export function resolveWorkspaceForLaunch(
@@ -864,6 +988,37 @@ export async function activate(context: vscode.ExtensionContext) {
       setTimeout(() => {
         void treeProvider.refresh();
       }, 5000);
+    }),
+
+    vscode.commands.registerCommand('ramros.analyzeWorkspace', async (item?: WorkspaceInfo) => {
+      const workspaces = treeProvider.getWorkspaces();
+
+      if (workspaces.length === 0) {
+        void vscode.window.showWarningMessage('No ROS2 workspaces found');
+        return;
+      }
+
+      let selectedWorkspace: WorkspaceInfo | undefined;
+
+      if (item) {
+        // Tree item invocation: the item may be the workspace tree node or a
+        // plain stub carrying the workspace root path.
+        const itemId = typeof item.id === 'string' ? item.id : undefined;
+        selectedWorkspace = workspaces.find(w => w.id === item.id)
+          ?? findWorkspaceForPath(workspaces, typeof itemId === 'string' ? itemId : item.rootPath?.fsPath ?? '');
+      } else {
+        selectedWorkspace = await pickWorkspace();
+      }
+
+      if (!selectedWorkspace) {
+        return;
+      }
+
+      try {
+        await analyzeWorkspaceCompleteness(selectedWorkspace, ramrosDocProvider, Ros2CliService.getInstance());
+      } catch (error) {
+        void vscode.window.showErrorMessage(`Workspace analysis failed: ${(error as Error).message}`);
+      }
     }),
     
     vscode.commands.registerCommand('ramros.createPackage', async (options?: Record<string, unknown>) => {
@@ -1522,9 +1677,6 @@ export async function activate(context: vscode.ExtensionContext) {
         try {
           const structure = await loader.loadStructure(serviceType);
           const { buildFormHtml } = await import('./core/form-html');
-          const setupBashPath = workspace.installPath ? path.join(workspace.installPath.fsPath, 'setup.bash') : undefined;
-          const hasSetup = setupBashPath !== undefined && fs.existsSync(setupBashPath);
-          const sourcePrefix = hasSetup ? `. "${setupBashPath}" && ` : '';
           const html = buildFormHtml(structure, {
             nonce: createNonce(),
             cspSource: '',

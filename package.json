@@ -74,6 +74,11 @@
         "icon": "$(wrench)"
       },
       {
+        "command": "ramros.analyzeWorkspace",
+        "title": "Analyze Workspace Completeness",
+        "icon": "$(checklist)"
+      },
+      {
         "command": "ramros.createPackage",
         "title": "Create New Package",
         "icon": "$(new-file)"
@@ -317,6 +322,10 @@
         },
         {
           "command": "ramros.buildWorkspace",
+          "when": "view == ramrosExplorer && viewItem == workspaceRoot"
+        },
+        {
+          "command": "ramros.analyzeWorkspace",
           "when": "view == ramrosExplorer && viewItem == workspaceRoot"
         },
         {
