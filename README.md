@@ -100,8 +100,11 @@ Real-time monitoring of ROS2 system activity.
 - Publisher and subscriber count display
 - Enable/disable the live view via view-title toggle (persisted as `liveView.enabled` in `ramros.json`)
 - Publish messages to topics (`ros2 topic pub`, once or at a rate); if the topic type cannot be discovered (e.g. no node running), you can enter it manually
+- **Structured input forms for publishing**: the message structure is fetched from the workspace/ROS installation and rendered as a form (nested messages as collapsible sections, arrays as per-element inputs, neutral defaults prefilled); the generated JSON is shown before sending, raw JSON input stays available as fallback
 - Call services with JSON input (`ros2 service call`); response shown in a read-only document
+- **Structured input forms for service calls**: same form support as publishing, generated from the service request definition
 - View runtime node parameters under live nodes and set them via input box (values are validated against the parameter type reported by `ros2 param get`)
+- **ROS_DOMAIN_ID support**: workspace-wide default via `ramros.ros.domainId`, multi-domain grouping in the live view, per-start domain override for nodes and tools
 - Run a ROS2 health check (`ros2 doctor`) from the view title bar; report shown in a read-only document
 
 ### 📦 Workspace Section
@@ -140,6 +143,7 @@ Supports both C++ (`create_service`, `create_client`, `rclcpp_action::create_ser
 - Click to open interface file in editor
 - Support for `.msg`, `.srv`, and `.action` files
 - "Show Definition": resolved interface definition (`ros2 interface show`) in a read-only document
+- **Workspace Completeness Analysis**: "Analyze Workspace Completeness" (command palette and workspace context menu) compares package.xml declarations against actual code usage (python imports, C++ includes), checks ament_python entry points against node files (both directions), verifies msg/srv/action files are registered in `rosidl_generate_interfaces`, and lists unused dependencies — as a grouped read-only report per package
 
 #### Launch File Support
 - Automatic detection of `.launch.py` and `.launch.xml` files

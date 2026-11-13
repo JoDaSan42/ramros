@@ -59,12 +59,11 @@ export interface AnalyzerPackageInput {
   interfaceFiles: string[];
 }
 
-// import rclpy / import numpy, pandas
-const PYTHON_IMPORT_LINE = /^\s*import\s+([\w.,\s]+)$/gm;
+// import rclpy / import numpy, pandas — handled line-wise in
+// collectPythonImports so multi-import lines and `as` aliases resolve.
 // from X.y import z / from . import sibling
-const PYTHON_FROM_LINE = /^\s*from\s+([\w.]+)\s+import\b/gm;
 // #include <rclcpp/rclcpp.hpp> / #include "my_pkg/msg/pose.hpp"
-const CPP_INCLUDE_LINE = /^\s*#include\s+[<"]([\w/.]+)[>"]/gm;
+// (Regexes are inlined at their use sites below.)
 
 /**
  * Maps a python module path (`std_msgs.msg`, `geometry_msgs`) or a C++
