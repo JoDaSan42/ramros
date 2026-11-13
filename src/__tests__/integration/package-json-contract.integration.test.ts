@@ -114,4 +114,37 @@ describe('package.json contract', () => {
     );
     expect(contextEntry).toBeDefined();
   });
+
+  it('scopes each tool options button to its own tool item', () => {
+    // Distinct context values: the rviz2 gear must appear only on the rviz2
+    // item and the rqt_graph gear only on the rqt_graph item.
+    expect(findInlineEntry(contextEntries, 'ramros.launchTool.rviz2WithOptions', 'toolRviz2')).toBeDefined();
+    expect(findInlineEntry(contextEntries, 'ramros.launchTool.rqtGraphWithOptions', 'toolRqtGraph')).toBeDefined();
+
+    // No cross-placements: neither gear shows on the other tool's item,
+    // and neither shows on a generic 'tool' context.
+    expect(findInlineEntry(contextEntries, 'ramros.launchTool.rviz2WithOptions', 'toolRqtGraph')).toBeUndefined();
+    expect(findInlineEntry(contextEntries, 'ramros.launchTool.rqtGraphWithOptions', 'toolRviz2')).toBeUndefined();
+    expect(findInlineEntry(contextEntries, 'ramros.launchTool.rviz2WithOptions', 'tool')).toBeUndefined();
+    expect(findInlineEntry(contextEntries, 'ramros.launchTool.rqtGraphWithOptions', 'tool')).toBeUndefined();
+
+    // The when clauses use the tool-specific context values.
+    const rviz2When = contextEntries.find(e => e.command === 'ramros.launchTool.rviz2WithOptions' && isInline(e))?.when;
+    const rqtWhen = contextEntries.find(e => e.command === 'ramros.launchTool.rqtGraphWithOptions' && isInline(e))?.when;
+    expect(rviz2When).toContain('toolRviz2');
+    expect(rqtWhen).toContain('toolRqtGraph');
+  });
+
+  it('uses a combined play-with-gear icon for the node options command', () => {
+    const command = (packageJson.contributes?.commands ?? []).find(c => c.command === 'ramros.runNodeWithOptions');
+    expect(command?.icon).toBeDefined();
+    // A custom SVG (play + small gear) lives in media/ and is referenced
+    // light/dark — the icon string must point at the media file, not a
+    // codicon (combined glyphs do not exist as a single codicon).
+    const icon = command!.icon as unknown;
+    expect(typeof icon === 'string' || typeof icon === 'object').toBe(true);
+    const iconString = typeof icon === 'string' ? icon : JSON.stringify(icon);
+    expect(iconString).toContain('media/');
+    expect(iconString).not.toContain('settings-gear');
+  });
 });

@@ -167,7 +167,9 @@ export class ToolItem extends TreeItemBase {
   ) {
     super(label, vscode.TreeItemCollapsibleState.None);
     this.iconPath = new vscode.ThemeIcon(iconId);
-    this.contextValue = 'tool';
+    // Tool-specific context value so the inline options button shows only
+    // on the matching tool item.
+    this.contextValue = toolType === 'rviz2' ? 'toolRviz2' : 'toolRqtGraph';
     this.command = { command: `ramros.launchTool.${toolType}`, title: 'Launch Tool' };
   }
   
