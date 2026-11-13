@@ -20,6 +20,20 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   private readonly nodeInfoCache = new LiveInfoCache<NodeInfo | null>();
   private readonly topicInfoCache = new LiveInfoCache<TopicInfo | null>();
 
+  // Stable-item state (anti-flicker): items are created once per name and
+  // reused across ticks, so VSCode keeps expansion state and re-renders
+  // without flicker. Full refreshes fire only on actual list changes.
+  private readonly nodeItems = new Map<string, LiveNodeItem>();
+  private readonly topicItems = new Map<string, LiveTopicItem>();
+  private readonly expandedNodes = new Set<string>();
+  private readonly expandedTopics = new Set<string>();
+  private readonly nodeInfoSignature = new Map<string, string>();
+  private readonly topicInfoSignature = new Map<string, string>();
+  private lastNodeNames: string[] | null = null;
+  private lastTopicNames: string[] | null = null;
+  private readonly nodesFolder = new LiveFolderItem('Nodes', 'active-nodes');
+  private readonly topicsFolder = new LiveFolderItem('Topics', 'active-topics');
+
   private readonly SYSTEM_TOPICS = ['/parameter_events', '/rosout', '/clock'];
 
   constructor(private readonly configService?: WorkspaceConfigService) {
@@ -119,29 +133,119 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
     }
     if (this.autoRefreshEnabled) {
       this.autoRefreshInterval = setInterval(() => {
-        this.tick();
+        void this.tick();
       }, this.getEffectiveRefreshRate() * 1000);
     }
   }
 
   /**
-   * One auto-refresh tick: lazy info caches are only valid until the next
-   * tick, so they are cleared before the tree re-reads its folders.
+   * One auto-refresh tick: fetches the node/topic lists, fires a full refresh
+   * only when a list changed, and refreshes info for expanded items with a
+   * per-element fire only when the info actually changed. Collapsed items are
+   * not fetched (call budget stays at the expanded items).
    */
-  tick(): void {
+  async tick(): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
+
+    // Lazy info caches are only valid until the next tick, so they are
+    // cleared before anything else (re-expansion after a tick refetches).
     this.nodeInfoCache.newTick();
     this.topicInfoCache.newTick();
-    this._onDidChangeTreeData.fire(null);
+
+    // 1) Detect list changes (this is what a full refresh is for).
+    const nodeNames = await this.getActiveNodes();
+    let topicNames = await this.getActiveTopics();
+    if (this.hideSystemTopics) {
+      topicNames = topicNames.filter(name => !this.isSystemTopic(name));
+    }
+
+    const haveBaseline = this.lastNodeNames !== null || this.lastTopicNames !== null;
+    const listChanged = haveBaseline &&
+      (!listsEqual(this.lastNodeNames ?? [], nodeNames) ||
+        !listsEqual(this.lastTopicNames ?? [], topicNames));
+
+    this.lastNodeNames = nodeNames;
+    this.lastTopicNames = topicNames;
+    this.pruneStaleState(nodeNames, topicNames);
+
+    // 2) Refresh info for expanded items (fresh data each tick), firing per
+    // element only when the info actually changed.
+    await Promise.all([
+      ...[...this.expandedNodes].map(name => this.refreshExpandedNode(name)),
+      ...[...this.expandedTopics].map(name => this.refreshExpandedTopic(name)),
+    ]);
+
+    // 3) Full refresh (rebuild) only when a list actually changed. VSCode
+    // re-reads everything, but items are stable instances, so expansion
+    // state is preserved and the re-render is not a flicker.
+    if (listChanged) {
+      this._onDidChangeTreeData.fire(null);
+    }
   }
 
   async refresh(): Promise<void> {
-    this.tick();
+    await this.tick();
   }
 
   /**
-   * Lazily loads node info on expand: fetches once per tick (cache hit skips
-   * the call), applies it to the item and — only after a real fetch — fires
-   * for that element so VSCode re-renders the updated description.
+   * Removes an item from the expanded set (VSCode collapsed it): ticks stop
+   * fetching info for it until it is expanded again.
+   */
+  markCollapsed(item: LiveNodeItem | LiveTopicItem): void {
+    if (item instanceof LiveNodeItem) {
+      this.expandedNodes.delete(item.getNodeName());
+    } else if (item instanceof LiveTopicItem) {
+      this.expandedTopics.delete(item.getTopicName());
+    }
+  }
+
+  /**
+   * Tick-time info refresh for an expanded node: fetch fresh info, apply it,
+   * and fire for the element only when its visible info changed.
+   */
+  private async refreshExpandedNode(name: string): Promise<void> {
+    const item = this.nodeItems.get(name);
+    if (!item) {
+      return;
+    }
+    const info = await this.getNodeInfo(name);
+    // Write through to the cache so subsequent tree re-reads (ensureNodeExpanded
+    // cache hits) apply the fresh info instead of a stale earlier snapshot.
+    this.nodeInfoCache.set(name, info);
+    const signature = JSON.stringify(info ?? {});
+    if (this.nodeInfoSignature.get(name) !== signature) {
+      this.nodeInfoSignature.set(name, signature);
+      item.applyInfo(info ?? {});
+      this._onDidChangeTreeData.fire(item);
+    }
+  }
+
+  /**
+   * Tick-time info refresh for an expanded topic. See refreshExpandedNode.
+   */
+  private async refreshExpandedTopic(name: string): Promise<void> {
+    const item = this.topicItems.get(name);
+    if (!item) {
+      return;
+    }
+    const info = await this.getTopicInfo(name);
+    // Write-through (see refreshExpandedNode).
+    this.topicInfoCache.set(name, info);
+    const signature = JSON.stringify(info ?? {});
+    if (this.topicInfoSignature.get(name) !== signature) {
+      this.topicInfoSignature.set(name, signature);
+      item.applyInfo(info ?? {});
+      this._onDidChangeTreeData.fire(item);
+    }
+  }
+
+  /**
+   * Lazily loads node info on expand: fetches once per cache lifetime, applies
+   * it to the item and — only after a real fetch — fires for that element so
+   * VSCode re-renders the updated description. Records the info signature so
+   * tick refreshes only fire on actual change.
    */
   async ensureNodeExpanded(item: LiveNodeItem): Promise<void> {
     if (this.disposed) {
@@ -157,6 +261,7 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
     }
     item.applyInfo(info ?? {});
     if (fetched) {
+      this.nodeInfoSignature.set(name, JSON.stringify(info ?? {}));
       this._onDidChangeTreeData.fire(item);
     }
   }
@@ -178,6 +283,7 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
     }
     item.applyInfo(info ?? {});
     if (fetched) {
+      this.topicInfoSignature.set(name, JSON.stringify(info ?? {}));
       this._onDidChangeTreeData.fire(item);
     }
   }
@@ -191,10 +297,9 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
       if (!this.isEnabled()) {
         return [new LiveViewDisabledItem()];
       }
-      return [
-        new LiveFolderItem('Nodes', 'active-nodes'),
-        new LiveFolderItem('Topics', 'active-topics')
-      ];
+      // Stable folder instances: root re-reads never invalidate the folders,
+      // so VSCode keeps their expansion state too.
+      return [this.nodesFolder, this.topicsFolder];
     }
 
     if (element instanceof LiveFolderItem) {
@@ -202,24 +307,29 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
 
       if (folderType === 'active-nodes') {
         const nodes = await this.getActiveNodes();
-        // Lazy: items are name-only here; info loads on expand
-        // (ensureNodeExpanded) and is cached until the next tick.
-        return nodes.map(name => new LiveNodeItem(name));
+        this.lastNodeNames = nodes;
+        // Stable instances: one item per node name, reused across re-reads
+        // and ticks. Lazy: items may be name-only; info loads on expand.
+        return nodes.map(name => this.getOrCreateNodeItem(name));
       } else if (folderType === 'active-topics') {
         let topicNames = await this.getActiveTopics();
         if (this.hideSystemTopics) {
           topicNames = topicNames.filter(name => !this.isSystemTopic(name));
         }
-        return topicNames.map(name => new LiveTopicItem(name));
+        this.lastTopicNames = topicNames;
+        return topicNames.map(name => this.getOrCreateTopicItem(name));
       }
     }
 
-    // If VSCode expands (or re-reads) a name-only item, trigger the lazy
-    // info fetch. The per-element fire updates the description once the
-    // info arrives; repeated re-reads within a tick are cache hits.
+    // If VSCode expands (or re-reads) a name-only item, remember it as
+    // expanded (ticks refresh it) and trigger the lazy info fetch. The
+    // per-element fire updates the description once the info arrives;
+    // repeated re-reads within a tick are cache hits.
     if (element instanceof LiveNodeItem) {
+      this.expandedNodes.add(element.getNodeName());
       void this.ensureNodeExpanded(element);
     } else if (element instanceof LiveTopicItem) {
+      this.expandedTopics.add(element.getTopicName());
       void this.ensureTopicExpanded(element);
     }
 
@@ -241,7 +351,7 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   async getTopicInfo(topicName: string): Promise<import('../core/ros2-cli-service').TopicInfo | null> {
     return this.cli.getTopicInfo(topicName);
   }
-   
+
   async getNodeInfo(nodeName: string): Promise<import('../core/ros2-cli-service').NodeInfo | null> {
     const info = await this.cli.getNodeInfo(nodeName);
     if (!info) {
@@ -259,6 +369,53 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
     return info;
   }
 
+  /**
+   * Returns the stable item for a node name, creating it only on first sight.
+   */
+  private getOrCreateNodeItem(name: string): LiveNodeItem {
+    let item = this.nodeItems.get(name);
+    if (!item) {
+      item = new LiveNodeItem(name);
+      this.nodeItems.set(name, item);
+    }
+    return item;
+  }
+
+  /**
+   * Returns the stable item for a topic name. See getOrCreateNodeItem.
+   */
+  private getOrCreateTopicItem(name: string): LiveTopicItem {
+    let item = this.topicItems.get(name);
+    if (!item) {
+      item = new LiveTopicItem(name);
+      this.topicItems.set(name, item);
+    }
+    return item;
+  }
+
+  /**
+   * Removes stale items/signatures/expanded markers for names that left the
+   * lists (keeps the stable maps from growing unbounded across sessions).
+   */
+  private pruneStaleState(nodeNames: string[], topicNames: string[]): void {
+    const nodeSet = new Set(nodeNames);
+    for (const name of [...this.nodeItems.keys()]) {
+      if (!nodeSet.has(name)) {
+        this.nodeItems.delete(name);
+        this.nodeInfoSignature.delete(name);
+        this.expandedNodes.delete(name);
+      }
+    }
+    const topicSet = new Set(topicNames);
+    for (const name of [...this.topicItems.keys()]) {
+      if (!topicSet.has(name)) {
+        this.topicItems.delete(name);
+        this.topicInfoSignature.delete(name);
+        this.expandedTopics.delete(name);
+      }
+    }
+  }
+
   dispose(): void {
     this.disposed = true;
     if (this.autoRefreshInterval) {
@@ -266,4 +423,20 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
       this.autoRefreshInterval = null;
     }
   }
+}
+
+/**
+ * Order-insensitive list comparison: same members means unchanged.
+ */
+function listsEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  const set = new Set(a);
+  for (const item of b) {
+    if (!set.has(item)) {
+      return false;
+    }
+  }
+  return true;
 }

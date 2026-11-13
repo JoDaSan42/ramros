@@ -39,7 +39,10 @@ module.exports = {
     showOpenDialog: jest.fn(),
     showTextDocument: jest.fn().mockResolvedValue({}),
     withProgress: jest.fn(),
-    createTreeView: jest.fn(),
+    createTreeView: jest.fn(() => ({
+      onDidCollapseElement: jest.fn().mockReturnValue({ dispose: jest.fn() }),
+      onDidExpandElement: jest.fn().mockReturnValue({ dispose: jest.fn() })
+    })),
     onDidCloseTerminal: jest.fn().mockReturnValue({ dispose: jest.fn() })
   },
   commands: {

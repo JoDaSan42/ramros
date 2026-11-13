@@ -331,6 +331,123 @@ describe('LiveTreeProvider Integration Tests', () => {
     });
   });
 
+  describe('stable items (no flicker on refresh)', () => {
+    function collectEvents(): unknown[] {
+      const events: unknown[] = [];
+      provider.onDidChangeTreeData(e => events.push(e));
+      return events;
+    }
+
+    it('serves the same item instances across folder re-reads', async () => {
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/a', '/b']);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+
+      const folders = await provider.getChildren();
+      const first = await provider.getChildren(folders[0]) as LiveNodeItem[];
+      const second = await provider.getChildren(folders[0]) as LiveNodeItem[];
+
+      expect(second[0]).toBe(first[0]);
+      expect(second[1]).toBe(first[1]);
+    });
+
+    it('does not fire when a tick sees unchanged lists', async () => {
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/a']);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+
+      const folders = await provider.getChildren();
+      await provider.getChildren(folders[0]); // establishes the baseline list
+      const events = collectEvents();
+
+      await provider.tick();
+
+      expect(events).toHaveLength(0);
+    });
+
+    it('fires once when a tick sees a changed list', async () => {
+      const nodesMock = jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/a']);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+
+      const folders = await provider.getChildren();
+      await provider.getChildren(folders[0]);
+      const events = collectEvents();
+
+      nodesMock.mockResolvedValue(['/a', '/b']);
+      await provider.tick();
+
+      expect(events).toHaveLength(1);
+    });
+
+    it('keeps the item instance of a surviving node across a list-change tick', async () => {
+      const nodesMock = jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/a']);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+
+      const folders = await provider.getChildren();
+      const [nodeA] = await provider.getChildren(folders[0]) as LiveNodeItem[];
+      await provider.getChildren(nodeA); // expand
+
+      nodesMock.mockResolvedValue(['/a', '/b']);
+      await provider.tick();
+
+      const after = await provider.getChildren(folders[0]) as LiveNodeItem[];
+      const surviving = after.find(n => n.getNodeName() === '/a');
+      expect(surviving).toBe(nodeA);
+    });
+
+    it('refreshes expanded node info on tick and fires that element only on change', async () => {
+      const infoMock = jest.spyOn(cli, 'getNodeInfo')
+        .mockResolvedValue({ name: '/a', publishedTopics: ['/x'], subscribedTopics: [] });
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/a']);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+
+      const folders = await provider.getChildren();
+      const [nodeA] = await provider.getChildren(folders[0]) as LiveNodeItem[];
+      await provider.getChildren(nodeA); // expand -> fetch #1
+      await flushAsync();
+
+      const events = collectEvents();
+      infoMock.mockResolvedValue({ name: '/a', publishedTopics: ['/x', '/y'], subscribedTopics: [] });
+      await provider.tick();
+
+      expect(nodeA.description).toBe('2 pub / 0 sub');
+      expect(events).toContain(nodeA);
+
+      const eventsAfter = collectEvents();
+      await provider.tick(); // info unchanged -> no element fire
+      expect(eventsAfter.filter(e => e === nodeA)).toHaveLength(0);
+    });
+
+    it('does not fetch info for collapsed items on tick', async () => {
+      const infoSpy = jest.spyOn(cli, 'getNodeInfo').mockResolvedValue(null);
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/a', '/b']);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+
+      const folders = await provider.getChildren();
+      await provider.getChildren(folders[0]); // no expansion
+
+      const infoCallsBefore = infoSpy.mock.calls.length;
+      await provider.tick();
+
+      expect(infoSpy.mock.calls.length).toBe(infoCallsBefore);
+    });
+
+    it('stops refreshing an item after markCollapsed', async () => {
+      const infoSpy = jest.spyOn(cli, 'getNodeInfo').mockResolvedValue(null);
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue(['/a']);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+
+      const folders = await provider.getChildren();
+      const [nodeA] = await provider.getChildren(folders[0]) as LiveNodeItem[];
+      await provider.getChildren(nodeA); // expand
+      await flushAsync();
+
+      provider.markCollapsed(nodeA);
+      await provider.tick();
+      await flushAsync();
+
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('auto-refresh', () => {
     it('can be toggled off and on', () => {
       provider.setAutoRefresh(false);

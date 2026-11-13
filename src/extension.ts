@@ -12,7 +12,7 @@ import { CacheManager } from './cache/cache-manager';
 import { RamrosTreeProvider } from './treeview/tree-provider';
 import { ToolsTreeProvider } from './treeview/tools-tree-provider';
 import { LiveTreeProvider } from './treeview/live-tree-provider';
-import { LiveParameterItem, NodeParametersItem } from './treeview/live-items';
+import { LiveParameterItem, LiveNodeItem, LiveTopicItem, NodeParametersItem } from './treeview/live-items';
 import { TerminalManager } from './executor/terminal-manager';
 import { BagSessionService } from './executor/bag-session-service';
 import { PackageCreator } from './wizard/package-creator';
@@ -445,6 +445,15 @@ export async function activate(context: vscode.ExtensionContext) {
   const liveTreeView = vscode.window.createTreeView('ramrosLive', {
     treeDataProvider: liveTreeProvider,
     showCollapseAll: false
+  });
+  // Track collapses so ticks stop fetching info for collapsed items
+  // (anti-flicker model: expanded set maintained by expand via getChildren
+  // re-reads and explicit collapse events).
+  liveTreeView.onDidCollapseElement(event => {
+    const element = event.element;
+    if (element instanceof LiveNodeItem || element instanceof LiveTopicItem) {
+      liveTreeProvider.markCollapsed(element);
+    }
   });
   
    const ramrosConfigWatcher = vscode.workspace.createFileSystemWatcher('**/ramros.json');
