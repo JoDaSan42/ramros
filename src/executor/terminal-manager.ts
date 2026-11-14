@@ -28,7 +28,8 @@ export class TerminalManager implements vscode.Disposable {
    * executeInNewTerminal). `undefined` stops exporting the variable.
    */
   setDomainId(domainId: number | undefined): void {
-    this.domainId = domainId;
+    // Reject non-integer values from settings before they reach the shell.
+    this.domainId = Number.isInteger(domainId) ? domainId : undefined;
   }
 
   /**
@@ -43,7 +44,11 @@ export class TerminalManager implements vscode.Disposable {
     }
     const effectiveDomain = options?.domainId ?? this.domainId;
     if (effectiveDomain !== undefined) {
-      parts.push(`export ROS_DOMAIN_ID=${effectiveDomain}`);
+      // Domain ids come from settings (possibly a hostile workspace
+      // configuration); only sane integers may reach the shell line.
+      if (Number.isInteger(effectiveDomain)) {
+        parts.push(`export ROS_DOMAIN_ID=${effectiveDomain}`);
+      }
     }
     parts.push(command);
     return parts.join(' && ');

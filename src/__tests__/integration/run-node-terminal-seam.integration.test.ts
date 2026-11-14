@@ -102,7 +102,7 @@ describe('run node with options terminal seam', () => {
     await handler(makeNodeItem());
 
     const command = lastTerminalCommand();
-    expect(command).toContain('ros2 run my_pkg talker_node');
+    expect(command).toContain('ros2 run "my_pkg" "talker_node"');
     expect(command).not.toContain('--ros-args');
     expect(showQuickPick).not.toHaveBeenCalled();
   });
@@ -121,7 +121,7 @@ describe('run node with options terminal seam', () => {
 
     const command = lastTerminalCommand();
     expect(command).toContain(`source "${path.join(tempDir, 'install', 'setup.bash')}"`);
-    expect(command).toContain('ros2 run my_pkg talker_node');
+    expect(command).toContain('ros2 run "my_pkg" "talker_node"');
     const argsIndex = command.indexOf('--ros-args');
     expect(argsIndex).toBeGreaterThan(-1);
     expect(command.slice(argsIndex)).toBe('--ros-args -r __node:=renamed_node');

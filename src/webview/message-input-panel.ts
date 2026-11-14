@@ -81,6 +81,12 @@ function dispatchMessage(
   panel: vscode.WebviewPanel,
   message: MessageInputCommand
 ): Promise<void> {
+  // Only known message types are forwarded; unknown types are ignored so a
+  // compromised or buggy webview cannot trigger unexpected handler paths.
+  const knownTypes = ['publishRate', 'publishOnce', 'call'];
+  if (message.type !== undefined && !knownTypes.includes(message.type)) {
+    return Promise.resolve();
+  }
   return target
     .onMessage(message)
     .then(result => {

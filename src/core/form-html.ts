@@ -154,7 +154,7 @@ function renderField(field: InterfaceField, path: string, defaults: Record<strin
   // Unresolved sub-trees and non-primitive arrays: JSON free text.
   if (field.unresolved || (!isPrimitiveType(field.type) && field.isArray)) {
     const attr = field.unresolved ? 'data-raw="true"' : 'data-json="true"';
-    return `<div class="field-row">${label}<textarea data-path="${path}" ${attr} placeholder="JSON"></textarea></div>`;
+    return `<div class="field-row">${label}<textarea data-path="${escapeAttr(path)}" ${attr} placeholder="JSON"></textarea></div>`;
   }
 
   // Nested message group.
@@ -177,7 +177,7 @@ function renderField(field: InterfaceField, path: string, defaults: Record<strin
 
   // Free-length arrays (primitives): one comma-separated text input.
   if (field.isArray) {
-    return `<div class="field-row">${label}<input type="text" data-path="${path}" data-array="true" value="${escapeAttr(defaults[path] ?? '')}" placeholder="comma-separated, escape commas as \\,"></div>`;
+    return `<div class="field-row">${label}<input type="text" data-path="${escapeAttr(path)}" data-array="true" value="${escapeAttr(defaults[path] ?? '')}" placeholder="comma-separated, escape commas as \\,"></div>`;
   }
 
   // Scalar leaf.
@@ -187,13 +187,13 @@ function renderField(field: InterfaceField, path: string, defaults: Record<strin
 function inputFor(field: InterfaceField, path: string, value: string): string {
   if (field.type === 'bool') {
     const checked = value === 'true' ? ' checked' : '';
-    return `<input type="checkbox" data-path="${path}"${checked}>`;
+    return `<input type="checkbox" data-path="${escapeAttr(path)}"${checked}>`;
   }
   const numeric = /^(u?int)(8|16|32|64)$/.test(field.type) || field.type === 'float32' || field.type === 'float64';
   const inputType = numeric ? 'number' : 'text';
   const step = field.type === 'float32' || field.type === 'float64' ? ' step="any"' : '';
   const valueAttr = value.length > 0 ? ` value="${escapeAttr(value)}"` : '';
-  return `<input type="${inputType}"${step} data-path="${path}"${valueAttr}>`;
+  return `<input type="${inputType}"${step} data-path="${escapeAttr(path)}"${valueAttr}>`;
 }
 
 function escapeHtml(text: string): string {

