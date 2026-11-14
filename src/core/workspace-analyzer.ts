@@ -360,19 +360,26 @@ function analyzeUnusedDependencies(pkg: AnalyzerPackageInput): AnalysisFinding[]
     }
   }
 
+  // ament_cmake packages reference most dependencies in CMakeLists.txt
+  // (find_package, target_link_libraries, rosidl DEPENDENCIES, …) rather
+  // than in code — count a dependency as used when its name appears there.
+  const cmakeTokens = new Set<string>(
+    pkg.cmakeContent?.match(/[A-Za-z0-9_]+/g) ?? []
+  );
+
   for (const dependency of pkg.declaredDependencies) {
     // test dependencies are not expected to appear in runtime code.
     const kinds = pkg.declaredDependencyKinds?.[dependency] ?? [];
     if (kinds.length > 0 && kinds.every(kind => kind === 'test')) {
       continue;
     }
-    if (!usedPackages.has(dependency)) {
+    if (!usedPackages.has(dependency) && !cmakeTokens.has(dependency)) {
       findings.push({
         severity: 'info',
         kind: 'unused-dependency',
         packageName: pkg.name,
         dependency,
-        message: `Dependency '${dependency}' is declared in package.xml but not used in the package code.`
+        message: `Dependency '${dependency}' is declared in package.xml but not referenced in the package code or build files.`
       });
     }
   }

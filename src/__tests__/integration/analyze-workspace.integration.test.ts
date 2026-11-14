@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { activate, __resetInterfaceLoaderForTests } from '../../extension';
+import { activate, __resetInterfaceLoaderForTests, collectAnalyzerPackageInput } from '../../extension';
 import { RamrosDocProvider } from '../../core/ramros-doc-provider';
 
 jest.mock('child_process', () => {
@@ -261,5 +261,23 @@ describe('analyze workspace completeness command', () => {
       (entry: { command: string }) => entry.command === 'ramros.analyzeWorkspace'
     );
     expect(binding?.when).toContain('workspaceRoot');
+  });
+
+  it('ignores placeholder files like .gitkeep in interface folders', async () => {
+    await activateWithWorkspace(tempDir);
+
+    const pkgRoot = path.join(tempDir, 'src', 'iface_pkg');
+    fs.mkdirSync(path.join(pkgRoot, 'msg'), { recursive: true });
+    fs.mkdirSync(path.join(pkgRoot, 'srv'), { recursive: true });
+    fs.writeFileSync(path.join(pkgRoot, 'msg', '.gitkeep'), '', 'utf8');
+    fs.writeFileSync(path.join(pkgRoot, 'srv', '.gitkeep'), '', 'utf8');
+    fs.writeFileSync(path.join(pkgRoot, 'msg', 'MyMessage.msg'), 'int32 value\n', 'utf8');
+
+    const input = collectAnalyzerPackageInput(
+      makePackageInfo(pkgRoot) as never,
+      filePath => fs.readFileSync(filePath, 'utf8')
+    );
+
+    expect(input.interfaceFiles).toEqual(['msg/MyMessage.msg']);
   });
 });

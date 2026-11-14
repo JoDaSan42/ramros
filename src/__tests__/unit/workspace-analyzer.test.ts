@@ -336,6 +336,55 @@ describe('workspace analyzer — entry points, rosidl and unused deps', () => {
     expect(finding.kind).toBe('unused-dependency');
     expect(finding.dependency).toBe('geometry_msgs');
   });
+
+  it('treats dependencies used in CMakeLists.txt as used', () => {
+    const report = analyzeWorkspace(
+      [
+        pythonPackage({
+          name: 'iface_pkg',
+          buildType: 'ament_cmake',
+          declaredDependencies: ['std_msgs', 'geometry_msgs'],
+          cppFiles: [],
+          cmakeContent: [
+            'find_package(std_msgs REQUIRED)',
+            'rosidl_generate_interfaces(${PROJECT_NAME}',
+            '  "msg/MyMessage.msg"',
+            '  DEPENDENCIES std_msgs',
+            ')',
+            ''
+          ].join('\n')
+        })
+      ],
+      ROS_PACKAGES
+    );
+
+    // std_msgs appears in CMakeLists.txt; geometry_msgs does not.
+    expect(report.findings).toHaveLength(1);
+    expect(report.findings[0].kind).toBe('unused-dependency');
+    expect(report.findings[0].dependency).toBe('geometry_msgs');
+  });
+
+  it('treats build tool dependencies as used when the build file references them', () => {
+    const report = analyzeWorkspace(
+      [
+        pythonPackage({
+          name: 'iface_pkg',
+          buildType: 'ament_cmake',
+          declaredDependencies: ['ament_cmake', 'rosidl_default_generators', 'rosidl_default_runtime'],
+          cppFiles: [],
+          cmakeContent: [
+            'find_package(ament_cmake REQUIRED)',
+            'find_package(rosidl_default_generators REQUIRED)',
+            'ament_export_dependencies(rosidl_default_runtime)',
+            ''
+          ].join('\n')
+        })
+      ],
+      ROS_PACKAGES
+    );
+
+    expect(report.findings).toEqual([]);
+  });
 });
 
 describe('workspace analyzer — report rendering', () => {
