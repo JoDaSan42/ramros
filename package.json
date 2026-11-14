@@ -112,7 +112,7 @@
       {
         "command": "ramros.runLaunchFile",
         "title": "Run Launch File",
-        "icon": "$(play-circle)"
+        "icon": "$(play)"
       },
       {
         "command": "ramros.addNodeToPackage",
@@ -188,6 +188,11 @@
         "command": "ramros.live.echoTopic",
         "title": "Echo Topic",
         "icon": "$(megaphone)"
+      },
+      {
+        "command": "ramros.live.stopNode",
+        "title": "Stop Node",
+        "icon": "$(stop-circle)"
       },
       {
         "command": "ramros.live.hzTopic",
@@ -287,14 +292,9 @@
           "group": "navigation@2"
         },
         {
-          "command": "ramros.launchTool.rqt_graph",
-          "when": "view == ramrosLive",
-          "group": "navigation@3"
-        },
-        {
           "command": "ramros.tools.healthCheck",
           "when": "view == ramrosLive",
-          "group": "navigation@4"
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -603,6 +603,15 @@
         {
           "command": "ramros.live.updateParameters",
           "when": "view == ramrosLive && viewItem == nodeParameters"
+        },
+        {
+          "command": "ramros.live.stopNode",
+          "when": "view == ramrosLive && viewItem == liveNode",
+          "group": "inline@1"
+        },
+        {
+          "command": "ramros.live.stopNode",
+          "when": "view == ramrosLive && viewItem == liveNode"
         }
       ]
     },

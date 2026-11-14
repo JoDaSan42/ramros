@@ -621,29 +621,9 @@ export class LaunchWizard {
       message += ` in ${this.targetPackage.name}`;
     }
 
-    // Ask if user wants to run it
-    const runChoice = await vscode.window.showInformationMessage(
-      message,
-      { modal: true },
-      'Run now',
-      'Close'
-    );
-
-    if (runChoice === 'Run now') {
-      const packageName = this.targetPackage?.name || '';
-      if (packageName) {
-        const installPath = path.join(this.workspacePath, 'install');
-        const setupBash = path.join(installPath, 'setup.bash');
-        const launchFileName = `${fileName}${this.getFileExtension()}`;
-        const terminal = vscode.window.createTerminal(`Launch: ${fileName}`);
-        terminal.show();
-        const fs = await import('fs');
-        if (fs.existsSync(setupBash)) {
-          terminal.sendText(`source "${setupBash}" && ros2 launch ${packageName} ${launchFileName}`);
-        } else {
-          terminal.sendText(`ros2 launch ${packageName} ${launchFileName}`);
-        }
-      }
-    }
+    // No "run it now?" prompt: a fresh launch file needs the workspace
+    // (re)built before `ros2 launch` can resolve it, so running right away
+    // would just fail.
+    void vscode.window.showInformationMessage(message);
   }
 }
