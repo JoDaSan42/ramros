@@ -214,6 +214,11 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
     this._onDidChangeTreeData.fire(null);
   }
 
+  /** Domain ids currently configured for the grouped live view. */
+  getDomainGroups(): number[] {
+    return [...this.domainGroups];
+  }
+
   /**
    * Stable group item per (domain, kind) pair.
    */

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { RosEnvironmentService } from './core/ros-environment';
 import { WorkspaceDetector, WorkspaceInfo, findWorkspaceForPath } from './core/workspace-detector';
 import { getWorkspaceBagPaths, scanBagFolder } from './core/bag-discovery';
@@ -30,6 +31,7 @@ import { InterfaceField, InterfaceStructure } from './core/interface-parser';
 import { valuesToYaml, valuesToJson, fieldDefaults } from './core/message-serializer';
 import { showMessageInputPanel, MessageInputCommand } from './webview/message-input-panel';
 import { analyzeWorkspace, renderAnalysisReport, AnalyzerPackageInput } from './core/workspace-analyzer';
+import { buildDomainBridgeConfigYaml } from './core/domain-bridge';
 
 let cacheManager: CacheManager;
 let ramrosDocProvider: RamrosDocProvider;
@@ -1759,6 +1761,82 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!workspace) return;
       
       await terminalManager.executeInNewTerminal(`ros2 topic hz "${topicName}"`, workspace, `Hz: ${topicName}`);
+    }),
+
+    vscode.commands.registerCommand('ramros.live.bridgeTopic', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
+      const cli = Ros2CliService.getInstance();
+      const topicName = resolveTopicName(treeItem) ?? await pickTopic();
+      if (!topicName) return;
+
+      // domain_bridge is a separate package, not part of the ROS desktop
+      // install — fail early with guidance instead of a dead terminal.
+      const availability = await cli.executeRaw('ros2 pkg prefix domain_bridge', { timeout: 10000 });
+      if (!availability.ok || availability.output.trim().length === 0) {
+        const openDocs = await vscode.window.showWarningMessage(
+          `Cannot bridge ${topicName}: the 'domain_bridge' package is not installed in the active ROS distribution.`,
+          'Install instructions'
+        );
+        if (openDocs === 'Install instructions') {
+          await vscode.env.openExternal(vscode.Uri.parse('https://github.com/ros2/domain_bridge'));
+        }
+        return;
+      }
+
+      const messageType = resolveTopicMessageType(treeItem) ?? await cli.getTopicType(topicName) ?? undefined;
+      if (!messageType) {
+        void vscode.window.showWarningMessage(`Could not resolve the type of ${topicName}. Is a node publishing on it?`);
+        return;
+      }
+
+      const fromPick = await vscode.window.showQuickPick([
+        { label: 'Current environment (no override)', fromDomain: undefined },
+        ...liveTreeProvider.getDomainGroups().map(id => ({ label: `Domain ${id}`, fromDomain: id }))
+      ], { placeHolder: 'Bridge from which domain?' });
+      if (!fromPick) return;
+
+      const configuredDomains = vscode.workspace.getConfiguration('ramros.liveView').get<number[]>('domainIds', []);
+      const toOptions = [
+        ...configuredDomains.map(id => ({ label: `Domain ${id}`, toDomain: id })),
+        { label: 'Enter domain id…', toDomain: -1 }
+      ];
+      const toPick = await vscode.window.showQuickPick(toOptions, { placeHolder: 'Bridge to which domain?' });
+      if (!toPick) return;
+
+      let toDomain = toPick.toDomain;
+      if (toDomain === -1) {
+        const raw = await vscode.window.showInputBox({
+          prompt: 'Target ROS_DOMAIN_ID (integer)',
+          validateInput: value => (/^\d+$/.test(value) ? undefined : 'Domain id must be a non-negative integer')
+        });
+        if (raw === undefined) return;
+        toDomain = parseInt(raw, 10);
+      }
+
+      // Write the bridge config to a temp file and start domain_bridge in a
+      // dedicated terminal so the user can stop it with Ctrl+C.
+      const configYaml = buildDomainBridgeConfigYaml({
+        topic: topicName,
+        type: messageType,
+        fromDomain: fromPick.fromDomain,
+        toDomain
+      });
+      const configFile = path.join(os.tmpdir(), `ramros-bridge-${Date.now()}.yaml`);
+      fs.writeFileSync(configFile, configYaml, 'utf8');
+
+      const workspace = await pickWorkspace();
+      if (!workspace) {
+        fs.rmSync(configFile, { force: true });
+        return;
+      }
+
+      await terminalManager.executeInNewTerminal(
+        `ros2 run domain_bridge domain_bridge ${shellSingleQuote(configFile)}`,
+        workspace,
+        `Bridge: ${topicName}`
+      );
+      void vscode.window.showInformationMessage(
+        `Bridging ${topicName} to domain ${toDomain}. Stop the bridge with Ctrl+C in its terminal.`
+      );
     }),
 
     vscode.commands.registerCommand('ramros.live.toggleEnabled', async () => {

@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { activate } from '../../extension';
-import { LiveNodeItem, LiveParameterItem } from '../../treeview/live-items';
+import { LiveNodeItem, LiveTopicItem, LiveParameterItem } from '../../treeview/live-items';
 import { Ros2CliService } from '../../core/ros2-cli-service';
 
 function makeExtensionContext(): vscode.ExtensionContext {
@@ -176,8 +176,7 @@ describe('extension command registration', () => {
     expect(nodeTerminal.dispose).not.toHaveBeenCalled();
   });
 
-  it('stopNode reports nodes without a matching RAMROS terminal', async () => {
-    await activate(makeExtensionContext());
+  it('stopNode reports nodes without a matching RAMROS terminal', async () => {    await activate(makeExtensionContext());
 
     const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
       ([id]) => id === 'ramros.live.stopNode'
@@ -196,5 +195,59 @@ describe('extension command registration', () => {
       expect.stringContaining('not started by RAMROS'),
       'OK'
     );
+  });
+
+  it('bridgeTopic starts domain_bridge with a generated config after picks', async () => {
+    await activate(makeExtensionContext());
+
+    const cli = Ros2CliService.getInstance();
+    jest.spyOn(cli, 'getTopicType').mockResolvedValue('std_msgs/msg/String');
+    jest.spyOn(Ros2CliService.prototype, 'executeRaw').mockResolvedValue({
+      output: '/opt/ros/lyrical',
+      ok: true
+    });
+    (vscode.window.showQuickPick as jest.Mock)
+      .mockResolvedValueOnce({ label: 'Current environment (no override)', fromDomain: undefined })
+      .mockResolvedValueOnce({ label: '2', toDomain: 2 });
+
+    const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+      ([id]) => id === 'ramros.live.bridgeTopic'
+    )?.[1];
+    expect(handler).toBeDefined();
+
+    const item = new LiveTopicItem('/chatter');
+    await handler(item);
+
+    const terminalMock = vscode.window.createTerminal as jest.Mock;
+    const terminalOptions = terminalMock.mock.calls[terminalMock.mock.calls.length - 1][0];
+    expect(terminalOptions.name).toBe('Bridge: /chatter');
+    const sent = terminalOptions.name && (terminalMock.mock.results[terminalMock.mock.results.length - 1].value.sendText as jest.Mock).mock.calls[0][0] as string;
+    expect(sent).toContain('ros2 run domain_bridge domain_bridge');
+    expect(sent).toMatch(/bridge-.*\.yaml/);
+  });
+
+  it('bridgeTopic warns when domain_bridge is not installed', async () => {
+    await activate(makeExtensionContext());
+
+    (vscode.window.createTerminal as jest.Mock).mockClear();
+    jest.spyOn(Ros2CliService.prototype, 'executeRaw').mockResolvedValue({
+      output: '',
+      ok: false,
+      stderr: 'Package not found'
+    });
+
+    const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+      ([id]) => id === 'ramros.live.bridgeTopic'
+    )?.[1];
+    expect(handler).toBeDefined();
+
+    const item = new LiveTopicItem('/chatter');
+    await handler(item);
+
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('domain_bridge'),
+      'Install instructions'
+    );
+    expect(vscode.window.createTerminal).not.toHaveBeenCalled();
   });
 });

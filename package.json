@@ -195,6 +195,11 @@
         "icon": "$(stop-circle)"
       },
       {
+        "command": "ramros.live.bridgeTopic",
+        "title": "Bridge Topic to Domain…",
+        "icon": "$(arrow-both)"
+      },
+      {
         "command": "ramros.live.hzTopic",
         "title": "Measure Topic Frequency",
         "icon": "$(pulse)"
@@ -612,6 +617,15 @@
         {
           "command": "ramros.live.stopNode",
           "when": "view == ramrosLive && viewItem == liveNode"
+        },
+        {
+          "command": "ramros.live.bridgeTopic",
+          "when": "view == ramrosLive && viewItem == liveTopic",
+          "group": "inline@2"
+        },
+        {
+          "command": "ramros.live.bridgeTopic",
+          "when": "view == ramrosLive && viewItem == liveTopic"
         }
       ]
     },
