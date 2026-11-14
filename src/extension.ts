@@ -21,8 +21,9 @@ import { TreeItemBase } from './treeview/base-tree-item';
 import { BagPlayItem, BagPlayControlItem, BagLoopItem, BagRecordItem, BagFilesFolderItem, BagFileItem, ExternalBagFolderItem, BagEntriesProvider } from './treeview/bag-items';
 import { LaunchWizard } from './wizard/launch-wizard';
 import { runCreatePackageWizard, runAddToPackageWizard } from './wizard/package-wizard';
+import { PackageFormValidator } from './wizard/package-form-validator';
 import { RamrosDocProvider, showInReadonlyDoc } from './core/ramros-doc-provider';
-import { buildTopicPubCommand } from './core/command-builders';
+import { buildTopicPubCommand, shellSingleQuote, shellDoubleQuote } from './core/command-builders';
 import { Ros2CliService, validateParameterValue } from './core/ros2-cli-service';
 import { createInterfaceLoader } from './core/interface-loader';
 import { InterfaceField, InterfaceStructure } from './core/interface-parser';
@@ -161,9 +162,9 @@ async function startNodeWithOptions(nodeToRun: NodeInfo): Promise<void> {
 
   let runCommand: string;
   if (fs.existsSync(setupBashPath)) {
-    runCommand = `source "${setupBashPath}" && ros2 run ${nodeToRun.packageName} ${nodeToRun.name}`;
+    runCommand = `source "${setupBashPath}" && ros2 run ${shellDoubleQuote(nodeToRun.packageName)} ${shellDoubleQuote(nodeToRun.name)}`;
   } else {
-    runCommand = `ros2 run ${nodeToRun.packageName} ${nodeToRun.name}`;
+    runCommand = `ros2 run ${shellDoubleQuote(nodeToRun.packageName)} ${shellDoubleQuote(nodeToRun.name)}`;
   }
   if (args) {
     runCommand += ` ${args}`;
@@ -183,6 +184,39 @@ function resolveTopicName(treeItem?: TreeItemBase | TreeItemBase[]): string | un
     return (item as unknown as { getTopicName: () => string }).getTopicName();
   }
   return undefined;
+}
+
+function resolveNodeName(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {
+  const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
+  if (item && 'getNodeName' in item && typeof (item as { getNodeName?: unknown }).getNodeName === 'function') {
+    return (item as unknown as { getNodeName: () => string }).getNodeName();
+  }
+  return undefined;
+}
+
+/** Time for SIGINT to reach a node before its terminal is torn down. */
+const SIGINT_SETTLE_MS = 200;
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Whether a RAMROS node terminal title refers to the given ROS node name.
+ * Titles are "Node: <name>" or "Node: <alias> (<name>)"; the alias is
+ * user-provided, so only the ROS name in parentheses (or the whole title
+ * after the prefix) is matched.
+ */
+function terminalTitleMatchesNode(title: string, nodeName: string): boolean {
+  if (!title.startsWith('Node: ')) {
+    return false;
+  }
+  const rest = title.slice('Node: '.length);
+  if (rest === nodeName) {
+    return true;
+  }
+  const match = /^(.*) \((.*)\)$/.exec(rest);
+  return match?.[2] === nodeName;
 }
 
 function resolveTopicMessageType(treeItem?: TreeItemBase | TreeItemBase[]): string | undefined {
@@ -308,7 +342,7 @@ export async function selectBagForPlayback(bagPath: string): Promise<void> {
 
   // Get bag info
   try {
-    const bagInfo = await Ros2CliService.getInstance().executeRaw(`ros2 bag info "${bagPath}"`);
+    const bagInfo = await Ros2CliService.getInstance().executeRaw(`ros2 bag info ${shellDoubleQuote(bagPath)}`);
     const bagInfoOutput = bagInfo.output;
     if (!bagInfo.ok && bagInfoOutput.length === 0) {
       throw new Error(bagInfo.stderr ?? 'ros2 bag info failed');
@@ -351,18 +385,19 @@ export async function showInterfaceDefinition(qualifiedName: string, interfacePa
 }
 
 async function buildInterfaceShowCommand(qualifiedName: string, interfacePath?: string): Promise<string> {
+  const quoted = shellSingleQuote(qualifiedName);
   if (!interfacePath) {
-    return `ros2 interface show ${qualifiedName}`;
+    return `ros2 interface show ${quoted}`;
   }
   const workspaces = treeProvider?.getWorkspaces() ?? [];
   const workspace = findWorkspaceForPath(workspaces, interfacePath);
   const setupBashPath = workspace?.installPath ? path.join(workspace.installPath.fsPath, 'setup.bash') : undefined;
   if (!setupBashPath || !fs.existsSync(setupBashPath)) {
-    return `ros2 interface show ${qualifiedName}`;
+    return `ros2 interface show ${quoted}`;
   }
-  // POSIX dot sourcing: hidden execs run under /bin/sh (dash on Ubuntu),
-  // where the bashism `source` fails.
-  return `. "${setupBashPath}" && ros2 interface show ${qualifiedName}`;
+  // Hidden execs run under bash (see Ros2CliService.execOptions), so both
+  // dot sourcing and `source` work; bash is required by ROS setup scripts.
+  return `. "${setupBashPath}" && ros2 interface show ${quoted}`;
 }
 
 /**
@@ -376,11 +411,11 @@ async function fetchInterfaceDefinition(
   cli: Ros2CliService
 ): Promise<string> {
   const setupBashPath = workspace.installPath ? path.join(workspace.installPath.fsPath, 'setup.bash') : undefined;
-  // POSIX dot sourcing: hidden execs run under /bin/sh (dash on Ubuntu),
-  // where the bashism `source` fails.
+  // Hidden execs run under bash (see Ros2CliService.execOptions), so both
+  // dot sourcing and `source` work; bash is required by ROS setup scripts.
   const command = setupBashPath && fs.existsSync(setupBashPath)
-    ? `. "${setupBashPath}" && ros2 interface show ${qualifiedType}`
-    : `ros2 interface show ${qualifiedType}`;
+    ? `. "${setupBashPath}" && ros2 interface show ${shellSingleQuote(qualifiedType)}`
+    : `ros2 interface show ${shellSingleQuote(qualifiedType)}`;
   const result = await cli.executeRaw(command, { timeout: 5000 });
   if (!result.ok && result.output.length === 0) {
     throw new Error(result.stderr ?? `ros2 interface show ${qualifiedType} failed`);
@@ -497,7 +532,11 @@ export function collectAnalyzerPackageInput(
       } else {
         const segments = relativePath.split('/');
         if (segments.length === 2 && ['msg', 'srv', 'action'].includes(segments[0])) {
-          interfaceFiles.push(relativePath);
+          // Placeholder files (.gitkeep) and empty files are not interfaces —
+          // listing them produces bogus "unregistered interface" findings.
+          if (['.msg', '.srv', '.action'].includes(ext) && fs.statSync(fullPath).size > 0) {
+            interfaceFiles.push(relativePath);
+          }
         }
       }
     }
@@ -702,9 +741,14 @@ async function handleStructuredPublish(
 ): Promise<{ type: string; ok: boolean; message: string }> {
   if (message.type === 'publishRate') {
     const yaml = valuesToYaml(fields, { ...fieldDefaults(fields), ...message.values });
-    const command = `${sourcePrefix}${buildTopicPubCommand(topicName, messageType, yaml, 'rate', message.rate ?? 1)}`;
+    // The rate comes from the webview; only finite positive numbers may
+    // reach the command line.
+    const rate = typeof message.rate === 'number' && Number.isFinite(message.rate) && message.rate > 0
+      ? message.rate
+      : 1;
+    const command = `${sourcePrefix}${buildTopicPubCommand(topicName, messageType, yaml, 'rate', rate)}`;
     await terminalManager.executeInNewTerminal(command, workspace, `Pub: ${topicName}`);
-    return { type: 'result', ok: true, message: `Publishing at ${message.rate ?? 1} Hz in a terminal` };
+    return { type: 'result', ok: true, message: `Publishing at ${rate} Hz in a terminal` };
   }
 
   // publishOnce (default): hidden exec with a 10s subscriber timeout.
@@ -1023,6 +1067,16 @@ export async function activate(context: vscode.ExtensionContext) {
     
     vscode.commands.registerCommand('ramros.createPackage', async (options?: Record<string, unknown>) => {
       if (options && typeof options.packageName === 'string') {
+        // Programmatic invocation: run the same validation as the wizard so
+        // traversal paths or shell metacharacters cannot reach the file
+        // system or the `ros2 pkg create` command line.
+        const validation = new PackageFormValidator().validatePackageName(options.packageName, []);
+        if (!validation.isValid) {
+          void vscode.window.showErrorMessage(
+            `Invalid package name '${options.packageName}': ${validation.errors.join(' ')}`
+          );
+          return;
+        }
         console.log('[DEBUG] createPackage command received options:', JSON.stringify(options, null, 2));
         const config = {
           packageName: options.packageName,
@@ -1162,9 +1216,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
       let runCommand: string;
       if (fs.existsSync(setupBashPath)) {
-        runCommand = `source "${setupBashPath}" && ros2 run ${nodeToRun.packageName} ${nodeToRun.name}`;
+        runCommand = `source "${setupBashPath}" && ros2 run ${shellDoubleQuote(nodeToRun.packageName)} ${shellDoubleQuote(nodeToRun.name)}`;
       } else {
-        runCommand = `ros2 run ${nodeToRun.packageName} ${nodeToRun.name}`;
+        runCommand = `ros2 run ${shellDoubleQuote(nodeToRun.packageName)} ${shellDoubleQuote(nodeToRun.name)}`;
       }
 
       await terminalManager.executeInNewTerminal(runCommand, selectedWorkspace, `Node: ${nodeToRun.name}`);
@@ -1367,9 +1421,9 @@ export async function activate(context: vscode.ExtensionContext) {
       
       let runCommand: string;
       if (fs.existsSync(setupBashPath)) {
-        runCommand = `source "${setupBashPath}" && ros2 launch ${launchFileToRun.packageName} ${launchFileToRun.name}`;
+        runCommand = `source "${setupBashPath}" && ros2 launch ${shellDoubleQuote(launchFileToRun.packageName)} ${shellDoubleQuote(launchFileToRun.name)}`;
       } else {
-        runCommand = `ros2 launch ${launchFileToRun.packageName} ${launchFileToRun.name}`;
+        runCommand = `ros2 launch ${shellDoubleQuote(launchFileToRun.packageName)} ${shellDoubleQuote(launchFileToRun.name)}`;
       }
       
       await terminalManager.executeInNewTerminal(runCommand, selectedWorkspace, `Launch: ${launchFileToRun.name}`);
@@ -1400,6 +1454,24 @@ export async function activate(context: vscode.ExtensionContext) {
         if (!pkg) {
           void vscode.window.showErrorMessage(`Package '${opts.packageName}' not found`);
           return;
+        }
+
+        // Programmatic invocation: same validators as the wizard, so names
+        // with path separators or shell metacharacters are rejected before
+        // they reach file writes or command lines.
+        const validator = new PackageFormValidator();
+        if (opts.nodeType === 'interface') {
+          const nameError = validator.validateInterfaceName(opts.interfaceName ?? '');
+          if (nameError) {
+            void vscode.window.showErrorMessage(`Invalid interface name: ${nameError}`);
+            return;
+          }
+        } else {
+          const nameError = validator.validateNodeNameInput(opts.nodeName ?? '');
+          if (nameError) {
+            void vscode.window.showErrorMessage(`Invalid node name: ${nameError}`);
+            return;
+          }
         }
 
         try {
@@ -1514,7 +1586,16 @@ export async function activate(context: vscode.ExtensionContext) {
       });
       
       if (!filename) return;
-      
+
+      // The filename lands in a shell command line; reject anything that
+      // could break out of quoting instead of trusting the input box.
+      if (!/^[A-Za-z0-9._-]+$/.test(filename)) {
+        void vscode.window.showWarningMessage(
+          'Invalid bag filename. Use only letters, digits, dots, underscores and dashes.'
+        );
+        return;
+      }
+
       const folders = await vscode.window.showOpenDialog({
         canSelectFiles: false,
         canSelectFolders: true,
@@ -1548,10 +1629,13 @@ export async function activate(context: vscode.ExtensionContext) {
       
       if (!selectedTopics || selectedTopics.length === 0) return;
       
-      const topicArgs = selectedTopics.map(t => `"${t.label}"`).join(' ');
+      const topicArgs = selectedTopics.map(t => shellDoubleQuote(t.label)).join(' ');
       // Topics must be passed to the --topics flag (they are no longer positional),
       // and `script` provides a TTY so ros2 bag record accepts SPACE for pause/resume.
-      const recordCommand = `script -q -c 'ros2 bag record -o "${outputPath}" --topics ${topicArgs}' /dev/null`;
+      // The whole inner command is single-quoted for `script -c`; shellSingleQuote
+      // escapes embedded quotes so paths cannot break out.
+      const innerCommand = `ros2 bag record -o ${shellDoubleQuote(outputPath)} --topics ${topicArgs}`;
+      const recordCommand = `script -q -c ${shellSingleQuote(innerCommand)} /dev/null`;
       
       const recordingTerminal = await terminalManager.executeInNewTerminal(recordCommand, workspace, `Bag Record: ${filename}`);
       
@@ -1609,6 +1693,48 @@ export async function activate(context: vscode.ExtensionContext) {
     
     vscode.commands.registerCommand('ramros.live.settings', async () => {
       liveTreeProvider.openSettings();
+    }),
+
+    vscode.commands.registerCommand('ramros.live.stopNode', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
+      const nodeName = resolveNodeName(treeItem);
+      if (!nodeName) {
+        void vscode.window.showWarningMessage('No node selected');
+        return;
+      }
+
+      const choice = await vscode.window.showWarningMessage(
+        `Stop node ${nodeName}?`,
+        { modal: true },
+        'Stop Node',
+        'Cancel'
+      );
+      if (choice !== 'Stop Node') {
+        return;
+      }
+
+      // RAMROS starts nodes in terminals named "Node: <ros name>" (or
+      // "Node: <alias> (<ros name>)"). Only those terminals are stoppable:
+      // send SIGINT (Ctrl+C) so the node shuts down gracefully, then close
+      // the terminal.
+      const terminals = vscode.window.terminals;
+      const candidates = terminals.filter(t => t.name.startsWith('Node: '));
+      const byRosName = candidates.filter(t => terminalTitleMatchesNode(t.name, nodeName));
+      if (byRosName.length === 0) {
+        void vscode.window.showWarningMessage(
+          `Node ${nodeName} was not started by RAMROS (no matching terminal found). Stop it where it is running.`,
+          'OK'
+        );
+        return;
+      }
+
+      for (const terminal of byRosName) {
+        terminal.sendText('\x03');
+      }
+      await delay(SIGINT_SETTLE_MS);
+      for (const terminal of byRosName) {
+        terminal.dispose();
+      }
+      void vscode.window.showInformationMessage(`Stop signal sent to node ${nodeName}`);
     }),
     
     vscode.commands.registerCommand('ramros.tools.healthCheck', async () => {
@@ -1845,7 +1971,7 @@ export async function activate(context: vscode.ExtensionContext) {
       } else {
         // Start playback with script wrapper for keyboard control support
         const loopArg = bagSession.isPlaybackLooping ? '--loop' : '';
-        const playCommand = `script -q -c 'ros2 bag play "${bagPath}" ${loopArg}' /dev/null`;
+        const playCommand = `script -q -c ${shellSingleQuote(`ros2 bag play ${shellDoubleQuote(bagPath)} ${loopArg}`)} /dev/null`;
         const newTerminal = await terminalManager.executeInNewTerminal(playCommand, workspace, `Bag Play: ${path.basename(bagPath)}`);
         bagSession.setPlaybackTerminal(newTerminal);
         BagPlayControlItem.setPlayingState(true, false);
@@ -1870,7 +1996,7 @@ export async function activate(context: vscode.ExtensionContext) {
           if (workspace) {
             await terminalManager.waitForRestart();
             const loopArg = isLooping ? '--loop' : '';
-            const playCommand = `script -q -c 'ros2 bag play "${bagPath}" ${loopArg}' /dev/null`;
+            const playCommand = `script -q -c ${shellSingleQuote(`ros2 bag play ${shellDoubleQuote(bagPath)} ${loopArg}`)} /dev/null`;
             const newTerminal = await terminalManager.executeInNewTerminal(playCommand, workspace, `Bag Play: ${path.basename(bagPath)}`);
             bagSession.setPlaybackTerminal(newTerminal);
             BagPlayControlItem.setPlayingState(true, false);
@@ -1933,7 +2059,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const workspace = await resolveWorkspaceForPath(bagPath);
       if (!workspace) return;
 
-      await terminalManager.executeInNewTerminal(`rqt_bag "${bagPath}"`, workspace, `rqt_bag: ${path.basename(bagPath)}`);
+      await terminalManager.executeInNewTerminal(`rqt_bag ${shellDoubleQuote(bagPath)}`, workspace, `rqt_bag: ${path.basename(bagPath)}`);
     }),
 
     vscode.commands.registerCommand('ramros.bag.playBagByPath', async (bagPath: string) => {

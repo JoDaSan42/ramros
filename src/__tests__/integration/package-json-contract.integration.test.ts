@@ -99,6 +99,14 @@ describe('package.json contract', () => {
     expect(findInlineEntry(contextEntries, 'ramros.live.pubTopic', 'liveTopic')).toBeDefined();
   });
 
+  it('offers Stop Node on liveNode items', () => {
+    expect(registeredCommands.has('ramros.live.stopNode')).toBe(true);
+    expect(findInlineEntry(contextEntries, 'ramros.live.stopNode', 'liveNode')).toBeDefined();
+    expect(contextEntries.find(
+      entry => entry.command === 'ramros.live.stopNode' && viewItemOf(entry) === 'liveNode' && !isInline(entry)
+    )).toBeDefined();
+  });
+
   it('declares the parameter update command', () => {
     expect(registeredCommands.has('ramros.live.updateParameters')).toBe(true);
   });

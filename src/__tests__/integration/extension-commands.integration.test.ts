@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { activate } from '../../extension';
-import { LiveParameterItem } from '../../treeview/live-items';
+import { LiveNodeItem, LiveParameterItem } from '../../treeview/live-items';
 import { Ros2CliService } from '../../core/ros2-cli-service';
 
 function makeExtensionContext(): vscode.ExtensionContext {
@@ -117,6 +117,84 @@ describe('extension command registration', () => {
     expect(cli.setParameterValue).toHaveBeenCalledWith('/talker', 'use_sim_time', 'True');
     expect(vscode.window.showInputBox).toHaveBeenCalledWith(
       expect.objectContaining({ value: 'False' })
+    );
+  });
+
+  it('stopNode sends SIGINT to the node terminal and disposes it after confirmation', async () => {
+    await activate(makeExtensionContext());
+
+    const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+      ([id]) => id === 'ramros.live.stopNode'
+    )?.[1];
+    expect(handler).toBeDefined();
+
+    const item = new LiveNodeItem('/talker');
+    // Modal: first button confirms.
+    (vscode.window.showWarningMessage as jest.Mock).mockResolvedValue('Stop Node');
+
+    // RAMROS started this node in a terminal named "Node: /talker".
+    const nodeTerminal = {
+      name: 'Node: /talker',
+      sendText: jest.fn(),
+      dispose: jest.fn()
+    } as unknown as vscode.Terminal;
+    (vscode.window as unknown as { terminals: vscode.Terminal[] }).terminals = [nodeTerminal];
+
+    await handler(item);
+
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('/talker'),
+      { modal: true },
+      'Stop Node',
+      'Cancel'
+    );
+    expect(nodeTerminal.sendText).toHaveBeenCalledWith('\x03');
+    expect(nodeTerminal.dispose).toHaveBeenCalled();
+  });
+
+  it('stopNode does nothing when the confirmation is cancelled', async () => {
+    await activate(makeExtensionContext());
+
+    const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+      ([id]) => id === 'ramros.live.stopNode'
+    )?.[1];
+    expect(handler).toBeDefined();
+
+    const item = new LiveNodeItem('/talker');
+    (vscode.window.showWarningMessage as jest.Mock).mockResolvedValue(undefined);
+
+    const nodeTerminal = {
+      name: 'Node: /talker',
+      sendText: jest.fn(),
+      dispose: jest.fn()
+    } as unknown as vscode.Terminal;
+    (vscode.window as unknown as { terminals: vscode.Terminal[] }).terminals = [nodeTerminal];
+
+    await handler(item);
+
+    expect(nodeTerminal.sendText).not.toHaveBeenCalled();
+    expect(nodeTerminal.dispose).not.toHaveBeenCalled();
+  });
+
+  it('stopNode reports nodes without a matching RAMROS terminal', async () => {
+    await activate(makeExtensionContext());
+
+    const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+      ([id]) => id === 'ramros.live.stopNode'
+    )?.[1];
+    expect(handler).toBeDefined();
+
+    const item = new LiveNodeItem('/talker');
+    (vscode.window.showWarningMessage as jest.Mock).mockResolvedValue('Stop Node');
+
+    // Node runs in a terminal RAMROS does not know (started elsewhere).
+    (vscode.window as unknown as { terminals: vscode.Terminal[] }).terminals = [];
+
+    await handler(item);
+
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('not started by RAMROS'),
+      'OK'
     );
   });
 });
