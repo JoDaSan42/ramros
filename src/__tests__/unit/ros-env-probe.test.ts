@@ -12,6 +12,14 @@ describe('ros env probe', () => {
   it('normalizes case and whitespace', () => {
     expect(parseRosEnvProbeOutput('RMW= RMW_CYCLONEDDS_CPP \nDOMAIN=1\n').rmw).toBe('rmw_cyclonedds_cpp');
   });
+  it('uses the last occurrence when a line repeats', () => {
+    const r = parseRosEnvProbeOutput('RMW=rmw_fastrtps_cpp\nDOMAIN=1\nRMW=rmw_cyclonedds_cpp\nDOMAIN=2\n');
+    expect(r).toEqual({ rmw: 'rmw_cyclonedds_cpp', domainId: 2 });
+  });
+  it('keeps the default domain when DOMAIN is not an integer', () => {
+    const r = parseRosEnvProbeOutput('RMW=rmw_cyclonedds_cpp\nDOMAIN=abc\n');
+    expect(r).toEqual({ rmw: 'rmw_cyclonedds_cpp', domainId: 0 });
+  });
   it('defaultRmwForDistro returns Fast DDS for all known distros', () => {
     for (const d of ['humble', 'iron', 'jazzy', 'kilted', 'lyrical', 'rolling']) {
       expect(defaultRmwForDistro(d)).toBe('rmw_fastrtps_cpp');
@@ -32,9 +40,16 @@ describe('ros env probe', () => {
     expect(commands[0]).toContain('[ -f /home/ws/install/setup.bash ] && source');
   });
 
-  it('returns defaults when the probe fails instead of throwing', async () => {
+  it('returns defaults when the probe fails (ok:false) instead of throwing', async () => {
     const probe = async () => ({ output: '', ok: false });
     const r = await probeRosEnv(probe, { distro: 'kilted' });
+
+    expect(r).toEqual({ rmw: 'rmw_fastrtps_cpp', domainId: 0 });
+  });
+
+  it('returns defaults when the probe promise rejects instead of throwing', async () => {
+    const probe = () => Promise.reject(new Error('spawn failed'));
+    const r = await probeRosEnv(probe, { distro: 'iron' });
 
     expect(r).toEqual({ rmw: 'rmw_fastrtps_cpp', domainId: 0 });
   });

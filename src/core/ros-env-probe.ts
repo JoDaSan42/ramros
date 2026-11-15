@@ -26,6 +26,9 @@ export function defaultRmwForDistro(distro: string): string {
  * Builds the single-line probe command: source the distro setup.bash (if it
  * exists), source the workspace overlay (if configured and present), then
  * print RMW_IMPLEMENTATION and ROS_DOMAIN_ID from the resulting environment.
+ *
+ * `workspaceInstallPath` is the workspace root, not the install dir: the
+ * `/install/setup.bash` suffix is appended here.
  */
 function buildProbeCommand(options: { distro: string; workspaceInstallPath?: string }): string {
   const distroSetup = `/opt/ros/${options.distro}/setup.bash`;
@@ -62,6 +65,8 @@ export function parseRosEnvProbeOutput(output: string): RosEnvProbeResult {
   }
   const normalizedRmw = rmw.trim().toLowerCase();
   return {
+    // distro is unknown at parse time; the default is currently
+    // distro-independent, so passing '' is safe
     rmw: normalizedRmw.length > 0 ? normalizedRmw : defaultRmwForDistro(''),
     domainId
   };
@@ -69,15 +74,17 @@ export function parseRosEnvProbeOutput(output: string): RosEnvProbeResult {
 
 /**
  * Sources the distro setup.bash (and optional workspace overlay), then reads
- * RMW_IMPLEMENTATION and ROS_DOMAIN_ID from the resulting environment. A
- * failed probe yields the distro defaults instead of throwing.
+ * RMW_IMPLEMENTATION and ROS_DOMAIN_ID from the resulting environment.
+ * `workspaceInstallPath` is the workspace root, not the install dir: the
+ * `/install/setup.bash` suffix is appended. A failed or rejected probe yields
+ * the distro defaults instead of throwing.
  */
 export async function probeRosEnv(
   probe: (command: string) => Promise<{ output: string; ok: boolean }>,
   options: { distro: string; workspaceInstallPath?: string }
 ): Promise<RosEnvProbeResult> {
-  const result = await probe(buildProbeCommand(options));
-  if (!result.ok) {
+  const result = await probe(buildProbeCommand(options)).catch(() => undefined);
+  if (!result || !result.ok) {
     return { rmw: defaultRmwForDistro(options.distro), domainId: 0 };
   }
   return parseRosEnvProbeOutput(result.output);
