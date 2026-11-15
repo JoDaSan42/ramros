@@ -147,4 +147,24 @@ describe('package.json contract', () => {
     const command = (packageJson.contributes?.commands ?? []).find(c => c.command === 'ramros.runNodeWithOptions');
     expect(command?.icon).toBe('$(settings-gear)');
   });
+
+  it('offers bridge commands on live services and actions (context menu only)', () => {
+    expect(registeredCommands.has('ramros.live.bridgeTopic')).toBe(true);
+    expect(registeredCommands.has('ramros.live.bridgeService')).toBe(true);
+    expect(registeredCommands.has('ramros.live.bridgeAction')).toBe(true);
+
+    // liveService: context-menu entry only, no inline button.
+    const serviceInline = findInlineEntry(contextEntries, 'ramros.live.bridgeService', 'liveService');
+    expect(serviceInline).toBeUndefined();
+    expect(contextEntries.find(
+      entry => entry.command === 'ramros.live.bridgeService' && viewItemOf(entry) === 'liveService' && !isInline(entry)
+    )).toBeDefined();
+
+    // liveAction: context-menu entry only, no inline button.
+    const actionInline = findInlineEntry(contextEntries, 'ramros.live.bridgeAction', 'liveAction');
+    expect(actionInline).toBeUndefined();
+    expect(contextEntries.find(
+      entry => entry.command === 'ramros.live.bridgeAction' && viewItemOf(entry) === 'liveAction' && !isInline(entry)
+    )).toBeDefined();
+  });
 });

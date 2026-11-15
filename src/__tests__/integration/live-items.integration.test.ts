@@ -43,6 +43,34 @@ describe('Live Items Integration Tests', () => {
       expect(children.some(c => c instanceof NodeParametersItem)).toBe(true);
     });
 
+    it('exposes an actions folder when action servers are given', async () => {
+      const item = new LiveNodeItem('/talker', {
+        publishedTopics: [],
+        subscribedTopics: [],
+        actionServers: [{ name: '/fibonacci', type: 'example_interfaces/action/Fibonacci' }]
+      });
+
+      const children = await item.getChildren();
+
+      const actions = children.find(c => c instanceof NodeActionsItem);
+      expect(actions).toBeInstanceOf(NodeActionsItem);
+
+      const actionChildren = await actions!.getChildren();
+      const action = actionChildren.find(c => c instanceof LiveActionItem) as LiveActionItem;
+      expect(action).toBeInstanceOf(LiveActionItem);
+      expect(action.getActionName()).toBe('/fibonacci');
+      expect(action.getActionType()).toBe('example_interfaces/action/Fibonacci');
+    });
+
+    it('omits the actions folder when no action servers are given', async () => {
+      const item = new LiveNodeItem('/talker');
+
+      const children = await item.getChildren();
+
+      expect(children.some(c => c instanceof NodeActionsItem)).toBe(false);
+      expect(children.some(c => c instanceof NodeParametersItem)).toBe(true);
+    });
+
     it('NodeActionsItem renders children as liveAction items with type description', async () => {
       const folder = new NodeActionsItem([{ name: '/fibonacci', type: 'example_interfaces/action/Fibonacci' }, { name: '/notype' }]);
       expect(folder.contextValue).toBe('nodeActions');

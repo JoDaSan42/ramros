@@ -12,6 +12,15 @@ import { RamrosTreeProvider } from './treeview/tree-provider';
 import { ToolsTreeProvider } from './treeview/tools-tree-provider';
 import { LiveTreeProvider } from './treeview/live-tree-provider';
 import { LiveParameterItem, LiveNodeItem, LiveTopicItem, NodeParametersItem } from './treeview/live-items';
+import { resolveBridgeStrategy, BridgeEntityKind } from './core/bridge-policy';
+import { probeRosEnv } from './core/ros-env-probe';
+import { buildZenohBridgeConfigs, pickFreePort } from './core/zenoh-bridge';
+import {
+  zenohInstallGuide,
+  domainBridgeInstallGuide,
+  servicesActionsGuide,
+  zenohNativeGuide
+} from './core/bridge-install-docs';
 import { TerminalManager } from './executor/terminal-manager';
 import { BagSessionService } from './executor/bag-session-service';
 import { PackageCreator } from './wizard/package-creator';
@@ -239,6 +248,21 @@ function resolveServiceItem(treeItem?: TreeItemBase | TreeItemBase[]): { name: s
     return {
       name: (item as unknown as { getServiceName: () => string }).getServiceName(),
       type: (item as unknown as { getServiceType: () => string | undefined }).getServiceType(),
+    };
+  }
+  return undefined;
+}
+
+function resolveActionItem(treeItem?: TreeItemBase | TreeItemBase[]): { name: string; type?: string } | undefined {
+  const item = Array.isArray(treeItem) ? treeItem[0] : treeItem;
+  if (
+    item &&
+    'getActionName' in item && typeof (item as { getActionName?: unknown }).getActionName === 'function' &&
+    'getActionType' in item && typeof (item as { getActionType?: unknown }).getActionType === 'function'
+  ) {
+    return {
+      name: (item as unknown as { getActionName: () => string }).getActionName(),
+      type: (item as unknown as { getActionType: () => string | undefined }).getActionType(),
     };
   }
   return undefined;
@@ -611,6 +635,178 @@ export function resolveWorkspaceForLaunch(
     return workspaces.find(w => w.id === ws.id) ?? undefined;
   }
   return undefined;
+}
+
+/**
+ * Shared flow behind 'Bridge Topic/Service/Action to Domain…'.
+ *
+ * Chooses the bridging strategy from the active distro, the probed RMW and
+ * the entity kind: rmw_zenoh_cpp gets the native-RMW guide; services/actions
+ * under a non-CycloneDDS RMW get the limitation guide; topics on pre-Jazzy
+ * distros bridge via the `domain_bridge` package; everything else uses two
+ * peering `zenoh-bridge-ros2dds` instances. Missing tools render the matching
+ * install guide in a readonly tab instead of starting a dead terminal.
+ */
+async function runBridgeFlow(
+  entityKind: BridgeEntityKind,
+  entityName: string | undefined,
+  messageType: string | undefined
+): Promise<void> {
+  if (!entityName) return;
+  const cli = Ros2CliService.getInstance();
+
+  const distro = new RosEnvironmentService(
+    vscode.workspace.getConfiguration('ramros.ros').get<string>('rosRoot', '/opt/ros')
+  ).getActiveDistributionName() ?? '';
+
+  const workspace = await pickWorkspace();
+  if (!workspace) return;
+
+  // Probe the effective RMW + ROS_DOMAIN_ID (distro setup.bash plus the
+  // workspace overlay). A failed probe falls back to distro defaults inside
+  // probeRosEnv instead of aborting the flow.
+  const probe = await probeRosEnv(
+    async command => {
+      const r = await cli.executeRaw(command, { timeout: 10000 });
+      return { output: r.output, ok: r.ok };
+    },
+    { distro, workspaceInstallPath: workspace.rootPath.fsPath }
+  );
+
+  const strategy = resolveBridgeStrategy({ distro, rmw: probe.rmw, entityKind });
+  if (strategy.kind === 'guide') {
+    if (strategy.reason === 'rmw-zenoh-native') {
+      await showInReadonlyDoc(ramrosDocProvider, `bridge/${strategy.reason}`, zenohNativeGuide({ entityKind, entityName }));
+    } else {
+      await showInReadonlyDoc(
+        ramrosDocProvider,
+        `bridge/${strategy.reason}`,
+        servicesActionsGuide({ distro, rmw: probe.rmw, entityKind, entityName })
+      );
+    }
+    return;
+  }
+
+  // domain_bridge is a separate package, not part of the ROS desktop
+  // install — fail early with guidance instead of a dead terminal.
+  if (strategy.kind === 'domainBridge') {
+    const availability = await cli.executeRaw('ros2 pkg prefix domain_bridge', { timeout: 10000 });
+    if (!availability.ok || availability.output.trim().length === 0) {
+      await showInReadonlyDoc(ramrosDocProvider, 'bridge/install-domain-bridge', domainBridgeInstallGuide(distro));
+      return;
+    }
+  } else {
+    // zenoh-bridge-ros2dds is a standalone binary, not a ROS package.
+    const zenohBinary = await cli.executeRaw('command -v zenoh-bridge-ros2dds', { timeout: 10000 });
+    if (!zenohBinary.ok || zenohBinary.output.trim().length === 0) {
+      await showInReadonlyDoc(ramrosDocProvider, 'bridge/install-zenoh', zenohInstallGuide(distro));
+      return;
+    }
+  }
+
+  // domain_bridge needs the topic type for its YAML; zenoh's ros2dds plugin
+  // discovers the type itself.
+  let resolvedType = messageType;
+  if (strategy.kind === 'domainBridge' && !resolvedType) {
+    resolvedType = await cli.getTopicType(entityName) ?? undefined;
+    if (!resolvedType) {
+      void vscode.window.showWarningMessage(`Could not resolve the type of ${entityName}. Is a node publishing on it?`);
+      return;
+    }
+  }
+
+  const fromPick = await vscode.window.showQuickPick([
+    { label: 'Current environment (no override)', fromDomain: probe.domainId },
+    ...liveTreeProvider.getDomainGroups().map(id => ({ label: `Domain ${id}`, fromDomain: id }))
+  ], { placeHolder: 'Bridge from which domain?' });
+  if (!fromPick) return;
+
+  const configuredDomains = vscode.workspace.getConfiguration('ramros.liveView').get<number[]>('domainIds', []);
+  const toOptions = [
+    ...configuredDomains.map(id => ({ label: `Domain ${id}`, toDomain: id })),
+    { label: 'Enter domain id…', toDomain: -1 }
+  ];
+  const toPick = await vscode.window.showQuickPick(toOptions, { placeHolder: 'Bridge to which domain?' });
+  if (!toPick) return;
+
+  let toDomain = toPick.toDomain;
+  if (toDomain === -1) {
+    const raw = await vscode.window.showInputBox({
+      prompt: 'Target ROS_DOMAIN_ID (integer)',
+      validateInput: value => (/^\d+$/.test(value) ? undefined : 'Domain id must be a non-negative integer')
+    });
+    if (raw === undefined) return;
+    toDomain = parseInt(raw, 10);
+  }
+
+  if (strategy.kind === 'domainBridge') {
+    // Write the bridge config to a temp file and start domain_bridge in a
+    // dedicated terminal so the user can stop it with Ctrl+C.
+    const configYaml = buildDomainBridgeConfigYaml({
+      topic: entityName,
+      type: resolvedType as string,
+      fromDomain: fromPick.fromDomain,
+      toDomain
+    });
+    const configFile = path.join(os.tmpdir(), `ramros-bridge-${Date.now()}.yaml`);
+    try {
+      fs.writeFileSync(configFile, configYaml, 'utf8');
+      await terminalManager.executeInNewTerminal(
+        `ros2 run domain_bridge domain_bridge ${shellSingleQuote(configFile)}`,
+        workspace,
+        `Bridge: ${entityName}`
+      );
+    } finally {
+      // Once the terminal has the command the file has served its purpose;
+      // domain_bridge reads it once at startup.
+      fs.rmSync(configFile, { force: true });
+    }
+    void vscode.window.showInformationMessage(
+      `Bridging ${entityName} to domain ${toDomain}. Stop the bridge with Ctrl+C in its terminal.`
+    );
+  } else {
+    // Two peering zenoh-bridge-ros2dds instances: A listens on a free port
+    // in the source domain, B connects to it from the target domain. Both
+    // configs allow-list exactly the bridged entity.
+    const peerPort = await pickFreePort();
+    const { configA, configB } = buildZenohBridgeConfigs({
+      entityKind,
+      entityName,
+      fromDomain: fromPick.fromDomain,
+      toDomain,
+      peerPort
+    });
+    const timestamp = Date.now();
+    const configFiles = [
+      { file: path.join(os.tmpdir(), `ramros-bridge-a-${timestamp}.json5`), content: configA },
+      { file: path.join(os.tmpdir(), `ramros-bridge-b-${timestamp}.json5`), content: configB }
+    ];
+    try {
+      for (const { file, content } of configFiles) {
+        fs.writeFileSync(file, content, 'utf8');
+      }
+      // kill 0 signals the whole process group, so Ctrl+C stops both
+      // bridge instances; `wait` keeps the terminal open while they run.
+      const command = [
+        "trap 'kill 0' EXIT;",
+        `zenoh-bridge-ros2dds -c ${shellSingleQuote(configFiles[0].file)} &`,
+        `zenoh-bridge-ros2dds -c ${shellSingleQuote(configFiles[1].file)} &`,
+        'wait'
+      ].join(' ');
+      await terminalManager.executeInNewTerminal(command, workspace, `Bridge: ${entityName}`);
+    } finally {
+      // Both JSON5 files are removed on every exit path: once the terminal
+      // has the command (or if anything failed before it), the configs have
+      // served their purpose — zenoh-bridge-ros2dds reads them once at
+      // startup.
+      for (const { file } of configFiles) {
+        fs.rmSync(file, { force: true });
+      }
+    }
+    void vscode.window.showInformationMessage(
+      `Bridging ${entityName} bidirectionally between domains ${fromPick.fromDomain} and ${toDomain}. Stop the bridge with Ctrl+C in its terminal.`
+    );
+  }
 }
 
 export async function publishToTopic(
@@ -1764,79 +1960,34 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('ramros.live.bridgeTopic', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
-      const cli = Ros2CliService.getInstance();
       const topicName = resolveTopicName(treeItem) ?? await pickTopic();
       if (!topicName) return;
 
-      // domain_bridge is a separate package, not part of the ROS desktop
-      // install — fail early with guidance instead of a dead terminal.
-      const availability = await cli.executeRaw('ros2 pkg prefix domain_bridge', { timeout: 10000 });
-      if (!availability.ok || availability.output.trim().length === 0) {
-        const openDocs = await vscode.window.showWarningMessage(
-          `Cannot bridge ${topicName}: the 'domain_bridge' package is not installed in the active ROS distribution.`,
-          'Install instructions'
-        );
-        if (openDocs === 'Install instructions') {
-          await vscode.env.openExternal(vscode.Uri.parse('https://github.com/ros2/domain_bridge'));
-        }
-        return;
-      }
-
-      const messageType = resolveTopicMessageType(treeItem) ?? await cli.getTopicType(topicName) ?? undefined;
-      if (!messageType) {
-        void vscode.window.showWarningMessage(`Could not resolve the type of ${topicName}. Is a node publishing on it?`);
-        return;
-      }
-
-      const fromPick = await vscode.window.showQuickPick([
-        { label: 'Current environment (no override)', fromDomain: undefined },
-        ...liveTreeProvider.getDomainGroups().map(id => ({ label: `Domain ${id}`, fromDomain: id }))
-      ], { placeHolder: 'Bridge from which domain?' });
-      if (!fromPick) return;
-
-      const configuredDomains = vscode.workspace.getConfiguration('ramros.liveView').get<number[]>('domainIds', []);
-      const toOptions = [
-        ...configuredDomains.map(id => ({ label: `Domain ${id}`, toDomain: id })),
-        { label: 'Enter domain id…', toDomain: -1 }
-      ];
-      const toPick = await vscode.window.showQuickPick(toOptions, { placeHolder: 'Bridge to which domain?' });
-      if (!toPick) return;
-
-      let toDomain = toPick.toDomain;
-      if (toDomain === -1) {
-        const raw = await vscode.window.showInputBox({
-          prompt: 'Target ROS_DOMAIN_ID (integer)',
-          validateInput: value => (/^\d+$/.test(value) ? undefined : 'Domain id must be a non-negative integer')
-        });
-        if (raw === undefined) return;
-        toDomain = parseInt(raw, 10);
-      }
-
-      // Write the bridge config to a temp file and start domain_bridge in a
-      // dedicated terminal so the user can stop it with Ctrl+C.
-      const configYaml = buildDomainBridgeConfigYaml({
-        topic: topicName,
-        type: messageType,
-        fromDomain: fromPick.fromDomain,
-        toDomain
-      });
-      const configFile = path.join(os.tmpdir(), `ramros-bridge-${Date.now()}.yaml`);
-      fs.writeFileSync(configFile, configYaml, 'utf8');
-
-      const workspace = await pickWorkspace();
-      if (!workspace) {
-        fs.rmSync(configFile, { force: true });
-        return;
-      }
-
-      await terminalManager.executeInNewTerminal(
-        `ros2 run domain_bridge domain_bridge ${shellSingleQuote(configFile)}`,
-        workspace,
-        `Bridge: ${topicName}`
+      await runBridgeFlow(
+        'topic',
+        topicName,
+        resolveTopicMessageType(treeItem) ?? await Ros2CliService.getInstance().getTopicType(topicName) ?? undefined
       );
-      void vscode.window.showInformationMessage(
-        `Bridging ${topicName} to domain ${toDomain}. Stop the bridge with Ctrl+C in its terminal.`
-      );
+    }),
+
+    vscode.commands.registerCommand('ramros.live.bridgeService', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
+      const serviceItem = resolveServiceItem(treeItem);
+      if (!serviceItem) {
+        void vscode.window.showWarningMessage('No service selected');
+        return;
+      }
+
+      await runBridgeFlow('service', serviceItem.name, serviceItem.type);
+    }),
+
+    vscode.commands.registerCommand('ramros.live.bridgeAction', async (treeItem?: TreeItemBase | TreeItemBase[]) => {
+      const actionItem = resolveActionItem(treeItem);
+      if (!actionItem) {
+        void vscode.window.showWarningMessage('No action selected');
+        return;
+      }
+
+      await runBridgeFlow('action', actionItem.name, actionItem.type);
     }),
 
     vscode.commands.registerCommand('ramros.live.toggleEnabled', async () => {

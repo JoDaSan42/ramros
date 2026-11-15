@@ -80,7 +80,7 @@ export class RosEnvironmentService {
     return true;
   }
   
-  private getActiveDistributionName(): string | null {
+  getActiveDistributionName(): string | null {
     return process.env.ROS_DISTRO || null;
   }
   
