@@ -194,7 +194,9 @@ export class Ros2CliService {
 
   /**
    * Environment for exec calls: current environment plus ROS_DOMAIN_ID when
-   * a domain is set.
+   * a domain is set. An explicit domain override wins over the global
+   * default and travels with the options, so concurrent calls with different
+   * domains cannot mislabel each other.
    */
   private buildEnv(overrides?: Record<string, string>): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = { ...process.env };
@@ -208,11 +210,11 @@ export class Ros2CliService {
   }
 
   /** Options shared by all exec calls: env injection + bash shell. */
-  private execOptions(timeout?: number): { encoding: 'utf-8'; timeout?: number; env: NodeJS.ProcessEnv; shell: string } {
+  private execOptions(timeout?: number, domainOverride?: number): { encoding: 'utf-8'; timeout?: number; env: NodeJS.ProcessEnv; shell: string } {
     return {
       encoding: 'utf-8',
       timeout,
-      env: this.buildEnv(),
+      env: this.buildEnv(domainOverride !== undefined ? { ROS_DOMAIN_ID: String(domainOverride) } : undefined),
       // Hidden execs source ROS setup.bash scripts, which use bash features
       // (they fail with "Bad substitution" under dash, the /bin/sh on Ubuntu).
       shell: '/bin/bash'
@@ -222,6 +224,17 @@ export class Ros2CliService {
   private async executeCommand(command: string): Promise<string[]> {
     try {
       const { stdout } = await execAsync(command, this.execOptions(5000));
+      return stdout.split('\n').filter(line => line.trim().length > 0);
+    } catch (error) {
+      console.error(`Failed to execute command: ${command}`, error);
+      return [];
+    }
+  }
+
+  /** executeCommand with an explicit domain; see execOptions. */
+  private async executeCommandForDomain(command: string, domainId: number): Promise<string[]> {
+    try {
+      const { stdout } = await execAsync(command, this.execOptions(5000, domainId));
       return stdout.split('\n').filter(line => line.trim().length > 0);
     } catch (error) {
       console.error(`Failed to execute command: ${command}`, error);
@@ -265,34 +278,35 @@ export class Ros2CliService {
 
   /**
    * Lists active nodes in a specific domain, regardless of the global
-   * default set via setDomainId.
+   * default set via setDomainId. The domain travels with the exec options,
+   * so concurrent calls with different domains stay isolated.
    */
   async getActiveNodesForDomain(domainId: number): Promise<string[]> {
-    const previous = this.domainId;
-    this.domainId = domainId;
-    try {
-      return await this.executeCommand('ros2 node list');
-    } finally {
-      this.domainId = previous;
-    }
+    return this.executeCommandForDomain('ros2 node list', domainId);
   }
 
   /**
    * Lists active topics in a specific domain. See getActiveNodesForDomain.
    */
   async getActiveTopicsForDomain(domainId: number): Promise<string[]> {
-    const previous = this.domainId;
-    this.domainId = domainId;
-    try {
-      return await this.executeCommand('ros2 topic list');
-    } finally {
-      this.domainId = previous;
-    }
+    return this.executeCommandForDomain('ros2 topic list', domainId);
   }
 
   async getTopicInfo(topicName: string): Promise<TopicInfo | null> {
+    return this.fetchTopicInfo(topicName);
+  }
+
+  /**
+   * Topic details (type, publishers, subscribers) in a specific domain,
+   * regardless of the global default set via setDomainId.
+   */
+  async getTopicInfoForDomain(topicName: string, domainId: number): Promise<TopicInfo | null> {
+    return this.fetchTopicInfo(topicName, domainId);
+  }
+
+  private async fetchTopicInfo(topicName: string, domainId?: number): Promise<TopicInfo | null> {
     try {
-      const { stdout } = await execAsync(`ros2 topic info ${topicName} --verbose`, this.execOptions(5000));
+      const { stdout } = await execAsync(`ros2 topic info ${topicName} --verbose`, this.execOptions(5000, domainId));
       const lines = stdout.split('\n');
 
       let messageType = '';
@@ -382,8 +396,20 @@ export class Ros2CliService {
   }
 
   async getNodeInfo(nodeName: string): Promise<NodeInfo | null> {
+    return this.fetchNodeInfo(nodeName);
+  }
+
+  /**
+   * Node details (topics, services, actions) in a specific domain,
+   * regardless of the global default set via setDomainId.
+   */
+  async getNodeInfoForDomain(nodeName: string, domainId: number): Promise<NodeInfo | null> {
+    return this.fetchNodeInfo(nodeName, domainId);
+  }
+
+  private async fetchNodeInfo(nodeName: string, domainId?: number): Promise<NodeInfo | null> {
     try {
-      const { stdout } = await execAsync(`ros2 node info ${nodeName}`, this.execOptions(5000));
+      const { stdout } = await execAsync(`ros2 node info ${nodeName}`, this.execOptions(5000, domainId));
       const parsed = parseNodeInfoOutput(stdout);
 
       return {

@@ -64,7 +64,8 @@ export class LiveNodeItem extends TreeItemBase {
       subscribedTopics?: string[];
       serviceServers?: ServiceServerInfo[];
       actionServers?: ServiceServerInfo[];
-    }
+    },
+    private readonly domainId?: number
   ) {
     super(nodeName, vscode.TreeItemCollapsibleState.Collapsed);
     this.iconPath = new vscode.ThemeIcon('broadcast', new vscode.ThemeColor('charts.green'));
@@ -74,6 +75,15 @@ export class LiveNodeItem extends TreeItemBase {
     this.serviceServers = info?.serviceServers;
     this.actionServers = info?.actionServers;
     this.updateDisplay();
+  }
+
+  /**
+   * The domain this item's entity lives in, when the item was created for a
+   * domain group. Info fetches must query that domain; `undefined` means the
+   * flat environment view (global default domain).
+   */
+  getDomainId(): number | undefined {
+    return this.domainId;
   }
 
   /**
@@ -378,7 +388,8 @@ export class LiveTopicItem extends TreeItemBase {
       messageType?: string;
       publishers?: string[];
       subscribers?: string[];
-    }
+    },
+    private readonly domainId?: number
   ) {
     super(topicName, vscode.TreeItemCollapsibleState.Collapsed);
     this.iconPath = new vscode.ThemeIcon('symbol-event');
@@ -387,6 +398,14 @@ export class LiveTopicItem extends TreeItemBase {
     this.publishers = info?.publishers;
     this.subscribers = info?.subscribers;
     this.updateDisplay();
+  }
+
+  /**
+   * The domain this item's entity lives in, when the item was created for a
+   * domain group. See LiveNodeItem.getDomainId.
+   */
+  getDomainId(): number | undefined {
+    return this.domainId;
   }
 
   /**

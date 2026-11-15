@@ -535,6 +535,100 @@ describe('LiveTreeProvider Integration Tests', () => {
       // No throw: collapsing a group is a no-op for the expanded-items set
       expect(true).toBe(true);
     });
+
+    it('node items from a domain group fetch their info in the group domain', async () => {
+      jest.spyOn(cli, 'getActiveNodesForDomain').mockResolvedValue(['/d1-node']);
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue([]);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+      const domainInfoSpy = jest.spyOn(cli, 'getNodeInfoForDomain').mockResolvedValue({
+        name: '/d1-node',
+        publishedTopics: ['/d1-topic'],
+        subscribedTopics: [],
+        serviceServers: [],
+        actionServers: []
+      });
+      const globalInfoSpy = jest.spyOn(cli, 'getNodeInfo').mockResolvedValue(null);
+
+      provider.setDomainGroups([1]);
+      const folders = await provider.getChildren() as LiveFolderItem[];
+      const nodesFolder = folders.find(f => f.getFolderType() === 'active-nodes')!;
+      const [group] = await provider.getChildren(nodesFolder) as LiveDomainGroupItem[];
+      const [item] = await provider.getChildren(group) as LiveNodeItem[];
+
+      await provider.ensureNodeExpanded(item);
+
+      expect(domainInfoSpy).toHaveBeenCalledWith('/d1-node', 1);
+      expect(globalInfoSpy).not.toHaveBeenCalled();
+    });
+
+    it('topic items from a domain group fetch their info in the group domain', async () => {
+      jest.spyOn(cli, 'getActiveTopicsForDomain').mockResolvedValue(['/d2-topic']);
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue([]);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+      const domainInfoSpy = jest.spyOn(cli, 'getTopicInfoForDomain').mockResolvedValue({
+        name: '/d2-topic',
+        messageType: 'std_msgs/msg/String',
+        publishers: ['/d1-node'],
+        subscribers: []
+      });
+      const globalInfoSpy = jest.spyOn(cli, 'getTopicInfo').mockResolvedValue(null);
+
+      provider.setDomainGroups([2]);
+      const folders = await provider.getChildren() as LiveFolderItem[];
+      const topicsFolder = folders.find(f => f.getFolderType() === 'active-topics')!;
+      const [group] = await provider.getChildren(topicsFolder) as LiveDomainGroupItem[];
+      const [item] = await provider.getChildren(group) as LiveTopicItem[];
+
+      await provider.ensureTopicExpanded(item);
+
+      expect(domainInfoSpy).toHaveBeenCalledWith('/d2-topic', 2);
+      expect(globalInfoSpy).not.toHaveBeenCalled();
+    });
+
+    it('the same node name in two domains yields distinct items with per-domain info', async () => {
+      jest.spyOn(cli, 'getActiveNodesForDomain').mockImplementation(
+        async (domainId: number) => ['/shared']
+      );
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue([]);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+      const domainInfoSpy = jest.spyOn(cli, 'getNodeInfoForDomain').mockResolvedValue(null);
+
+      provider.setDomainGroups([1, 2]);
+      const folders = await provider.getChildren() as LiveFolderItem[];
+      const nodesFolder = folders.find(f => f.getFolderType() === 'active-nodes')!;
+      const groups = await provider.getChildren(nodesFolder) as LiveDomainGroupItem[];
+      const [item1] = await provider.getChildren(groups[0]) as LiveNodeItem[];
+      const [item2] = await provider.getChildren(groups[1]) as LiveNodeItem[];
+
+      expect(item1).not.toBe(item2);
+
+      await provider.ensureNodeExpanded(item1);
+      await provider.ensureNodeExpanded(item2);
+      expect(domainInfoSpy).toHaveBeenCalledWith('/shared', 1);
+      expect(domainInfoSpy).toHaveBeenCalledWith('/shared', 2);
+    });
+
+    it('the tick detects list changes inside a domain group', async () => {
+      jest.spyOn(cli, 'getActiveNodesForDomain')
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce(['/arrived']);
+      jest.spyOn(cli, 'getActiveTopicsForDomain').mockResolvedValue([]);
+      jest.spyOn(cli, 'getActiveNodes').mockResolvedValue([]);
+      jest.spyOn(cli, 'getActiveTopics').mockResolvedValue([]);
+      jest.spyOn(cli, 'getNodeInfo').mockResolvedValue(null);
+      jest.spyOn(cli, 'getTopicInfo').mockResolvedValue(null);
+      jest.spyOn(cli, 'getNodeInfoForDomain').mockResolvedValue(null);
+      jest.spyOn(cli, 'getTopicInfoForDomain').mockResolvedValue(null);
+
+      provider.setDomainGroups([42]);
+      await provider.refresh(); // baseline: domain 42 is empty
+
+      const fired: unknown[] = [];
+      provider.onDidChangeTreeData(event => fired.push(event));
+      await provider.refresh(); // a node appears in domain 42
+
+      expect(fired.length).toBe(1);
+    });
   });
 
   describe('auto-refresh', () => {

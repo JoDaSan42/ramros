@@ -310,6 +310,39 @@ describe('Ros2CliService exec-backed methods', () => {
       expect(env.ROS_DOMAIN_ID).toBe('7');
     });
 
+    it('getNodeInfoForDomain uses the given domain regardless of the global default', async () => {
+      cli.setDomainId(2);
+      mockStdout('/talker\n publishers:\n');
+      await cli.getNodeInfoForDomain('/talker', 7);
+      const env = ((exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string> }).env;
+      expect(env.ROS_DOMAIN_ID).toBe('7');
+      cli.setDomainId(undefined);
+    });
+
+    it('getTopicInfoForDomain uses the given domain regardless of the global default', async () => {
+      cli.setDomainId(undefined);
+      mockStdout('Type: std_msgs/msg/String\nPublisher count: 0\nSubscription count: 0\n');
+      await cli.getTopicInfoForDomain('/chatter', 9);
+      const env = ((exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string> }).env;
+      expect(env.ROS_DOMAIN_ID).toBe('9');
+    });
+
+    it('ForDomain info calls do not leak the override into later default calls', async () => {
+      // The tick refreshes expanded items from several domains concurrently;
+      // a save/mutate/restore on shared state would interleave and mislabel
+      // calls, so the override must travel with the exec options instead.
+      cli.setDomainId(2);
+      mockStdout('/n7\n publishers:\n');
+      await cli.getNodeInfoForDomain('/n7', 7);
+      mockStdout('/talker\n publishers:\n');
+      await cli.getNodeInfo('/talker');
+      const envs = (exec as unknown as jest.Mock).mock.calls.map(
+        (call: unknown[]) => (call[1] as { env: Record<string, string> }).env.ROS_DOMAIN_ID
+      );
+      expect(envs).toEqual(['7', '2']);
+      cli.setDomainId(undefined);
+    });
+
     it('executeLines routes a raw command through the central env injection', async () => {
       cli.setDomainId(3);
       mockStdout('/a\n/b\n');

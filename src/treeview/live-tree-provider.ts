@@ -23,14 +23,17 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   // Stable-item state (anti-flicker): items are created once per name and
   // reused across ticks, so VSCode keeps expansion state and re-renders
   // without flicker. Full refreshes fire only on actual list changes.
+  // Items are keyed by `domain|name` so the same entity name in two domain
+  // groups gets two independent items (and two independent info states).
   private readonly nodeItems = new Map<string, LiveNodeItem>();
   private readonly topicItems = new Map<string, LiveTopicItem>();
-  private readonly expandedNodes = new Set<string>();
-  private readonly expandedTopics = new Set<string>();
+  private readonly expandedNodes = new Set<LiveNodeItem>();
+  private readonly expandedTopics = new Set<LiveTopicItem>();
   private readonly nodeInfoSignature = new Map<string, string>();
   private readonly topicInfoSignature = new Map<string, string>();
   private lastNodeNames: string[] | null = null;
   private lastTopicNames: string[] | null = null;
+  private readonly lastDomainLists = new Map<number, { nodes: string[]; topics: string[] }>();
   private readonly nodesFolder = new LiveFolderItem('Nodes', 'active-nodes');
   private readonly topicsFolder = new LiveFolderItem('Topics', 'active-topics');
   private domainGroups: number[] = [];
@@ -156,6 +159,14 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
     this.nodeInfoCache.newTick();
     this.topicInfoCache.newTick();
 
+    // Domain-grouped view: change detection runs per domain (a change in any
+    // group's list fires the full refresh); the flat environment lists are
+    // not rendered in this mode.
+    if (this.domainGroups.length > 0) {
+      await this.tickGrouped();
+      return;
+    }
+
     // 1) Detect list changes (this is what a full refresh is for).
     const nodeNames = await this.getActiveNodes();
     let topicNames = await this.getActiveTopics();
@@ -175,13 +186,47 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
     // 2) Refresh info for expanded items (fresh data each tick), firing per
     // element only when the info actually changed.
     await Promise.all([
-      ...[...this.expandedNodes].map(name => this.refreshExpandedNode(name)),
-      ...[...this.expandedTopics].map(name => this.refreshExpandedTopic(name)),
+      ...[...this.expandedNodes].map(item => this.refreshExpandedNode(item)),
+      ...[...this.expandedTopics].map(item => this.refreshExpandedTopic(item)),
     ]);
 
     // 3) Full refresh (rebuild) only when a list actually changed. VSCode
     // re-reads everything, but items are stable instances, so expansion
     // state is preserved and the re-render is not a flicker.
+    if (listChanged) {
+      this._onDidChangeTreeData.fire(null);
+    }
+  }
+
+  /**
+   * Auto-refresh tick for the domain-grouped view: change detection per
+   * domain (a change in any group's node or topic list fires one full
+   * refresh), then fresh info for expanded domain-scoped items.
+   */
+  private async tickGrouped(): Promise<void> {
+    let listChanged = false;
+    await Promise.all(this.domainGroups.map(async domainId => {
+      const [nodes, topics] = await Promise.all([
+        this.cli.getActiveNodesForDomain(domainId),
+        this.cli.getActiveTopicsForDomain(domainId)
+      ]);
+      const filteredTopics = this.hideSystemTopics
+        ? topics.filter(name => !this.isSystemTopic(name))
+        : topics;
+      const previous = this.lastDomainLists.get(domainId);
+      if (previous &&
+          (!listsEqual(previous.nodes, nodes) || !listsEqual(previous.topics, filteredTopics))) {
+        listChanged = true;
+      }
+      this.lastDomainLists.set(domainId, { nodes, topics: filteredTopics });
+      this.pruneDomainItemsForList(domainId, nodes, filteredTopics);
+    }));
+
+    await Promise.all([
+      ...[...this.expandedNodes].map(item => this.refreshExpandedNode(item)),
+      ...[...this.expandedTopics].map(item => this.refreshExpandedTopic(item)),
+    ]);
+
     if (listChanged) {
       this._onDidChangeTreeData.fire(null);
     }
@@ -197,9 +242,9 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
    */
   markCollapsed(item: LiveNodeItem | LiveTopicItem | LiveDomainGroupItem): void {
     if (item instanceof LiveNodeItem) {
-      this.expandedNodes.delete(item.getNodeName());
+      this.expandedNodes.delete(item);
     } else if (item instanceof LiveTopicItem) {
-      this.expandedTopics.delete(item.getTopicName());
+      this.expandedTopics.delete(item);
     }
     // LiveDomainGroupItem: its members are refreshed lazily via the group's
     // own list call; no per-item expanded tracking beyond that.
@@ -208,9 +253,12 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   /**
    * Configures the multi-domain live view groups (from the
    * ramros.liveView.domainIds setting). Empty list = flat environment view.
+   * Domain-scoped items from removed groups are dropped so their next
+   * rendering rebuilds with the new grouping.
    */
   setDomainGroups(domainIds: number[]): void {
     this.domainGroups = [...domainIds];
+    this.pruneDomainScopedItems();
     this._onDidChangeTreeData.fire(null);
   }
 
@@ -234,37 +282,36 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
 
   /**
    * Members of a domain group: regular node/topic items fetched with the
-   * group's domain env (independent of the global default).
+   * group's domain env (independent of the global default). The items carry
+   * the group's domain so their info fetches query the same domain.
    */
   private async getDomainGroupChildren(group: LiveDomainGroupItem): Promise<TreeItemBase[]> {
     const domainId = group.getDomainId();
     if (group.getGroupKind() === 'nodes') {
       const names = await this.cli.getActiveNodesForDomain(domainId);
-      return names.map(name => this.getOrCreateNodeItem(name));
+      return names.map(name => this.getOrCreateNodeItem(name, domainId));
     }
     let topicNames = await this.cli.getActiveTopicsForDomain(domainId);
     if (this.hideSystemTopics) {
       topicNames = topicNames.filter(name => !this.isSystemTopic(name));
     }
-    return topicNames.map(name => this.getOrCreateTopicItem(name));
+    return topicNames.map(name => this.getOrCreateTopicItem(name, domainId));
   }
 
   /**
    * Tick-time info refresh for an expanded node: fetch fresh info, apply it,
-   * and fire for the element only when its visible info changed.
+   * and fire for the element only when its visible info changed. Domain
+   * group items are queried in their own domain.
    */
-  private async refreshExpandedNode(name: string): Promise<void> {
-    const item = this.nodeItems.get(name);
-    if (!item) {
-      return;
-    }
-    const info = await this.getNodeInfo(name);
+  private async refreshExpandedNode(item: LiveNodeItem): Promise<void> {
+    const key = this.itemKey(item.getNodeName(), item.getDomainId());
+    const info = await this.fetchNodeInfoForItem(item);
     // Write through to the cache so subsequent tree re-reads (ensureNodeExpanded
     // cache hits) apply the fresh info instead of a stale earlier snapshot.
-    this.nodeInfoCache.set(name, info);
+    this.nodeInfoCache.set(key, info);
     const signature = JSON.stringify(info ?? {});
-    if (this.nodeInfoSignature.get(name) !== signature) {
-      this.nodeInfoSignature.set(name, signature);
+    if (this.nodeInfoSignature.get(key) !== signature) {
+      this.nodeInfoSignature.set(key, signature);
       item.applyInfo(info ?? {});
       this._onDidChangeTreeData.fire(item);
     }
@@ -273,43 +320,57 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   /**
    * Tick-time info refresh for an expanded topic. See refreshExpandedNode.
    */
-  private async refreshExpandedTopic(name: string): Promise<void> {
-    const item = this.topicItems.get(name);
-    if (!item) {
-      return;
-    }
-    const info = await this.getTopicInfo(name);
+  private async refreshExpandedTopic(item: LiveTopicItem): Promise<void> {
+    const key = this.itemKey(item.getTopicName(), item.getDomainId());
+    const info = await this.fetchTopicInfoForItem(item);
     // Write-through (see refreshExpandedNode).
-    this.topicInfoCache.set(name, info);
+    this.topicInfoCache.set(key, info);
     const signature = JSON.stringify(info ?? {});
-    if (this.topicInfoSignature.get(name) !== signature) {
-      this.topicInfoSignature.set(name, signature);
+    if (this.topicInfoSignature.get(key) !== signature) {
+      this.topicInfoSignature.set(key, signature);
       item.applyInfo(info ?? {});
       this._onDidChangeTreeData.fire(item);
     }
+  }
+
+  /** Info fetch routed by the item's domain (group domain or global env). */
+  private async fetchNodeInfoForItem(item: LiveNodeItem): Promise<NodeInfo | null> {
+    const domainId = item.getDomainId();
+    return domainId === undefined
+      ? this.getNodeInfo(item.getNodeName())
+      : this.cli.getNodeInfoForDomain(item.getNodeName(), domainId);
+  }
+
+  /** Info fetch routed by the item's domain. See fetchNodeInfoForItem. */
+  private async fetchTopicInfoForItem(item: LiveTopicItem): Promise<TopicInfo | null> {
+    const domainId = item.getDomainId();
+    return domainId === undefined
+      ? this.getTopicInfo(item.getTopicName())
+      : this.cli.getTopicInfoForDomain(item.getTopicName(), domainId);
   }
 
   /**
    * Lazily loads node info on expand: fetches once per cache lifetime, applies
    * it to the item and — only after a real fetch — fires for that element so
    * VSCode re-renders the updated description. Records the info signature so
-   * tick refreshes only fire on actual change.
+   * tick refreshes only fire on actual change. Domain group items are
+   * queried in their own domain.
    */
   async ensureNodeExpanded(item: LiveNodeItem): Promise<void> {
     if (this.disposed) {
       return;
     }
-    const name = item.getNodeName();
-    let info = this.nodeInfoCache.get(name);
+    const key = this.itemKey(item.getNodeName(), item.getDomainId());
+    let info = this.nodeInfoCache.get(key);
     let fetched = false;
     if (info === undefined) {
-      info = await this.getNodeInfo(name);
-      this.nodeInfoCache.set(name, info);
+      info = await this.fetchNodeInfoForItem(item);
+      this.nodeInfoCache.set(key, info);
       fetched = true;
     }
     item.applyInfo(info ?? {});
     if (fetched) {
-      this.nodeInfoSignature.set(name, JSON.stringify(info ?? {}));
+      this.nodeInfoSignature.set(key, JSON.stringify(info ?? {}));
       this._onDidChangeTreeData.fire(item);
     }
   }
@@ -321,17 +382,17 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
     if (this.disposed) {
       return;
     }
-    const name = item.getTopicName();
-    let info = this.topicInfoCache.get(name);
+    const key = this.itemKey(item.getTopicName(), item.getDomainId());
+    let info = this.topicInfoCache.get(key);
     let fetched = false;
     if (info === undefined) {
-      info = await this.getTopicInfo(name);
-      this.topicInfoCache.set(name, info);
+      info = await this.fetchTopicInfoForItem(item);
+      this.topicInfoCache.set(key, info);
       fetched = true;
     }
     item.applyInfo(info ?? {});
     if (fetched) {
-      this.topicInfoSignature.set(name, JSON.stringify(info ?? {}));
+      this.topicInfoSignature.set(key, JSON.stringify(info ?? {}));
       this._onDidChangeTreeData.fire(item);
     }
   }
@@ -386,10 +447,10 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
     // per-element fire updates the description once the info arrives;
     // repeated re-reads within a tick are cache hits.
     if (element instanceof LiveNodeItem) {
-      this.expandedNodes.add(element.getNodeName());
+      this.expandedNodes.add(element);
       void this.ensureNodeExpanded(element);
     } else if (element instanceof LiveTopicItem) {
-      this.expandedTopics.add(element.getTopicName());
+      this.expandedTopics.add(element);
       void this.ensureTopicExpanded(element);
     }
 
@@ -430,13 +491,22 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   }
 
   /**
+   * Stable item key: domain-scoped entities (domain group members) are
+   * distinct from flat environment entities with the same name.
+   */
+  private itemKey(name: string, domainId?: number): string {
+    return `${domainId ?? 'env'}|${name}`;
+  }
+
+  /**
    * Returns the stable item for a node name, creating it only on first sight.
    */
-  private getOrCreateNodeItem(name: string): LiveNodeItem {
-    let item = this.nodeItems.get(name);
+  private getOrCreateNodeItem(name: string, domainId?: number): LiveNodeItem {
+    const key = this.itemKey(name, domainId);
+    let item = this.nodeItems.get(key);
     if (!item) {
-      item = new LiveNodeItem(name);
-      this.nodeItems.set(name, item);
+      item = new LiveNodeItem(name, undefined, domainId);
+      this.nodeItems.set(key, item);
     }
     return item;
   }
@@ -444,11 +514,12 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   /**
    * Returns the stable item for a topic name. See getOrCreateNodeItem.
    */
-  private getOrCreateTopicItem(name: string): LiveTopicItem {
-    let item = this.topicItems.get(name);
+  private getOrCreateTopicItem(name: string, domainId?: number): LiveTopicItem {
+    const key = this.itemKey(name, domainId);
+    let item = this.topicItems.get(key);
     if (!item) {
-      item = new LiveTopicItem(name);
-      this.topicItems.set(name, item);
+      item = new LiveTopicItem(name, undefined, domainId);
+      this.topicItems.set(key, item);
     }
     return item;
   }
@@ -456,24 +527,78 @@ export class LiveTreeProvider implements vscode.TreeDataProvider<TreeItemBase> {
   /**
    * Removes stale items/signatures/expanded markers for names that left the
    * lists (keeps the stable maps from growing unbounded across sessions).
+   * Domain-scoped items are pruned per domain list (tickGrouped) and on
+   * group changes instead, since the flat lists say nothing about them.
    */
   private pruneStaleState(nodeNames: string[], topicNames: string[]): void {
     const nodeSet = new Set(nodeNames);
-    for (const name of [...this.nodeItems.keys()]) {
-      if (!nodeSet.has(name)) {
-        this.nodeItems.delete(name);
-        this.nodeInfoSignature.delete(name);
-        this.expandedNodes.delete(name);
+    for (const [key, item] of [...this.nodeItems.entries()]) {
+      if (item.getDomainId() !== undefined) {
+        continue;
+      }
+      if (!nodeSet.has(item.getNodeName())) {
+        this.nodeItems.delete(key);
+        this.nodeInfoSignature.delete(key);
+        this.expandedNodes.delete(item);
       }
     }
     const topicSet = new Set(topicNames);
-    for (const name of [...this.topicItems.keys()]) {
-      if (!topicSet.has(name)) {
-        this.topicItems.delete(name);
-        this.topicInfoSignature.delete(name);
-        this.expandedTopics.delete(name);
+    for (const [key, item] of [...this.topicItems.entries()]) {
+      if (item.getDomainId() !== undefined) {
+        continue;
+      }
+      if (!topicSet.has(item.getTopicName())) {
+        this.topicItems.delete(key);
+        this.topicInfoSignature.delete(key);
+        this.expandedTopics.delete(item);
       }
     }
+  }
+
+  /**
+   * Drops domain-scoped items of one domain whose names left that domain's
+   * list (called from tickGrouped with the fresh list).
+   */
+  private pruneDomainItemsForList(domainId: number, nodeNames: string[], topicNames: string[]): void {
+    const nodeSet = new Set(nodeNames);
+    for (const [key, item] of [...this.nodeItems.entries()]) {
+      if (item.getDomainId() === domainId && !nodeSet.has(item.getNodeName())) {
+        this.nodeItems.delete(key);
+        this.nodeInfoSignature.delete(key);
+        this.expandedNodes.delete(item);
+      }
+    }
+    const topicSet = new Set(topicNames);
+    for (const [key, item] of [...this.topicItems.entries()]) {
+      if (item.getDomainId() === domainId && !topicSet.has(item.getTopicName())) {
+        this.topicItems.delete(key);
+        this.topicInfoSignature.delete(key);
+        this.expandedTopics.delete(item);
+      }
+    }
+  }
+
+  /**
+   * Drops every domain-scoped item, group item and baseline (called when the
+   * domain grouping changes; the next rendering rebuilds from scratch).
+   */
+  private pruneDomainScopedItems(): void {
+    for (const [key, item] of [...this.nodeItems.entries()]) {
+      if (item.getDomainId() !== undefined) {
+        this.nodeItems.delete(key);
+        this.nodeInfoSignature.delete(key);
+        this.expandedNodes.delete(item);
+      }
+    }
+    for (const [key, item] of [...this.topicItems.entries()]) {
+      if (item.getDomainId() !== undefined) {
+        this.topicItems.delete(key);
+        this.topicInfoSignature.delete(key);
+        this.expandedTopics.delete(item);
+      }
+    }
+    this.domainGroupItems.clear();
+    this.lastDomainLists.clear();
   }
 
   dispose(): void {
