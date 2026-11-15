@@ -12,8 +12,21 @@ export interface RosDistribution {
 const SUPPORTED_DISTROS = ['humble', 'jazzy', 'lyrical', 'rolling', 'iron', 'galactic', 'foxy'];
 
 export class RosEnvironmentService {
-  private readonly rosRoot = '/opt/ros';
-  
+  private rosRoot: string;
+
+  constructor(rosRoot: string = '/opt/ros') {
+    this.rosRoot = rosRoot;
+  }
+
+  /**
+   * Re-points the service at a new ROS root (e.g. after the
+   * ramros.ros.rosRoot setting changed). Subsequent detections read from
+   * the new root; no caches hold ros-root-dependent data.
+   */
+  setRosRoot(rosRoot: string): void {
+    this.rosRoot = rosRoot;
+  }
+
   async detectInstallations(): Promise<RosDistribution[]> {
     const distributions: RosDistribution[] = [];
     const activeDistro = this.getActiveDistributionName();
@@ -67,7 +80,7 @@ export class RosEnvironmentService {
     return true;
   }
   
-  private getActiveDistributionName(): string | null {
+  getActiveDistributionName(): string | null {
     return process.env.ROS_DISTRO || null;
   }
   

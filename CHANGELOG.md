@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-13
+
+### Added
+- **Structured message input** for publishing and service calls: instead of
+  hand-writing JSON, "Publish Message" and "Call Service" open a form
+  generated from the message/service definition — nested messages become
+  collapsible sections, arrays and fixed-size blocks get per-element inputs,
+  byte arrays accept comma-separated values. Values are prefilled with
+  neutral defaults (`0`, empty string, `false`), valid YAML/JSON is shown
+  before sending, and the raw JSON input remains available as a fallback
+  (e.g. when the workspace is not built or the type cannot be fetched).
+  Message structures are fetched once per session and cached.
+- **Run nodes with options**: a gear button next to each node's run action
+  opens a dialog to start the node with parameters (`--ros-args -p
+  name:=value` with type validation), a custom node name, and topic remaps —
+  with suggestions from currently active endpoints.
+- **ROS_DOMAIN_ID support**: set a workspace-wide default domain via
+  `ramros.ros.domainId`; every ROS2 exec and terminal inherits it centrally.
+  The live view can group topics/nodes/services by domain (multi-domain
+  monitoring), each started node/tool can override the domain per start.
+- **Multi-domain live view**: domain groups with per-domain visibility
+  toggles in the live view title bar.
+- **Workspace completeness analysis**: new "Analyze Workspace Completeness"
+  command (palette and workspace context menu) generates a read-only report
+  per package: declared vs. used dependencies (python imports, C++ includes),
+  ament_python entry points vs. node files (both directions), msg/srv/action
+  files missing from `rosidl_generate_interfaces`, and unused dependencies.
+- Configurable ROS installation root via `ramros.ros.rosRoot` for
+  non-standard ROS setups.
+
+### Changed
+- Live view details (publishers/subscribers, parameters, service/action
+  endpoints) load lazily when a node or topic is expanded instead of on
+  every refresh tick — 2 instead of N+2 CLI calls per tick, visibly
+  smoother polling. Tree items stay stable across refreshes; only changed
+  entries are re-rendered.
+- rviz2 and rqt_graph start without a workspace prompt when a single
+  workspace is open (sourcing follows that workspace automatically).
+- rqt_graph is started via `ros2 run rqt_graph rqt_graph` so it works on
+  distributions where the binary is not on PATH.
+
+### Fixed
+- Publish-once now reports failures (e.g. timeout without a subscriber)
+  as errors instead of silently succeeding.
+- Hidden ROS2 execs source the workspace overlay with the POSIX dot
+  command, so they also work when `/bin/sh` is dash (Ubuntu default).
+- Enter in the structured input form no longer clears the form.
+
 ## [1.3.2] - 2026-10-14
 
 ### Fixed

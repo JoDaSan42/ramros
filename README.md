@@ -1,6 +1,8 @@
 # RAMROS - Really Awesome Management of ROS
 
-<img src="./img/RAMROS_logo_color.png">
+<p align="center">
+  <img src="./img/RAMROS_logo.png" alt="RAMROS logo" width="280">
+</p>
 
 A VSCode extension for managing ROS2 workspaces efficiently.
 
@@ -8,7 +10,7 @@ A VSCode extension for managing ROS2 workspaces efficiently.
 
 ### From GitHub Release
 1. Go to the [Releases page](https://github.com/JoDaSan42/ramros/releases)
-2. Download the latest `.vsix` file (e.g., `ramros-1.3.2.vsix`)
+2. Download the latest `.vsix` file (e.g., `ramros-1.4.0.vsix`)
 3. In VSCode, open Extensions (`Ctrl+Shift+X`)
 4. Click the "..." menu → "Install from VSIX"
 5. Select the downloaded `.vsix` file
@@ -100,8 +102,11 @@ Real-time monitoring of ROS2 system activity.
 - Publisher and subscriber count display
 - Enable/disable the live view via view-title toggle (persisted as `liveView.enabled` in `ramros.json`)
 - Publish messages to topics (`ros2 topic pub`, once or at a rate); if the topic type cannot be discovered (e.g. no node running), you can enter it manually
+- **Structured input forms for publishing**: the message structure is fetched from the workspace/ROS installation and rendered as a form (nested messages as collapsible sections, arrays as per-element inputs, neutral defaults prefilled); the generated JSON is shown before sending, raw JSON input stays available as fallback
 - Call services with JSON input (`ros2 service call`); response shown in a read-only document
+- **Structured input forms for service calls**: same form support as publishing, generated from the service request definition
 - View runtime node parameters under live nodes and set them via input box (values are validated against the parameter type reported by `ros2 param get`)
+- **ROS_DOMAIN_ID support**: workspace-wide default via `ramros.ros.domainId`, multi-domain grouping in the live view, per-start domain override for nodes and tools
 - Run a ROS2 health check (`ros2 doctor`) from the view title bar; report shown in a read-only document
 
 ### 📦 Workspace Section
@@ -140,6 +145,7 @@ Supports both C++ (`create_service`, `create_client`, `rclcpp_action::create_ser
 - Click to open interface file in editor
 - Support for `.msg`, `.srv`, and `.action` files
 - "Show Definition": resolved interface definition (`ros2 interface show`) in a read-only document
+- **Workspace Completeness Analysis**: "Analyze Workspace Completeness" (command palette and workspace context menu) compares package.xml declarations against actual code usage (python imports, C++ includes), checks ament_python entry points against node files (both directions), verifies msg/srv/action files are registered in `rosidl_generate_interfaces`, and lists unused dependencies — as a grouped read-only report per package
 
 #### Launch File Support
 - Automatic detection of `.launch.py` and `.launch.xml` files
@@ -204,11 +210,14 @@ Access commands from tree view context menu or command palette (`Ctrl+Shift+P`; 
 | `RAMROS: Build Workspace` | Run `colcon build` in workspace | Workspace root |
 | `RAMROS: Build Package` | Build specific package | Package |
 | `RAMROS: Run Node` | Execute node via `ros2 run <package> <node>` | Node |
+| `RAMROS: Run Node with Options…` | Start the node with parameters (type-validated `-p name:=value`), a custom node name, topic remaps (suggested from active endpoints) and a per-start `ROS_DOMAIN_ID` override | Node (gear button) |
 | `RAMROS: Debug Node` | Start debug session for node | Node |
 | `RAMROS: Open in Terminal` | Open new terminal in package directory | Package |
 | `RAMROS: Run Launch File` | Execute launch file via `ros2 launch` | Launch file |
 | `RAMROS: Launch RVIZ2` | Launch `rviz2` in a sourced terminal | ROS2 Tools |
+| `RAMROS: Launch RVIZ2 with Options…` | Launch `rviz2` with a chosen sourcing workspace, `ROS_DOMAIN_ID` and extra CLI arguments | ROS2 Tools (gear button) |
 | `RAMROS: Launch rqt_graph` | Launch `rqt_graph` in a sourced terminal | ROS2 Tools |
+| `RAMROS: Launch rqt_graph with Options…` | Launch `rqt_graph` with sourcing/domain/arguments options | ROS2 Tools (gear button) |
 | `RAMROS: Bag: Start Recording` | Begin bag recording | Bag Files folder |
 | `RAMROS: Bag: Pause/Resume Recording` | Pause or resume the active recording | During recording |
 | `RAMROS: Bag: Stop Recording` | Stop the active recording | During recording |
@@ -216,10 +225,19 @@ Access commands from tree view context menu or command palette (`Ctrl+Shift+P`; 
 | `RAMROS: Bag: Play/Pause` | Toggle playback | Selected bag |
 | `RAMROS: Bag: Stop` | Stop playback and close terminal | During playback |
 | `RAMROS: Bag: Toggle Loop` | Enable/disable loop mode | During playback |
+| `RAMROS: Bag: Add Bag Folder` | Add a bag folder outside the workspace | Bag Files folder |
+| `RAMROS: Bag: Remove Bag Folder` | Remove an external bag folder | External bag folder |
+| `RAMROS: Bag: Open in rqt_bag` | Open a bag file in rqt_bag | Bag file |
 | `RAMROS: Live: Refresh` | Refresh the ROS2 Live view | Live view title |
 | `RAMROS: Live: Settings` | Open ROS2 Live view settings | Live view title |
 | `RAMROS: Live: Echo Topic` | Run `ros2 topic echo` for the selected topic | Live topic |
 | `RAMROS: Live: Measure Topic Frequency` | Run `ros2 topic hz` for the selected topic | Live topic |
+| `RAMROS: Live: Publish Message` | Publish to a live topic — structured form from the message definition, raw JSON as fallback | Live topic |
+| `RAMROS: Live: Call Service` | Call a live service — structured form from the request definition, raw JSON as fallback | Live service |
+| `RAMROS: Live: Set Parameter` | Set a runtime parameter (type-validated) | Live node parameter |
+| `RAMROS: Live: Update Parameters` | Re-fetch a node's cached parameters | Node parameters |
+| `RAMROS: Enable/Disable Live View` | Toggle live view polling (persisted in `ramros.json`) | Live view title |
+| `RAMROS: Analyze Workspace Completeness` | Generate the package consistency report (deps, entry points, rosidl registration, unused deps) | Workspace root, command palette |
 
 ### 🎯 Additional Capabilities
 
@@ -245,6 +263,9 @@ Access commands from tree view context menu or command palette (`Ctrl+Shift+P`; 
 
 #### Configuration
 No configuration required for basic usage. Optional settings:
+- `ramros.ros.rosRoot` — Root directory of the ROS 2 installation (contains the distro folders like `humble/`, `jazzy/`; default `/opt/ros`)
+- `ramros.ros.domainId` — `ROS_DOMAIN_ID` applied to all ros2 CLI calls and new terminals (unset = use the environment's domain)
+- `ramros.liveView.domainIds` — Additional ROS domains shown as labeled groups in the live view (e.g. `[1, 2]` adds "Nodes (domain 1)")
 - `ramros.liveView.refreshRate` — Live view refresh rate (1-60 seconds)
 - `ramros.liveView.hideSystemTopics` — Hide/show system topics in live view
 - `ramros.cache.ttlSeconds` — Cache time-to-live (1-3600 seconds); changes apply live
@@ -263,29 +284,43 @@ No configuration required for basic usage. Optional settings:
 ```
 src/
 ├── core/                      # Core business logic
-│   ├── ros-environment.ts     # ROS2 installation detection
+│   ├── ros-environment.ts     # ROS2 installation detection (rosRoot-aware)
 │   ├── workspace-detector.ts  # Workspace discovery & validation
 │   ├── package-discovery.ts   # Package/node/interface static analysis
+│   ├── workspace-analyzer.ts  # Workspace completeness analysis (pure)
 │   ├── duplicate-package-detector.ts # Conflict detection
 │   ├── parameter-coercer.ts   # Parameter type inference/parsing/formatting
-│   └── ros2-cli-service.ts    # Async wrapper for ros2 CLI commands
+│   ├── ros2-cli-service.ts    # Async wrapper for ros2 CLI commands (domain/env injection)
+│   ├── run-args-builder.ts    # ros2 run argument building (params, name, remaps, domain)
+│   ├── command-builders.ts    # CLI command string builders
+│   ├── interface-parser.ts    # `ros2 interface show` → structure tree (pure)
+│   ├── interface-loader.ts    # Recursive structure loading with session cache (pure)
+│   ├── message-serializer.ts  # Field values → YAML/JSON (pure)
+│   ├── form-html.ts           # Structured input form HTML builder (pure)
+│   ├── ramros-doc-provider.ts # Read-only document provider (doctor, analysis, ...)
+│   ├── bag-discovery.ts       # Bag file/folder discovery
+│   ├── workspace-config-service.ts # Per-workspace config (ramros.json)
+│   └── live-info-cache.ts     # Tick-based lazy live view info cache
 ├── cache/                     # Caching layer
 │   └── cache-manager.ts       # TTL + LRU cache with FS invalidation
 ├── executor/                  # Command execution
-│   ├── terminal-manager.ts    # Terminal management
+│   ├── terminal-manager.ts    # Terminal management (sourcing, domain, args)
 │   └── bag-session-service.ts # Bag recording/playback state (singleton)
-├── wizard/                    # Package & launch file creation
+├── webview/                   # Webview panels
+│   └── message-input-panel.ts # Shared structured publish/service-call panel
+├── wizard/                    # Package, launch & run-option wizards
 │   ├── package-creator.ts     # Package/node/interface creation
 │   ├── package-wizard.ts      # Interactive create/add-package UI flows
 │   ├── package-form-validator.ts # Name/email validation
 │   ├── launch-wizard.ts       # Interactive launch file wizard
 │   ├── launch-generator.ts    # Launch file generation
 │   ├── interface-collector.ts # Interface definition wizard helpers
-│   └── build-file-patcher.ts  # CMakeLists/setup.py/package.xml patcher
+│   ├── build-file-patcher.ts  # CMakeLists/setup.py/package.xml patcher
+│   └── run-node-options-wizard.ts # Node start options (params, name, remaps, domain)
 ├── treeview/                  # UI components
 │   ├── tree-provider.ts       # Main workspace tree provider
 │   ├── tools-tree-provider.ts # ROS2 tools tree provider
-│   ├── live-tree-provider.ts  # Live ROS2 topic/node monitor
+│   ├── live-tree-provider.ts  # Live ROS2 topic/node monitor (multi-domain)
 │   ├── base-tree-item.ts      # Shared TreeItemBase
 │   ├── bag-items.ts           # Bag record/playback tree items
 │   ├── live-items.ts          # Live ROS2 tree items

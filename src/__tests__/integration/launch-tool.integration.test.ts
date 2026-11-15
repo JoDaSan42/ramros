@@ -1,0 +1,387 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import * as vscode from 'vscode';
+import { activate } from '../../extension';
+import { NodeItem } from '../../treeview/workspace-items';
+import { NodeInfo } from '../../core/package-discovery';
+
+function makeExtensionContext(): vscode.ExtensionContext {
+  return {
+    subscriptions: [],
+    globalState: {
+      get: () => undefined,
+      update: async () => undefined,
+      keys: () => []
+    },
+    workspaceState: {
+      get: () => undefined,
+      update: async () => undefined,
+      keys: () => []
+    },
+    extensionPath: path.resolve(__dirname, '../../../')
+  } as unknown as vscode.ExtensionContext;
+}
+
+describe('launch tool commands (rviz2 / rqt_graph)', () => {
+  let tempDir: string;
+  let tempDir2: string;
+  let showQuickPick: jest.Mock;
+  let showInputBox: jest.Mock;
+  let createTerminal: jest.Mock;
+  let workspaceState: { get: jest.Mock; update: jest.Mock };
+
+  function makeWorkspaceFolders(dirs: string[]): void {
+    (vscode.workspace as unknown as { workspaceFolders: unknown }).workspaceFolders = dirs.map((dir, index) => ({
+      uri: { fsPath: dir },
+      name: path.basename(dir),
+      index
+    }));
+  }
+
+  function installFsMock(): void {
+    (vscode.workspace as unknown as { fs: unknown }).fs = {
+      stat: async (uri: { fsPath?: string }) => {
+        const stat = fs.statSync(uri.fsPath ?? '');
+        return {
+          type: stat.isDirectory() ? vscode.FileType.Directory : vscode.FileType.File,
+          ctime: stat.ctimeMs,
+          mtime: stat.mtimeMs,
+          size: stat.size
+        };
+      }
+    };
+  }
+
+  function getHandler(commandId: string): ((...args: unknown[]) => unknown) | undefined {
+    const call = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(([id]) => id === commandId);
+    return call?.[1] as ((...args: unknown[]) => unknown) | undefined;
+  }
+
+  function makeNodeItem(): NodeItem {
+    const node: NodeInfo = {
+      name: 'talker_node',
+      path: tempDir,
+      packageName: 'my_pkg',
+      language: 'python',
+      isExecutable: true,
+    };
+    return new NodeItem(node);
+  }
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ramros-launch-a-'));
+    tempDir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'ramros-launch-b-'));
+    for (const dir of [tempDir, tempDir2]) {
+      fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+      fs.mkdirSync(path.join(dir, 'install'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'install', 'setup.bash'), '', 'utf8');
+    }
+
+    makeWorkspaceFolders([tempDir]);
+    installFsMock();
+    (vscode.workspace as unknown as { getConfiguration: jest.Mock }).getConfiguration = jest.fn().mockReturnValue({
+      get: jest.fn((_key: string, defaultValue: unknown) => defaultValue)
+    });
+
+    (vscode.window.createTreeView as jest.Mock).mockClear();
+    (vscode.commands.registerCommand as jest.Mock).mockClear();
+    (vscode.commands.executeCommand as jest.Mock).mockClear();
+
+    showQuickPick = vscode.window.showQuickPick as jest.Mock;
+    showInputBox = vscode.window.showInputBox as jest.Mock;
+    createTerminal = vscode.window.createTerminal as jest.Mock;
+    showQuickPick.mockReset();
+    showInputBox.mockReset();
+    createTerminal.mockReset();
+    createTerminal.mockImplementation((options: { name?: string }) => ({
+      name: options?.name,
+      sendText: jest.fn(),
+      show: jest.fn(),
+      dispose: jest.fn()
+    }));
+    workspaceState = {
+      get: jest.fn(() => undefined),
+      update: jest.fn(async () => undefined)
+    };
+  });
+
+  afterEach(() => {
+    const createTreeView = vscode.window.createTreeView as jest.Mock;
+    for (const call of createTreeView.mock.calls) {
+      const provider = (
+        call[1] as { treeDataProvider?: { dispose?: () => void; stopAutoRefresh?: () => void } }
+      ).treeDataProvider;
+      provider?.stopAutoRefresh?.();
+      provider?.dispose?.();
+    }
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    fs.rmSync(tempDir2, { recursive: true, force: true });
+    jest.restoreAllMocks();
+  });
+
+  async function activateWithWorkspaceState(state: { get: jest.Mock; update: jest.Mock }): Promise<void> {
+    const context = makeExtensionContext();
+    (context as unknown as { workspaceState: unknown }).workspaceState = state;
+    await activate(context);
+  }
+
+  it('starts rviz2 without any prompt in a single-workspace setup, sourcing the overlay', async () => {
+    await activateWithWorkspaceState(workspaceState);
+
+    const handler = getHandler('ramros.launchTool.rviz2');
+    expect(handler).toBeDefined();
+
+    await handler!();
+
+    expect(showQuickPick).not.toHaveBeenCalled();
+    expect(createTerminal).toHaveBeenCalledTimes(1);
+    const terminalOptions = createTerminal.mock.calls[0][0] as { name?: string };
+    expect(terminalOptions.name).toBe('RVIZ2');
+    const terminal = createTerminal.mock.results[0].value;
+    expect(terminal.sendText).toHaveBeenCalledWith(`source "${path.join(tempDir, 'install', 'setup.bash')}" && rviz2`);
+  });
+
+  it('starts rqt_graph without any prompt in a single-workspace setup, sourcing the overlay', async () => {
+    await activateWithWorkspaceState(workspaceState);
+
+    const handler = getHandler('ramros.launchTool.rqt_graph');
+    expect(handler).toBeDefined();
+
+    await handler!();
+
+    expect(showQuickPick).not.toHaveBeenCalled();
+    const terminal = createTerminal.mock.results[0].value;
+    expect(terminal.sendText).toHaveBeenCalledWith(`source "${path.join(tempDir, 'install', 'setup.bash')}" && ros2 run rqt_graph rqt_graph`);
+  });
+
+  it('offers a last-used marked workspace pick and a no-sourcing option in multi-workspace setups', async () => {
+    makeWorkspaceFolders([tempDir, tempDir2]);
+    workspaceState.get.mockReturnValue(tempDir2); // last used overlay workspace
+
+    await activateWithWorkspaceState(workspaceState);
+
+    const handler = getHandler('ramros.launchTool.rviz2');
+    await handler!();
+
+    expect(showQuickPick).toHaveBeenCalledTimes(1);
+    const items = showQuickPick.mock.calls[0][0] as Array<{ label: string; description?: string; alwaysShow?: boolean }>;
+    const labels = items.map(item => item.label);
+    // Last used workspace is listed and marked
+    const lastUsed = items.find(item => item.label.includes('(last used)'));
+    expect(lastUsed).toBeDefined();
+    expect(lastUsed!.label).toContain(path.basename(tempDir2));
+    // A no-sourcing option exists
+    expect(labels.some(label => /without sourcing/i.test(label))).toBe(true);
+
+    // Pick the last-used entry (first item)
+    showQuickPick.mockResolvedValueOnce(items[0]);
+    await handler!();
+
+    const terminal = createTerminal.mock.results[0].value;
+    expect(terminal.sendText).toHaveBeenCalledWith(`source "${path.join(tempDir2, 'install', 'setup.bash')}" && rviz2`);
+  });
+
+  it('builds a command without source prefix when no-sourcing is chosen', async () => {
+    makeWorkspaceFolders([tempDir, tempDir2]);
+
+    await activateWithWorkspaceState(workspaceState);
+
+    const handler = getHandler('ramros.launchTool.rviz2');
+    // First call: choose the no-sourcing option
+    await handler!();
+
+    const items = showQuickPick.mock.calls[0][0] as Array<{ label: string; noSourcing?: boolean }>;
+    const noSourcingItem = items.find(item => item.noSourcing);
+    expect(noSourcingItem).toBeDefined();
+    showQuickPick.mockResolvedValueOnce(noSourcingItem);
+    await handler!();
+
+    const terminal = createTerminal.mock.results[0].value;
+    const sent = (terminal.sendText as jest.Mock).mock.calls[0][0] as string;
+    expect(sent).not.toContain('source');
+    expect(sent).toBe('rviz2');
+  });
+
+  it('remembers the chosen overlay workspace for the next pick', async () => {
+    makeWorkspaceFolders([tempDir, tempDir2]);
+
+    await activateWithWorkspaceState(workspaceState);
+
+    const handler = getHandler('ramros.launchTool.rviz2');
+    await handler!();
+
+    const items = showQuickPick.mock.calls[0][0] as Array<{ label: string; workspace?: unknown }>;
+    showQuickPick.mockResolvedValueOnce(items[0]); // pick first workspace (tempDir)
+    await handler!();
+
+    expect(workspaceState.update).toHaveBeenCalledWith('ramros.lastOverlayWorkspace', tempDir);
+  });
+
+  it('keeps the colcon build prompt a plain workspace pick (regression)', async () => {
+    makeWorkspaceFolders([tempDir, tempDir2]);
+
+    await activateWithWorkspaceState(workspaceState);
+
+    const handler = getHandler('ramros.buildWorkspace');
+    expect(handler).toBeDefined();
+    await handler!();
+
+    expect(showQuickPick).toHaveBeenCalledTimes(1);
+    const items = showQuickPick.mock.calls[0][0];
+    // Plain string list (old behavior), no last-used marking, no no-sourcing option
+    expect(items.every((item: unknown) => typeof item === 'string')).toBe(true);
+    const labels = (items as string[]).join('\n');
+    expect(labels).not.toContain('(last used)');
+    expect(labels).not.toMatch(/without sourcing/i);
+  });
+
+  it('applies ramros.ros.rosRoot to the ROS environment service', async () => {
+    (vscode.workspace as unknown as { getConfiguration: jest.Mock }).getConfiguration = jest.fn((section: string) => {
+      if (section === 'ramros.ros') {
+        return { get: jest.fn((key: string, defaultValue: unknown) => key === 'rosRoot' ? tempDir : defaultValue) };
+      }
+      return { get: jest.fn((_key: string, defaultValue: unknown) => defaultValue) };
+    });
+
+    await activateWithWorkspaceState(workspaceState);
+
+    // The service is wired into the workspace detector; a refresh re-reads
+    // workspaces from the (here mocked) environment. We verify the wiring
+    // indirectly: no error during activate and the config listener registered.
+    const listener = (vscode.workspace.onDidChangeConfiguration as jest.Mock).mock.calls[0]?.[0];
+    expect(listener).toBeDefined();
+  });
+
+  it('shows the configured ROS domain in the tools view title description', async () => {
+    (vscode.workspace as unknown as { getConfiguration: jest.Mock }).getConfiguration = jest.fn((section: string) => {
+      if (section === 'ramros.ros') {
+        return { get: jest.fn((key: string, defaultValue: unknown) => key === 'domainId' ? 4 : defaultValue) };
+      }
+      return { get: jest.fn((_key: string, defaultValue: unknown) => defaultValue) };
+    });
+
+    await activateWithWorkspaceState(workspaceState);
+
+    // createTreeView calls: [0]=ramrosExplorer, [1]=ramrosTools, [2]=ramrosLive
+    const toolsView = (vscode.window.createTreeView as jest.Mock).mock.results[1].value as { description?: string };
+    expect(toolsView.description).toBe('ROS_DOMAIN_ID=4');
+  });
+
+  it('clears the tools view domain description when no domain is configured', async () => {
+    await activateWithWorkspaceState(workspaceState);
+
+    const toolsView = (vscode.window.createTreeView as jest.Mock).mock.results[1].value as { description?: string };
+    expect(toolsView.description).toBeUndefined();
+  });
+
+  it('starts rqt_graph via ros2 run (binary is not on PATH in newer distros)', async () => {
+    await activateWithWorkspaceState(workspaceState);
+
+    const handler = getHandler('ramros.launchTool.rqt_graph');
+    await handler!();
+
+    const terminal = createTerminal.mock.results[0].value;
+    expect(terminal.sendText).toHaveBeenCalledWith(`source "${path.join(tempDir, 'install', 'setup.bash')}" && ros2 run rqt_graph rqt_graph`);
+  });
+
+  it('launches rviz2 with a per-start domain via the with-options flow', async () => {
+    await activateWithWorkspaceState(workspaceState);
+
+    // With-options flow: workspace pick -> domain pick ("specific" + number)
+    const workspaceHandler = getHandler('ramros.launchTool.rviz2WithOptions');
+    expect(workspaceHandler).toBeDefined();
+
+    const pickItems = [
+      { label: path.basename(tempDir), workspace: { rootPath: { fsPath: tempDir }, name: path.basename(tempDir) }, source: true }
+    ];
+    showQuickPick.mockResolvedValueOnce(pickItems[0]);      // workspace pick (item shape: implementation detail)
+    showQuickPick.mockResolvedValueOnce({ label: 'Use a specific domain…', isSpecific: true });
+    showInputBox.mockResolvedValueOnce('5');
+
+    await workspaceHandler!();
+
+    expect(createTerminal).toHaveBeenCalledTimes(1);
+    const terminal = createTerminal.mock.results[0].value;
+    const sent = (terminal.sendText as jest.Mock).mock.calls[0][0] as string;
+    expect(sent).toContain('export ROS_DOMAIN_ID=5 &&');
+    expect(sent).toContain('rviz2');
+    expect(sent).toContain('source');
+  });
+
+  it('launches rqt_graph with ros2 run in the with-options flow', async () => {
+    await activateWithWorkspaceState(workspaceState);
+
+    const handler = getHandler('ramros.launchTool.rqtGraphWithOptions');
+    expect(handler).toBeDefined();
+
+    showQuickPick.mockResolvedValueOnce({ label: 'Use environment domain', isEnv: true });
+    await handler!();
+
+    const terminal = createTerminal.mock.results[0].value;
+    const sent = (terminal.sendText as jest.Mock).mock.calls[0][0] as string;
+    expect(sent).toContain('ros2 run rqt_graph rqt_graph');
+  });
+
+  it('starts nothing when the tool with-options domain pick is aborted', async () => {
+    await activateWithWorkspaceState(workspaceState);
+
+    const handler = getHandler('ramros.launchTool.rviz2WithOptions');
+    showQuickPick.mockResolvedValueOnce(undefined); // Esc at domain pick
+
+    await handler!();
+
+    expect(createTerminal).not.toHaveBeenCalled();
+  });
+
+  it('passes the wizard domain through to the terminal in runNodeWithOptions', async () => {
+    makeWorkspaceFolders([tempDir]);
+
+    await activateWithWorkspaceState(workspaceState);
+
+    const handler = getHandler('ramros.runNodeWithOptions');
+    const nodeItem = makeNodeItem();
+    const wizardResult = {
+      parameters: [],
+      remaps: [],
+      domainId: 3
+    };
+    // Wizard runs inside the handler; mock the pick sequence: params [], domain env, remaps done
+    showQuickPick
+      .mockResolvedValueOnce([])                                              // parameters
+      .mockResolvedValueOnce({ label: 'Use a specific domain…', isSpecific: true })
+      .mockResolvedValueOnce({ label: 'Done', isDone: true });
+    showInputBox
+      .mockResolvedValueOnce('talker_node')
+      .mockResolvedValueOnce('3');
+
+    await handler!(nodeItem);
+
+    expect(createTerminal).toHaveBeenCalledTimes(1);
+    const terminal = createTerminal.mock.results[0].value;
+    const sent = (terminal.sendText as jest.Mock).mock.calls[0][0] as string;
+    expect(sent).toContain('export ROS_DOMAIN_ID=3 &&');
+  });
+
+  it('applies a rosRoot setting change via setRosRoot and refreshes the tree', async () => {    makeWorkspaceFolders([tempDir]);
+
+    await activateWithWorkspaceState(workspaceState);
+
+    const calls = (vscode.workspace.onDidChangeConfiguration as jest.Mock).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+
+    // The RAMROS tree provider is the first created tree view.
+    const treeProvider = (vscode.window.createTreeView as jest.Mock).mock.calls[0][1].treeDataProvider;
+    const refreshSpy = jest.spyOn(treeProvider, 'refresh').mockResolvedValue(undefined);
+
+    const affects = jest.fn((key: string) => key === 'ramros.ros.rosRoot');
+    const event = { affectsConfiguration: affects };
+
+    for (const [listener] of calls) {
+      await (listener as (e: typeof event) => Promise<void> | void)(event);
+    }
+
+    expect(affects).toHaveBeenCalledWith('ramros.ros.rosRoot');
+    expect(refreshSpy).toHaveBeenCalled();
+  });
+});

@@ -83,6 +83,20 @@ describe('parseNodeInfoOutput', () => {
     expect(result.subscribedTopics).toEqual([]);
     expect(result.serviceServers).toEqual([]);
   });
+
+  it('parses Action Servers sections with types', () => {
+    const out = [
+      '/talker',
+      'Subscribers:',
+      '    /chatter: std_msgs/msg/String',
+      'Action Servers:',
+      '    /fibonacci: example_interfaces/action/Fibonacci',
+      'Action Clients:',
+      ''
+    ].join('\n');
+    const r = parseNodeInfoOutput(out);
+    expect(r.actionServers).toEqual([{ name: '/fibonacci', type: 'example_interfaces/action/Fibonacci' }]);
+  });
 });
 
 describe('parseParameterList', () => {
@@ -211,7 +225,7 @@ describe('setParameterValue command quoting', () => {
     expect(result).toBe(true);
     expect(exec).toHaveBeenCalledWith(
       'ros2 param set "/my node" "my param" "hello world"',
-      { encoding: 'utf-8', timeout: 10000 },
+      expect.objectContaining({ encoding: 'utf-8', timeout: 10000 }),
       expect.any(Function)
     );
   });
@@ -223,7 +237,7 @@ describe('setParameterValue command quoting', () => {
 
     expect(exec).toHaveBeenCalledWith(
       'ros2 param set "/talker" "greeting" "\\$(reboot) \\`touch /tmp/pwned\\`"',
-      { encoding: 'utf-8', timeout: 10000 },
+      expect.objectContaining({ encoding: 'utf-8', timeout: 10000 }),
       expect.any(Function)
     );
   });

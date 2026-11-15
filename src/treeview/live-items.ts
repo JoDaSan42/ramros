@@ -3,8 +3,37 @@ import { TopicEndpointInfo } from '../core/package-discovery';
 import { Ros2CliService, ServiceServerInfo } from '../core/ros2-cli-service';
 import { TreeItemBase } from './base-tree-item';
 
-export class LiveFolderItem extends TreeItemBase {
+/**
+ * A labeled group of nodes or topics for one ROS domain
+ * (e.g. "Nodes (domain 2)"). Members are regular LiveNodeItem/LiveTopicItem
+ * instances backed by domain-scoped CLI calls.
+ */
+export class LiveDomainGroupItem extends TreeItemBase {
   constructor(
+    label: string,
+    private readonly domainId: number,
+    private readonly groupKind: 'nodes' | 'topics'
+  ) {
+    super(label, vscode.TreeItemCollapsibleState.Collapsed);
+    this.iconPath = new vscode.ThemeIcon(groupKind === 'nodes' ? 'broadcast' : 'symbol-event');
+    this.contextValue = 'liveDomainGroup';
+    this.description = `ROS_DOMAIN_ID=${domainId}`;
+  }
+
+  getDomainId(): number {
+    return this.domainId;
+  }
+
+  getGroupKind(): 'nodes' | 'topics' {
+    return this.groupKind;
+  }
+
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
+export class LiveFolderItem extends TreeItemBase {  constructor(
     label: string,
     private readonly folderType: string
   ) {
@@ -23,15 +52,54 @@ export class LiveFolderItem extends TreeItemBase {
 }
 
 export class LiveNodeItem extends TreeItemBase {
+  private publishedTopics?: string[];
+  private subscribedTopics?: string[];
+  private serviceServers?: ServiceServerInfo[];
+  private actionServers?: ServiceServerInfo[];
+
   constructor(
     private readonly nodeName: string,
-    private readonly publishedTopics?: string[],
-    private readonly subscribedTopics?: string[],
-    private readonly serviceServers?: ServiceServerInfo[]
+    info?: {
+      publishedTopics?: string[];
+      subscribedTopics?: string[];
+      serviceServers?: ServiceServerInfo[];
+      actionServers?: ServiceServerInfo[];
+    },
+    private readonly domainId?: number
   ) {
     super(nodeName, vscode.TreeItemCollapsibleState.Collapsed);
     this.iconPath = new vscode.ThemeIcon('broadcast', new vscode.ThemeColor('charts.green'));
     this.contextValue = 'liveNode';
+    this.publishedTopics = info?.publishedTopics;
+    this.subscribedTopics = info?.subscribedTopics;
+    this.serviceServers = info?.serviceServers;
+    this.actionServers = info?.actionServers;
+    this.updateDisplay();
+  }
+
+  /**
+   * The domain this item's entity lives in, when the item was created for a
+   * domain group. Info fetches must query that domain; `undefined` means the
+   * flat environment view (global default domain).
+   */
+  getDomainId(): number | undefined {
+    return this.domainId;
+  }
+
+  /**
+   * Updates the info shown by this item (description + children source)
+   * after a lazy fetch. Called by the tree provider, not by the item itself.
+   */
+  applyInfo(info: {
+    publishedTopics?: string[];
+    subscribedTopics?: string[];
+    serviceServers?: ServiceServerInfo[];
+    actionServers?: ServiceServerInfo[];
+  }): void {
+    this.publishedTopics = info.publishedTopics;
+    this.subscribedTopics = info.subscribedTopics;
+    this.serviceServers = info.serviceServers;
+    this.actionServers = info.actionServers;
     this.updateDisplay();
   }
 
@@ -75,6 +143,10 @@ export class LiveNodeItem extends TreeItemBase {
       children.push(new NodeServicesItem(this.serviceServers));
     }
 
+    if (this.actionServers && this.actionServers.length > 0) {
+      children.push(new NodeActionsItem(this.actionServers));
+    }
+
     children.push(new NodeParametersItem(this.nodeName));
 
     if (children.length === 0) {
@@ -110,6 +182,39 @@ export class LiveServiceItem extends TreeItemBase {
   }
 
   getServiceType(): string | undefined {
+    return this.server.type;
+  }
+
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
+export class NodeActionsItem extends TreeItemBase {
+  constructor(private readonly actionServers: ServiceServerInfo[]) {
+    super(`Actions (${actionServers.length})`, vscode.TreeItemCollapsibleState.Collapsed);
+    this.iconPath = new vscode.ThemeIcon('play-circle');
+    this.contextValue = 'nodeActions';
+  }
+
+  async getChildren(): Promise<TreeItemBase[]> {
+    return this.actionServers.map(server => new LiveActionItem(server));
+  }
+}
+
+export class LiveActionItem extends TreeItemBase {
+  constructor(private readonly server: ServiceServerInfo) {
+    super(server.name, vscode.TreeItemCollapsibleState.None);
+    this.iconPath = new vscode.ThemeIcon('play');
+    this.description = server.type ?? '';
+    this.contextValue = 'liveAction';
+  }
+
+  getActionName(): string {
+    return this.server.name;
+  }
+
+  getActionType(): string | undefined {
     return this.server.type;
   }
 
@@ -273,15 +378,48 @@ export class NoEndpointsItem extends TreeItemBase {
 }
 
 export class LiveTopicItem extends TreeItemBase {
+  private messageType?: string;
+  private publishers?: string[];
+  private subscribers?: string[];
+
   constructor(
     private readonly topicName: string,
-    private readonly messageType?: string,
-    private readonly publishers?: string[],
-    private readonly subscribers?: string[]
+    info?: {
+      messageType?: string;
+      publishers?: string[];
+      subscribers?: string[];
+    },
+    private readonly domainId?: number
   ) {
     super(topicName, vscode.TreeItemCollapsibleState.Collapsed);
     this.iconPath = new vscode.ThemeIcon('symbol-event');
     this.contextValue = 'liveTopic';
+    this.messageType = info?.messageType;
+    this.publishers = info?.publishers;
+    this.subscribers = info?.subscribers;
+    this.updateDisplay();
+  }
+
+  /**
+   * The domain this item's entity lives in, when the item was created for a
+   * domain group. See LiveNodeItem.getDomainId.
+   */
+  getDomainId(): number | undefined {
+    return this.domainId;
+  }
+
+  /**
+   * Updates the info shown by this item (description + children source)
+   * after a lazy fetch. Called by the tree provider, not by the item itself.
+   */
+  applyInfo(info: {
+    messageType?: string;
+    publishers?: string[];
+    subscribers?: string[];
+  }): void {
+    this.messageType = info.messageType;
+    this.publishers = info.publishers;
+    this.subscribers = info.subscribers;
     this.updateDisplay();
   }
   
@@ -316,13 +454,13 @@ export class LiveTopicItem extends TreeItemBase {
     const children: TreeItemBase[] = [
       new TopicMessageTypeItem(this.topicName, this.messageType)
     ];
-    
+
     const pubCount = this.publishers?.length || 0;
     const subCount = this.subscribers?.length || 0;
-    
-    children.push(new TopicPublishersItem(this.topicName, pubCount));
-    children.push(new TopicSubscribersItem(this.topicName, subCount));
-    
+
+    children.push(new TopicPublishersItem(this.topicName, pubCount, this.domainId));
+    children.push(new TopicSubscribersItem(this.topicName, subCount, this.domainId));
+
     return children;
   }
 }
@@ -343,18 +481,23 @@ export class TopicMessageTypeItem extends TreeItemBase {
 export class TopicPublishersItem extends TreeItemBase {
   constructor(
     private readonly topicName: string,
-    count: number
+    count: number,
+    private readonly domainId?: number
   ) {
     super(`Publishers (${count})`, vscode.TreeItemCollapsibleState.Collapsed);
     this.iconPath = new vscode.ThemeIcon('arrow-up', new vscode.ThemeColor('charts.green'));
     this.contextValue = 'topicPublishers';
     this.tooltip = new vscode.MarkdownString(`**Publishers on ${topicName}**\n\nCount: ${count}`);
   }
-  
+
   async getChildren(): Promise<TreeItemBase[]> {
     const cli = Ros2CliService.getInstance();
-    const publishers = await cli.getTopicPublishers(this.topicName);
-    
+    // Domain group items must list their endpoints in the group's domain,
+    // not in the global default (where the real publisher does not exist).
+    const publishers = this.domainId === undefined
+      ? await cli.getTopicPublishers(this.topicName)
+      : await cli.getTopicPublishersForDomain(this.topicName, this.domainId);
+
     return publishers.map(pub => new TopicEndpointItem({
       topicName: this.topicName,
       messageType: '',
@@ -367,18 +510,23 @@ export class TopicPublishersItem extends TreeItemBase {
 export class TopicSubscribersItem extends TreeItemBase {
   constructor(
     private readonly topicName: string,
-    count: number
+    count: number,
+    private readonly domainId?: number
   ) {
     super(`Subscribers (${count})`, vscode.TreeItemCollapsibleState.Collapsed);
     this.iconPath = new vscode.ThemeIcon('arrow-down', new vscode.ThemeColor('charts.blue'));
     this.contextValue = 'topicSubscribers';
     this.tooltip = new vscode.MarkdownString(`**Subscribers on ${topicName}**\n\nCount: ${count}`);
   }
-  
+
   async getChildren(): Promise<TreeItemBase[]> {
     const cli = Ros2CliService.getInstance();
-    const subscribers = await cli.getTopicSubscribers(this.topicName);
-    
+    // See TopicPublishersItem: domain group items list endpoints in their
+    // own domain.
+    const subscribers = this.domainId === undefined
+      ? await cli.getTopicSubscribers(this.topicName)
+      : await cli.getTopicSubscribersForDomain(this.topicName, this.domainId);
+
     return subscribers.map(sub => new TopicEndpointItem({
       topicName: this.topicName,
       messageType: '',

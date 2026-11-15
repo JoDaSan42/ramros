@@ -134,8 +134,8 @@ describe('showInterfaceDefinition', () => {
     );
     expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
     expect(exec).toHaveBeenCalledWith(
-      'ros2 interface show my_pkg/srv/Reset',
-      { encoding: 'utf-8', timeout: 5000 },
+      "ros2 interface show 'my_pkg/srv/Reset'",
+      expect.objectContaining({ encoding: 'utf-8', timeout: 5000 }),
       expect.any(Function)
     );
   });
@@ -163,10 +163,13 @@ describe('showInterfaceDefinition', () => {
 
     await showInterfaceDefinition('my_pkg/srv/Reset', `${tmpRoot}/src/my_pkg/msg/Reset.msg`);
 
-    const expectedCommand = `source "${path.join(tmpRoot, 'install', 'setup.bash')}" && ros2 interface show my_pkg/srv/Reset`;
+    // POSIX dot sourcing: hidden execs source the overlay and run under
+    // bash; the qualified name is single-quoted against shell injection.
+    const expectedCommand = `. "${path.join(tmpRoot, 'install', 'setup.bash')}" && ros2 interface show 'my_pkg/srv/Reset'`;
     const calls = (exec as unknown as jest.Mock).mock.calls as unknown[][];
-    const withSource = calls.find(call => String(call[0]).includes('source'));
-    expect(withSource?.[0]).toBe(expectedCommand);
+    const withDot = calls.find(call => String(call[0]).includes('. "'));
+    expect(withDot?.[0]).toBe(expectedCommand);
+    expect(withDot?.[0]).not.toContain('source "');
     await fs.promises.rm(tmpRoot, { recursive: true, force: true });
   });
 
@@ -187,10 +190,25 @@ describe('showInterfaceDefinition', () => {
     await showInterfaceDefinition('my_pkg/srv/Reset', '/elsewhere/msg/Reset.msg');
 
     expect(exec).toHaveBeenCalledWith(
-      'ros2 interface show my_pkg/srv/Reset',
-      { encoding: 'utf-8', timeout: 5000 },
+      "ros2 interface show 'my_pkg/srv/Reset'",
+      expect.objectContaining({ encoding: 'utf-8', timeout: 5000 }),
       expect.any(Function)
     );
+  });
+
+  it('single-quotes interface names containing shell metacharacters', async () => {
+    (exec as unknown as jest.Mock).mockImplementationOnce((...args: unknown[]) => {
+      const cb = args[args.length - 1] as (error: Error | null, stdout: string, stderr: string) => void;
+      cb(null, 'definition text', '');
+    });
+
+    // Interface file names come from disk; a hostile repo can plant names
+    // with command substitutions. Quoting must render them inert.
+    await showInterfaceDefinition("my_pkg/msg/$(touch /tmp/pwned).msg");
+
+    const calls = (exec as unknown as jest.Mock).mock.calls as unknown[][];
+    const command = String(calls[calls.length - 1][0]);
+    expect(command).toBe("ros2 interface show 'my_pkg/msg/$(touch /tmp/pwned).msg'");
   });
 
   it('shows a colcon build hint when ros2 interface show fails', async () => {
@@ -244,7 +262,7 @@ describe('runHealthCheck', () => {
     expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
     expect(exec).toHaveBeenCalledWith(
       'ros2 doctor',
-      { encoding: 'utf-8', timeout: 60000 },
+      expect.objectContaining({ encoding: 'utf-8', timeout: 60000 }),
       expect.any(Function)
     );
   });

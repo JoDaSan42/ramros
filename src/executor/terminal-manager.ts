@@ -21,6 +21,38 @@ function delay(ms: number): Promise<void> {
 
 export class TerminalManager implements vscode.Disposable {
   private readonly terminals = new Map<string, vscode.Terminal>();
+  private domainId?: number;
+
+  /**
+   * Sets the ROS_DOMAIN_ID exported in new terminals (see
+   * executeInNewTerminal). `undefined` stops exporting the variable.
+   */
+  setDomainId(domainId: number | undefined): void {
+    // Reject non-integer values from settings before they reach the shell.
+    this.domainId = Number.isInteger(domainId) ? domainId : undefined;
+  }
+
+  /**
+   * Builds the command line for a new terminal: optional overlay source,
+   * optional ROS_DOMAIN_ID export (per-start override wins over the global
+   * domain), then the command itself.
+   */
+  private buildTerminalCommand(command: string, setupBashPath?: string, options?: { domainId?: number }): string {
+    const parts: string[] = [];
+    if (setupBashPath) {
+      parts.push(`source "${setupBashPath}"`);
+    }
+    const effectiveDomain = options?.domainId ?? this.domainId;
+    if (effectiveDomain !== undefined) {
+      // Domain ids come from settings (possibly a hostile workspace
+      // configuration); only sane integers may reach the shell line.
+      if (Number.isInteger(effectiveDomain)) {
+        parts.push(`export ROS_DOMAIN_ID=${effectiveDomain}`);
+      }
+    }
+    parts.push(command);
+    return parts.join(' && ');
+  }
 
   async focusAndWait(terminal: vscode.Terminal): Promise<void> {
     terminal.show(true);
@@ -87,8 +119,14 @@ export class TerminalManager implements vscode.Disposable {
     return terminal;
   }
 
-  async executeInNewTerminal(command: string, workspace: WorkspaceInfo, terminalName?: string): Promise<vscode.Terminal> {
+  async executeInNewTerminal(
+    command: string,
+    workspace: WorkspaceInfo,
+    terminalName?: string,
+    options?: { source?: boolean; domainId?: number }
+  ): Promise<vscode.Terminal> {
     const name = terminalName || `ROS Run: ${new Date().toLocaleTimeString()}`;
+    const shouldSource = options?.source !== false;
 
     const terminal = vscode.window.createTerminal({
       name
@@ -96,12 +134,8 @@ export class TerminalManager implements vscode.Disposable {
 
     terminal.show();
 
-    const setupBashPath = this.resolveSetupBash(workspace);
-    if (setupBashPath) {
-      terminal.sendText(`source "${setupBashPath}" && ${command}`);
-    } else {
-      terminal.sendText(command);
-    }
+    const setupBashPath = shouldSource ? this.resolveSetupBash(workspace) : undefined;
+    terminal.sendText(this.buildTerminalCommand(command, setupBashPath, options));
 
     return terminal;
   }

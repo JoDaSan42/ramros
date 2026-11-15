@@ -543,7 +543,9 @@ def generate_launch_description():
   private async getRosSetupCommand(): Promise<string> {
     const activeDist = await this.rosEnvironment.getActiveDistribution();
     if (activeDist) {
-      return `source ${activeDist.setupBash}`;
+      // The setup path derives from the ramros.ros.rosRoot setting; quote it
+      // so a path with spaces or shell metacharacters stays one word.
+      return `source '${activeDist.setupBash.replace(/'/g, "'\\''")}'`;
     }
     throw new Error('No active ROS2 distribution found. Please ensure ROS2 is installed and ROS_DISTRO is set.');
   }

@@ -33,6 +33,36 @@ describe('RosEnvironmentService', () => {
     }
   });
   
+  describe('ros root injection', () => {
+    it('accepts a custom ros root via constructor and detects from there', async () => {
+      fs.mkdirSync(mockDistroPath, { recursive: true });
+      fs.writeFileSync(mockSetupBash, '#!/bin/bash\nexport ROS_DISTRO_RELEASE="23.04"');
+
+      const custom = new RosEnvironmentService(mockRosRoot);
+      const result = await custom.detectInstallations();
+
+      expect(result).toHaveLength(1);
+      expect(result[0].installPath).toBe(mockDistroPath);
+    });
+
+    it('defaults to /opt/ros when no root is given', () => {
+      const defaulted = new RosEnvironmentService();
+      expect((defaulted as unknown as { rosRoot: string }).rosRoot).toBe('/opt/ros');
+    });
+
+    it('setRosRoot changes subsequent detection results', async () => {
+      fs.mkdirSync(mockDistroPath, { recursive: true });
+      fs.writeFileSync(mockSetupBash, '#!/bin/bash');
+
+      const custom = new RosEnvironmentService('/nonexistent-ros-root');
+      expect(await custom.detectInstallations()).toEqual([]);
+
+      custom.setRosRoot(mockRosRoot);
+      const result = await custom.detectInstallations();
+      expect(result).toHaveLength(1);
+    });
+  });
+
   describe('detectInstallations', () => {
     it('should return empty array when no ROS installation exists', async () => {
       const result = await service.detectInstallations();

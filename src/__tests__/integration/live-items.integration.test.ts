@@ -2,19 +2,27 @@ import {
   LiveNodeItem,
   NodeServicesItem,
   LiveServiceItem,
+  NodeActionsItem,
+  LiveActionItem,
   NodeParametersItem,
   LiveParameterItem,
   LiveViewDisabledItem,
-  NoEndpointsItem
+  NoEndpointsItem,
+  LiveTopicItem,
+  TopicPublishersItem,
+  TopicSubscribersItem,
+  TopicEndpointItem
 } from '../../treeview/live-items';
 import { Ros2CliService } from '../../core/ros2-cli-service';
 
 describe('Live Items Integration Tests', () => {
   describe('LiveNodeItem with service servers', () => {
     it('exposes a services folder and a parameters folder', async () => {
-      const item = new LiveNodeItem('/talker', ['/chatter'], [], [
-        { name: '/reset', type: 'std_srvs/srv/Trigger' }
-      ]);
+      const item = new LiveNodeItem('/talker', {
+        publishedTopics: ['/chatter'],
+        subscribedTopics: [],
+        serviceServers: [{ name: '/reset', type: 'std_srvs/srv/Trigger' }]
+      });
 
       const children = await item.getChildren();
 
@@ -37,6 +45,44 @@ describe('Live Items Integration Tests', () => {
 
       expect(children.some(c => c instanceof NodeServicesItem)).toBe(false);
       expect(children.some(c => c instanceof NodeParametersItem)).toBe(true);
+    });
+
+    it('exposes an actions folder when action servers are given', async () => {
+      const item = new LiveNodeItem('/talker', {
+        publishedTopics: [],
+        subscribedTopics: [],
+        actionServers: [{ name: '/fibonacci', type: 'example_interfaces/action/Fibonacci' }]
+      });
+
+      const children = await item.getChildren();
+
+      const actions = children.find(c => c instanceof NodeActionsItem);
+      expect(actions).toBeInstanceOf(NodeActionsItem);
+
+      const actionChildren = await actions!.getChildren();
+      const action = actionChildren.find(c => c instanceof LiveActionItem) as LiveActionItem;
+      expect(action).toBeInstanceOf(LiveActionItem);
+      expect(action.getActionName()).toBe('/fibonacci');
+      expect(action.getActionType()).toBe('example_interfaces/action/Fibonacci');
+    });
+
+    it('omits the actions folder when no action servers are given', async () => {
+      const item = new LiveNodeItem('/talker');
+
+      const children = await item.getChildren();
+
+      expect(children.some(c => c instanceof NodeActionsItem)).toBe(false);
+      expect(children.some(c => c instanceof NodeParametersItem)).toBe(true);
+    });
+
+    it('NodeActionsItem renders children as liveAction items with type description', async () => {
+      const folder = new NodeActionsItem([{ name: '/fibonacci', type: 'example_interfaces/action/Fibonacci' }, { name: '/notype' }]);
+      expect(folder.contextValue).toBe('nodeActions');
+      const kids = await folder.getChildren() as LiveActionItem[];
+      expect(kids).toHaveLength(2);
+      expect(kids[0].contextValue).toBe('liveAction');
+      expect(kids[0].description).toBe('example_interfaces/action/Fibonacci');
+      expect(kids[1].description).toBe('');
     });
   });
 
@@ -163,6 +209,78 @@ describe('Live Items Integration Tests', () => {
         command: 'ramros.live.toggleEnabled',
         title: 'Enable Live View'
       });
+    });
+  });
+
+  describe('LiveTopicItem endpoint chain in a domain', () => {
+    it('publisher endpoints under a domain-group topic are fetched in that domain', async () => {
+      const cli = Ros2CliService.getInstance();
+      const domainSpy = jest.spyOn(cli, 'getTopicPublishersForDomain').mockResolvedValue([
+        { nodeName: 'tolles_paket', nodeNamespace: '/' }
+      ]);
+      const globalSpy = jest.spyOn(cli, 'getTopicPublishers').mockResolvedValue([]);
+
+      const item = new LiveTopicItem('/topic', {
+        messageType: 'std_msgs/msg/String',
+        publishers: ['tolles_paket'],
+        subscribers: []
+      }, 42);
+
+      const children = await item.getChildren();
+      const pubs = children.find(c => c instanceof TopicPublishersItem) as TopicPublishersItem;
+      const endpoints = await pubs.getChildren();
+
+      expect(domainSpy).toHaveBeenCalledWith('/topic', 42);
+      expect(globalSpy).not.toHaveBeenCalled();
+      expect(endpoints.some(e => e instanceof TopicEndpointItem && e.label === 'tolles_paket')).toBe(true);
+    });
+
+    it('subscriber endpoints under a domain-group topic are fetched in that domain', async () => {
+      const cli = Ros2CliService.getInstance();
+      const domainSpy = jest.spyOn(cli, 'getTopicSubscribersForDomain').mockResolvedValue([
+        { nodeName: 'listener42', nodeNamespace: '/' }
+      ]);
+      const globalSpy = jest.spyOn(cli, 'getTopicSubscribers').mockResolvedValue([]);
+
+      const item = new LiveTopicItem('/topic', {
+        messageType: 'std_msgs/msg/String',
+        publishers: [],
+        subscribers: ['listener42']
+      }, 42);
+
+      const children = await item.getChildren();
+      const subs = children.find(c => c instanceof TopicSubscribersItem) as TopicSubscribersItem;
+      const endpoints = await subs.getChildren();
+
+      expect(domainSpy).toHaveBeenCalledWith('/topic', 42);
+      expect(globalSpy).not.toHaveBeenCalled();
+      expect(endpoints.some(e => e instanceof TopicEndpointItem && e.label === 'listener42')).toBe(true);
+    });
+
+    it('flat topic items keep querying the global domain', async () => {
+      const cli = Ros2CliService.getInstance();
+      // Earlier tests in this file spy the same methods without restoring
+      // them; clear the call history so the assertions below see only this
+      // test's calls.
+      const globalSpy = jest.spyOn(cli, 'getTopicPublishers').mockResolvedValue([
+        { nodeName: 'flat_node', nodeNamespace: '/' }
+      ]);
+      globalSpy.mockClear();
+      const domainSpy = jest.spyOn(cli, 'getTopicPublishersForDomain').mockResolvedValue([]);
+      domainSpy.mockClear();
+
+      const item = new LiveTopicItem('/topic', {
+        messageType: 'std_msgs/msg/String',
+        publishers: ['flat_node'],
+        subscribers: []
+      });
+
+      const children = await item.getChildren();
+      const pubs = children.find(c => c instanceof TopicPublishersItem) as TopicPublishersItem;
+      await pubs.getChildren();
+
+      expect(globalSpy).toHaveBeenCalledWith('/topic');
+      expect(domainSpy).not.toHaveBeenCalled();
     });
   });
 });

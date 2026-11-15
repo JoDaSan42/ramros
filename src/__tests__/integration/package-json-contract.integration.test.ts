@@ -55,8 +55,8 @@ describe('package.json contract', () => {
     contextEntries = packageJson.contributes?.menus?.['view/item/context'] ?? [];
   });
 
-  it('declares version 1.3.2', () => {
-    expect(packageJson.version).toBe('1.3.2');
+  it('declares version 1.4.0', () => {
+    expect(packageJson.version).toBe('1.4.0');
   });
 
   it('registers every command referenced in menus', () => {
@@ -99,6 +99,14 @@ describe('package.json contract', () => {
     expect(findInlineEntry(contextEntries, 'ramros.live.pubTopic', 'liveTopic')).toBeDefined();
   });
 
+  it('offers Stop Node on liveNode items', () => {
+    expect(registeredCommands.has('ramros.live.stopNode')).toBe(true);
+    expect(findInlineEntry(contextEntries, 'ramros.live.stopNode', 'liveNode')).toBeDefined();
+    expect(contextEntries.find(
+      entry => entry.command === 'ramros.live.stopNode' && viewItemOf(entry) === 'liveNode' && !isInline(entry)
+    )).toBeDefined();
+  });
+
   it('declares the parameter update command', () => {
     expect(registeredCommands.has('ramros.live.updateParameters')).toBe(true);
   });
@@ -113,5 +121,50 @@ describe('package.json contract', () => {
         !isInline(entry)
     );
     expect(contextEntry).toBeDefined();
+  });
+
+  it('scopes each tool options button to its own tool item', () => {
+    // Distinct context values: the rviz2 gear must appear only on the rviz2
+    // item and the rqt_graph gear only on the rqt_graph item.
+    expect(findInlineEntry(contextEntries, 'ramros.launchTool.rviz2WithOptions', 'toolRviz2')).toBeDefined();
+    expect(findInlineEntry(contextEntries, 'ramros.launchTool.rqtGraphWithOptions', 'toolRqtGraph')).toBeDefined();
+
+    // No cross-placements: neither gear shows on the other tool's item,
+    // and neither shows on a generic 'tool' context.
+    expect(findInlineEntry(contextEntries, 'ramros.launchTool.rviz2WithOptions', 'toolRqtGraph')).toBeUndefined();
+    expect(findInlineEntry(contextEntries, 'ramros.launchTool.rqtGraphWithOptions', 'toolRviz2')).toBeUndefined();
+    expect(findInlineEntry(contextEntries, 'ramros.launchTool.rviz2WithOptions', 'tool')).toBeUndefined();
+    expect(findInlineEntry(contextEntries, 'ramros.launchTool.rqtGraphWithOptions', 'tool')).toBeUndefined();
+
+    // The when clauses use the tool-specific context values.
+    const rviz2When = contextEntries.find(e => e.command === 'ramros.launchTool.rviz2WithOptions' && isInline(e))?.when;
+    const rqtWhen = contextEntries.find(e => e.command === 'ramros.launchTool.rqtGraphWithOptions' && isInline(e))?.when;
+    expect(rviz2When).toContain('toolRviz2');
+    expect(rqtWhen).toContain('toolRqtGraph');
+  });
+
+  it('uses the gear codicon for the node options command', () => {
+    const command = (packageJson.contributes?.commands ?? []).find(c => c.command === 'ramros.runNodeWithOptions');
+    expect(command?.icon).toBe('$(settings-gear)');
+  });
+
+  it('offers bridge commands on live services and actions (context menu only)', () => {
+    expect(registeredCommands.has('ramros.live.bridgeTopic')).toBe(true);
+    expect(registeredCommands.has('ramros.live.bridgeService')).toBe(true);
+    expect(registeredCommands.has('ramros.live.bridgeAction')).toBe(true);
+
+    // liveService: context-menu entry only, no inline button.
+    const serviceInline = findInlineEntry(contextEntries, 'ramros.live.bridgeService', 'liveService');
+    expect(serviceInline).toBeUndefined();
+    expect(contextEntries.find(
+      entry => entry.command === 'ramros.live.bridgeService' && viewItemOf(entry) === 'liveService' && !isInline(entry)
+    )).toBeDefined();
+
+    // liveAction: context-menu entry only, no inline button.
+    const actionInline = findInlineEntry(contextEntries, 'ramros.live.bridgeAction', 'liveAction');
+    expect(actionInline).toBeUndefined();
+    expect(contextEntries.find(
+      entry => entry.command === 'ramros.live.bridgeAction' && viewItemOf(entry) === 'liveAction' && !isInline(entry)
+    )).toBeDefined();
   });
 });
