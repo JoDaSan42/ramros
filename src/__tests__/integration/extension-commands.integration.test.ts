@@ -337,8 +337,16 @@ describe('extension command registration', () => {
     expect(terminalOptions.name).toBe('Bridge: /chatter');
     const sent = (terminalMock.mock.results[0].value.sendText as jest.Mock).mock.calls[0][0] as string;
     expect(sent).toContain("trap 'kill $(jobs -p)' INT TERM EXIT;");
-    expect(sent).toMatch(/zenoh-bridge-ros2dds -c '[^']*ramros-bridge-a-\d+\.json5' &/);
-    expect(sent).toMatch(/zenoh-bridge-ros2dds -c '[^']*ramros-bridge-b-\d+\.json5' &/);
+    // Each bridge instance pins ROS_DOMAIN_ID to its configured domain: the
+    // ros2dds plugin resolves the domain from that env var when the terminal
+    // exports it, which would otherwise override the config key and pull
+    // both bridges into the terminal's "Current environment" domain.
+    expect(sent).toMatch(
+      /ROS_DOMAIN_ID=0 zenoh-bridge-ros2dds -c '[^']*ramros-bridge-a-\d+\.json5' &/
+    );
+    expect(sent).toMatch(
+      /ROS_DOMAIN_ID=2 zenoh-bridge-ros2dds -c '[^']*ramros-bridge-b-\d+\.json5' &/
+    );
     expect(sent.trim().endsWith('wait')).toBe(true);
   });
 

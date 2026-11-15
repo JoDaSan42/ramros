@@ -797,10 +797,17 @@ async function runBridgeFlow(
       // `wait` — `kill 0` would signal the shell's own group and leave the
       // bridges running. `kill $(jobs -p)` targets the background jobs
       // directly and stops both bridge instances.
+      //
+      // Each instance also pins ROS_DOMAIN_ID to its configured domain: the
+      // ros2dds plugin resolves the domain from that env var when the
+      // terminal exports it, overriding the config's `domain:` key — without
+      // the pin, a terminal running in the source domain pulls BOTH bridges
+      // into that domain and nothing is bridged (observed with bridge
+      // v1.10.2).
       const command = [
         "trap 'kill $(jobs -p)' INT TERM EXIT;",
-        `zenoh-bridge-ros2dds -c ${shellSingleQuote(configFiles[0].file)} &`,
-        `zenoh-bridge-ros2dds -c ${shellSingleQuote(configFiles[1].file)} &`,
+        `ROS_DOMAIN_ID=${fromPick.fromDomain} zenoh-bridge-ros2dds -c ${shellSingleQuote(configFiles[0].file)} &`,
+        `ROS_DOMAIN_ID=${toDomain} zenoh-bridge-ros2dds -c ${shellSingleQuote(configFiles[1].file)} &`,
         'wait'
       ].join(' ');
       await terminalManager.executeInNewTerminal(command, workspace, `Bridge: ${entityName}`);
