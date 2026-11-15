@@ -1,0 +1,41 @@
+import { parseRosEnvProbeOutput, defaultRmwForDistro, probeRosEnv } from '../../core/ros-env-probe';
+
+describe('ros env probe', () => {
+  it('parses RMW and domain lines', () => {
+    const r = parseRosEnvProbeOutput('RMW=rmw_zenoh_cpp\nDOMAIN=2\n');
+    expect(r).toEqual({ rmw: 'rmw_zenoh_cpp', domainId: 2 });
+  });
+  it('falls back to distro default RMW and domain 0 when unset', () => {
+    const r = parseRosEnvProbeOutput('RMW=\nDOMAIN=0\n');
+    expect(r).toEqual({ rmw: 'rmw_fastrtps_cpp', domainId: 0 });
+  });
+  it('normalizes case and whitespace', () => {
+    expect(parseRosEnvProbeOutput('RMW= RMW_CYCLONEDDS_CPP \nDOMAIN=1\n').rmw).toBe('rmw_cyclonedds_cpp');
+  });
+  it('defaultRmwForDistro returns Fast DDS for all known distros', () => {
+    for (const d of ['humble', 'iron', 'jazzy', 'kilted', 'lyrical', 'rolling']) {
+      expect(defaultRmwForDistro(d)).toBe('rmw_fastrtps_cpp');
+    }
+  });
+
+  it('sources distro setup and workspace overlay in the probe command', async () => {
+    const commands: string[] = [];
+    const probe = async (command: string) => {
+      commands.push(command);
+      return { output: 'RMW=rmw_cyclonedds_cpp\nDOMAIN=3\n', ok: true };
+    };
+    const r = await probeRosEnv(probe, { distro: 'jazzy', workspaceInstallPath: '/home/ws' });
+
+    expect(r).toEqual({ rmw: 'rmw_cyclonedds_cpp', domainId: 3 });
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toContain('source /opt/ros/jazzy/setup.bash');
+    expect(commands[0]).toContain('[ -f /home/ws/install/setup.bash ] && source');
+  });
+
+  it('returns defaults when the probe fails instead of throwing', async () => {
+    const probe = async () => ({ output: '', ok: false });
+    const r = await probeRosEnv(probe, { distro: 'kilted' });
+
+    expect(r).toEqual({ rmw: 'rmw_fastrtps_cpp', domainId: 0 });
+  });
+});
