@@ -454,13 +454,13 @@ export class LiveTopicItem extends TreeItemBase {
     const children: TreeItemBase[] = [
       new TopicMessageTypeItem(this.topicName, this.messageType)
     ];
-    
+
     const pubCount = this.publishers?.length || 0;
     const subCount = this.subscribers?.length || 0;
-    
-    children.push(new TopicPublishersItem(this.topicName, pubCount));
-    children.push(new TopicSubscribersItem(this.topicName, subCount));
-    
+
+    children.push(new TopicPublishersItem(this.topicName, pubCount, this.domainId));
+    children.push(new TopicSubscribersItem(this.topicName, subCount, this.domainId));
+
     return children;
   }
 }
@@ -481,18 +481,23 @@ export class TopicMessageTypeItem extends TreeItemBase {
 export class TopicPublishersItem extends TreeItemBase {
   constructor(
     private readonly topicName: string,
-    count: number
+    count: number,
+    private readonly domainId?: number
   ) {
     super(`Publishers (${count})`, vscode.TreeItemCollapsibleState.Collapsed);
     this.iconPath = new vscode.ThemeIcon('arrow-up', new vscode.ThemeColor('charts.green'));
     this.contextValue = 'topicPublishers';
     this.tooltip = new vscode.MarkdownString(`**Publishers on ${topicName}**\n\nCount: ${count}`);
   }
-  
+
   async getChildren(): Promise<TreeItemBase[]> {
     const cli = Ros2CliService.getInstance();
-    const publishers = await cli.getTopicPublishers(this.topicName);
-    
+    // Domain group items must list their endpoints in the group's domain,
+    // not in the global default (where the real publisher does not exist).
+    const publishers = this.domainId === undefined
+      ? await cli.getTopicPublishers(this.topicName)
+      : await cli.getTopicPublishersForDomain(this.topicName, this.domainId);
+
     return publishers.map(pub => new TopicEndpointItem({
       topicName: this.topicName,
       messageType: '',
@@ -505,18 +510,23 @@ export class TopicPublishersItem extends TreeItemBase {
 export class TopicSubscribersItem extends TreeItemBase {
   constructor(
     private readonly topicName: string,
-    count: number
+    count: number,
+    private readonly domainId?: number
   ) {
     super(`Subscribers (${count})`, vscode.TreeItemCollapsibleState.Collapsed);
     this.iconPath = new vscode.ThemeIcon('arrow-down', new vscode.ThemeColor('charts.blue'));
     this.contextValue = 'topicSubscribers';
     this.tooltip = new vscode.MarkdownString(`**Subscribers on ${topicName}**\n\nCount: ${count}`);
   }
-  
+
   async getChildren(): Promise<TreeItemBase[]> {
     const cli = Ros2CliService.getInstance();
-    const subscribers = await cli.getTopicSubscribers(this.topicName);
-    
+    // See TopicPublishersItem: domain group items list endpoints in their
+    // own domain.
+    const subscribers = this.domainId === undefined
+      ? await cli.getTopicSubscribers(this.topicName)
+      : await cli.getTopicSubscribersForDomain(this.topicName, this.domainId);
+
     return subscribers.map(sub => new TopicEndpointItem({
       topicName: this.topicName,
       messageType: '',

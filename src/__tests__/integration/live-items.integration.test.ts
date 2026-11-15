@@ -7,7 +7,11 @@ import {
   NodeParametersItem,
   LiveParameterItem,
   LiveViewDisabledItem,
-  NoEndpointsItem
+  NoEndpointsItem,
+  LiveTopicItem,
+  TopicPublishersItem,
+  TopicSubscribersItem,
+  TopicEndpointItem
 } from '../../treeview/live-items';
 import { Ros2CliService } from '../../core/ros2-cli-service';
 
@@ -205,6 +209,78 @@ describe('Live Items Integration Tests', () => {
         command: 'ramros.live.toggleEnabled',
         title: 'Enable Live View'
       });
+    });
+  });
+
+  describe('LiveTopicItem endpoint chain in a domain', () => {
+    it('publisher endpoints under a domain-group topic are fetched in that domain', async () => {
+      const cli = Ros2CliService.getInstance();
+      const domainSpy = jest.spyOn(cli, 'getTopicPublishersForDomain').mockResolvedValue([
+        { nodeName: 'tolles_paket', nodeNamespace: '/' }
+      ]);
+      const globalSpy = jest.spyOn(cli, 'getTopicPublishers').mockResolvedValue([]);
+
+      const item = new LiveTopicItem('/topic', {
+        messageType: 'std_msgs/msg/String',
+        publishers: ['tolles_paket'],
+        subscribers: []
+      }, 42);
+
+      const children = await item.getChildren();
+      const pubs = children.find(c => c instanceof TopicPublishersItem) as TopicPublishersItem;
+      const endpoints = await pubs.getChildren();
+
+      expect(domainSpy).toHaveBeenCalledWith('/topic', 42);
+      expect(globalSpy).not.toHaveBeenCalled();
+      expect(endpoints.some(e => e instanceof TopicEndpointItem && e.label === 'tolles_paket')).toBe(true);
+    });
+
+    it('subscriber endpoints under a domain-group topic are fetched in that domain', async () => {
+      const cli = Ros2CliService.getInstance();
+      const domainSpy = jest.spyOn(cli, 'getTopicSubscribersForDomain').mockResolvedValue([
+        { nodeName: 'listener42', nodeNamespace: '/' }
+      ]);
+      const globalSpy = jest.spyOn(cli, 'getTopicSubscribers').mockResolvedValue([]);
+
+      const item = new LiveTopicItem('/topic', {
+        messageType: 'std_msgs/msg/String',
+        publishers: [],
+        subscribers: ['listener42']
+      }, 42);
+
+      const children = await item.getChildren();
+      const subs = children.find(c => c instanceof TopicSubscribersItem) as TopicSubscribersItem;
+      const endpoints = await subs.getChildren();
+
+      expect(domainSpy).toHaveBeenCalledWith('/topic', 42);
+      expect(globalSpy).not.toHaveBeenCalled();
+      expect(endpoints.some(e => e instanceof TopicEndpointItem && e.label === 'listener42')).toBe(true);
+    });
+
+    it('flat topic items keep querying the global domain', async () => {
+      const cli = Ros2CliService.getInstance();
+      // Earlier tests in this file spy the same methods without restoring
+      // them; clear the call history so the assertions below see only this
+      // test's calls.
+      const globalSpy = jest.spyOn(cli, 'getTopicPublishers').mockResolvedValue([
+        { nodeName: 'flat_node', nodeNamespace: '/' }
+      ]);
+      globalSpy.mockClear();
+      const domainSpy = jest.spyOn(cli, 'getTopicPublishersForDomain').mockResolvedValue([]);
+      domainSpy.mockClear();
+
+      const item = new LiveTopicItem('/topic', {
+        messageType: 'std_msgs/msg/String',
+        publishers: ['flat_node'],
+        subscribers: []
+      });
+
+      const children = await item.getChildren();
+      const pubs = children.find(c => c instanceof TopicPublishersItem) as TopicPublishersItem;
+      await pubs.getChildren();
+
+      expect(globalSpy).toHaveBeenCalledWith('/topic');
+      expect(domainSpy).not.toHaveBeenCalled();
     });
   });
 });

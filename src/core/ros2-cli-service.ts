@@ -362,14 +362,30 @@ export class Ros2CliService {
     return this.parseTopicEndpoints(topicName, 'publishers');
   }
 
+  /**
+   * Publisher endpoint details in a specific domain, regardless of the
+   * global default set via setDomainId.
+   */
+  async getTopicPublishersForDomain(topicName: string, domainId: number): Promise<TopicEndpointDetail[]> {
+    return this.parseTopicEndpoints(topicName, 'publishers', domainId);
+  }
+
   async getTopicSubscribers(topicName: string): Promise<TopicEndpointDetail[]> {
     return this.parseTopicEndpoints(topicName, 'subscribers');
   }
 
-  private async parseTopicEndpoints(topicName: string, targetSection: 'publishers' | 'subscribers'): Promise<TopicEndpointDetail[]> {
+  /**
+   * Subscriber endpoint details in a specific domain. See
+   * getTopicPublishersForDomain.
+   */
+  async getTopicSubscribersForDomain(topicName: string, domainId: number): Promise<TopicEndpointDetail[]> {
+    return this.parseTopicEndpoints(topicName, 'subscribers', domainId);
+  }
+
+  private async parseTopicEndpoints(topicName: string, targetSection: 'publishers' | 'subscribers', domainId?: number): Promise<TopicEndpointDetail[]> {
     const endpoints: TopicEndpointDetail[] = [];
     try {
-      const { stdout } = await execAsync(`ros2 topic info ${topicName} --verbose`, this.execOptions(5000));
+      const { stdout } = await execAsync(`ros2 topic info ${topicName} --verbose`, this.execOptions(5000, domainId));
       const lines = stdout.split('\n');
       let section: 'none' | 'publishers' | 'subscribers' = 'none';
 

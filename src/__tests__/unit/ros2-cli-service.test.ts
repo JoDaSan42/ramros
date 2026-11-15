@@ -327,6 +327,25 @@ describe('Ros2CliService exec-backed methods', () => {
       expect(env.ROS_DOMAIN_ID).toBe('9');
     });
 
+    it('getTopicPublishersForDomain uses the given domain regardless of the global default', async () => {
+      cli.setDomainId(2);
+      mockStdout('Type: std_msgs/msg/String\nPublisher count: 1\nNode name: pub7\n');
+      const endpoints = await cli.getTopicPublishersForDomain('/chatter', 7);
+      const env = ((exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string> }).env;
+      expect(env.ROS_DOMAIN_ID).toBe('7');
+      expect(endpoints).toEqual([{ nodeName: 'pub7', nodeNamespace: '' }]);
+      cli.setDomainId(undefined);
+    });
+
+    it('getTopicSubscribersForDomain uses the given domain regardless of the global default', async () => {
+      cli.setDomainId(undefined);
+      mockStdout('Type: std_msgs/msg/String\nPublisher count: 0\nSubscription count: 1\nNode name: sub9\n');
+      const endpoints = await cli.getTopicSubscribersForDomain('/chatter', 9);
+      const env = ((exec as unknown as jest.Mock).mock.calls[0][1] as { env: Record<string, string> }).env;
+      expect(env.ROS_DOMAIN_ID).toBe('9');
+      expect(endpoints).toEqual([{ nodeName: 'sub9', nodeNamespace: '' }]);
+    });
+
     it('ForDomain info calls do not leak the override into later default calls', async () => {
       // The tick refreshes expanded items from several domains concurrently;
       // a save/mutate/restore on shared state would interleave and mislabel
