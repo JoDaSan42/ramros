@@ -9,16 +9,14 @@
 export interface DomainBridgeConfig {
   topic: string;
   type: string;
-  /** Source domain; undefined = bridge from the current environment. */
-  fromDomain?: number;
+  /** Source ROS domain; always written because domain_bridge rejects a missing from_domain. */
+  fromDomain: number;
   toDomain: number;
 }
 
 export function buildDomainBridgeConfigYaml(config: DomainBridgeConfig): string {
   const lines: string[] = ['topics:', `  '${config.topic}':`, `    type: ${config.type}`];
-  if (config.fromDomain !== undefined) {
-    lines.push(`    from_domain: ${config.fromDomain}`);
-  }
+  lines.push(`    from_domain: ${config.fromDomain}`);
   lines.push(`    to_domain: ${config.toDomain}`);
   return lines.join('\n') + '\n';
 }

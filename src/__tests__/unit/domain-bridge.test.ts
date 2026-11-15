@@ -21,15 +21,15 @@ describe('domain bridge config builder', () => {
     );
   });
 
-  it('omits from_domain when the source is the current environment', () => {
+  it('always writes from_domain (domain_bridge rejects a missing one)', () => {
     const yaml = buildDomainBridgeConfigYaml({
       topic: '/chatter',
       type: 'std_msgs/msg/String',
-      fromDomain: undefined,
+      fromDomain: 0,
       toDomain: 1
     });
 
-    expect(yaml).not.toContain('from_domain');
+    expect(yaml).toContain('from_domain: 0');
     expect(yaml).toContain('to_domain: 1');
   });
 });
