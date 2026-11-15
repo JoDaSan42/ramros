@@ -55,6 +55,7 @@ export class LiveNodeItem extends TreeItemBase {
   private publishedTopics?: string[];
   private subscribedTopics?: string[];
   private serviceServers?: ServiceServerInfo[];
+  private actionServers?: ServiceServerInfo[];
 
   constructor(
     private readonly nodeName: string,
@@ -62,6 +63,7 @@ export class LiveNodeItem extends TreeItemBase {
       publishedTopics?: string[];
       subscribedTopics?: string[];
       serviceServers?: ServiceServerInfo[];
+      actionServers?: ServiceServerInfo[];
     }
   ) {
     super(nodeName, vscode.TreeItemCollapsibleState.Collapsed);
@@ -70,6 +72,7 @@ export class LiveNodeItem extends TreeItemBase {
     this.publishedTopics = info?.publishedTopics;
     this.subscribedTopics = info?.subscribedTopics;
     this.serviceServers = info?.serviceServers;
+    this.actionServers = info?.actionServers;
     this.updateDisplay();
   }
 
@@ -81,10 +84,12 @@ export class LiveNodeItem extends TreeItemBase {
     publishedTopics?: string[];
     subscribedTopics?: string[];
     serviceServers?: ServiceServerInfo[];
+    actionServers?: ServiceServerInfo[];
   }): void {
     this.publishedTopics = info.publishedTopics;
     this.subscribedTopics = info.subscribedTopics;
     this.serviceServers = info.serviceServers;
+    this.actionServers = info.actionServers;
     this.updateDisplay();
   }
 
@@ -128,6 +133,10 @@ export class LiveNodeItem extends TreeItemBase {
       children.push(new NodeServicesItem(this.serviceServers));
     }
 
+    if (this.actionServers && this.actionServers.length > 0) {
+      children.push(new NodeActionsItem(this.actionServers));
+    }
+
     children.push(new NodeParametersItem(this.nodeName));
 
     if (children.length === 0) {
@@ -163,6 +172,39 @@ export class LiveServiceItem extends TreeItemBase {
   }
 
   getServiceType(): string | undefined {
+    return this.server.type;
+  }
+
+  async getChildren(): Promise<TreeItemBase[]> {
+    return [];
+  }
+}
+
+export class NodeActionsItem extends TreeItemBase {
+  constructor(private readonly actionServers: ServiceServerInfo[]) {
+    super(`Actions (${actionServers.length})`, vscode.TreeItemCollapsibleState.Collapsed);
+    this.iconPath = new vscode.ThemeIcon('action-script');
+    this.contextValue = 'nodeActions';
+  }
+
+  async getChildren(): Promise<TreeItemBase[]> {
+    return this.actionServers.map(server => new LiveActionItem(server));
+  }
+}
+
+export class LiveActionItem extends TreeItemBase {
+  constructor(private readonly server: ServiceServerInfo) {
+    super(server.name, vscode.TreeItemCollapsibleState.None);
+    this.iconPath = new vscode.ThemeIcon('action-script');
+    this.description = server.type ?? '';
+    this.contextValue = 'liveAction';
+  }
+
+  getActionName(): string {
+    return this.server.name;
+  }
+
+  getActionType(): string | undefined {
     return this.server.type;
   }
 

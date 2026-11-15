@@ -83,6 +83,20 @@ describe('parseNodeInfoOutput', () => {
     expect(result.subscribedTopics).toEqual([]);
     expect(result.serviceServers).toEqual([]);
   });
+
+  it('parses Action Servers sections with types', () => {
+    const out = [
+      '/talker',
+      'Subscribers:',
+      '    /chatter: std_msgs/msg/String',
+      'Action Servers:',
+      '    /fibonacci: example_interfaces/action/Fibonacci',
+      'Action Clients:',
+      ''
+    ].join('\n');
+    const r = parseNodeInfoOutput(out);
+    expect(r.actionServers).toEqual([{ name: '/fibonacci', type: 'example_interfaces/action/Fibonacci' }]);
+  });
 });
 
 describe('parseParameterList', () => {

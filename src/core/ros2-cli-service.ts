@@ -21,6 +21,7 @@ export interface NodeInfo {
   publishedTopics: string[];
   subscribedTopics: string[];
   serviceServers?: ServiceServerInfo[];
+  actionServers?: ServiceServerInfo[];
 }
 
 export interface TopicEndpointDetail {
@@ -32,16 +33,18 @@ export interface ParsedNodeInfoOutput {
   publishedTopics: string[];
   subscribedTopics: string[];
   serviceServers: ServiceServerInfo[];
+  actionServers: ServiceServerInfo[];
 }
 
 export function parseNodeInfoOutput(stdout: string): ParsedNodeInfoOutput {
   const publishedTopics: string[] = [];
   const subscribedTopics: string[] = [];
   const serviceServers: ServiceServerInfo[] = [];
+  const actionServers: ServiceServerInfo[] = [];
 
   const lines = stdout.split('\n');
 
-  let section: 'none' | 'subscribers' | 'publishers' | 'service-servers' = 'none';
+  let section: 'none' | 'subscribers' | 'publishers' | 'service-servers' | 'action-servers' = 'none';
 
   for (const line of lines) {
     const trimmedLine = line.trim();
@@ -55,7 +58,10 @@ export function parseNodeInfoOutput(stdout: string): ParsedNodeInfoOutput {
     } else if (trimmedLine === 'Service Servers:') {
       section = 'service-servers';
       continue;
-    } else if (trimmedLine === 'Service Clients:' || trimmedLine === 'Action Servers:' || trimmedLine === 'Action Clients:') {
+    } else if (trimmedLine === 'Action Servers:') {
+      section = 'action-servers';
+      continue;
+    } else if (trimmedLine === 'Service Clients:' || trimmedLine === 'Action Clients:') {
       section = 'none';
       continue;
     } else if (section !== 'none' && trimmedLine.startsWith('/')) {
@@ -71,11 +77,15 @@ export function parseNodeInfoOutput(stdout: string): ParsedNodeInfoOutput {
         const typeMatch = trimmedLine.match(/^[^:]*:\s*(.+)$/);
         const type = typeMatch ? typeMatch[1].trim() : undefined;
         serviceServers.push({ name, type: type || undefined });
+      } else if (section === 'action-servers') {
+        const typeMatch = trimmedLine.match(/^[^:]*:\s*(.+)$/);
+        const type = typeMatch ? typeMatch[1].trim() : undefined;
+        actionServers.push({ name, type: type || undefined });
       }
     }
   }
 
-  return { publishedTopics, subscribedTopics, serviceServers };
+  return { publishedTopics, subscribedTopics, serviceServers, actionServers };
 }
 
 export function parseParameterList(stdout: string, nodeName: string): string[] {
@@ -381,6 +391,7 @@ export class Ros2CliService {
         publishedTopics: parsed.publishedTopics,
         subscribedTopics: parsed.subscribedTopics,
         serviceServers: parsed.serviceServers,
+        actionServers: parsed.actionServers,
       };
     } catch (error) {
       console.error(`Failed to get info for node ${nodeName}`, error);

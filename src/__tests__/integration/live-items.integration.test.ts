@@ -2,6 +2,8 @@ import {
   LiveNodeItem,
   NodeServicesItem,
   LiveServiceItem,
+  NodeActionsItem,
+  LiveActionItem,
   NodeParametersItem,
   LiveParameterItem,
   LiveViewDisabledItem,
@@ -39,6 +41,16 @@ describe('Live Items Integration Tests', () => {
 
       expect(children.some(c => c instanceof NodeServicesItem)).toBe(false);
       expect(children.some(c => c instanceof NodeParametersItem)).toBe(true);
+    });
+
+    it('NodeActionsItem renders children as liveAction items with type description', async () => {
+      const folder = new NodeActionsItem([{ name: '/fibonacci', type: 'example_interfaces/action/Fibonacci' }, { name: '/notype' }]);
+      expect(folder.contextValue).toBe('nodeActions');
+      const kids = await folder.getChildren() as LiveActionItem[];
+      expect(kids).toHaveLength(2);
+      expect(kids[0].contextValue).toBe('liveAction');
+      expect(kids[0].description).toBe('example_interfaces/action/Fibonacci');
+      expect(kids[1].description).toBe('');
     });
   });
 
