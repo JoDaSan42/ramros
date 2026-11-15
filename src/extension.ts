@@ -704,17 +704,8 @@ async function runBridgeFlow(
     }
   }
 
-  // domain_bridge needs the topic type for its YAML; zenoh's ros2dds plugin
-  // discovers the type itself.
-  let resolvedType = messageType;
-  if (strategy.kind === 'domainBridge' && !resolvedType) {
-    resolvedType = await cli.getTopicType(entityName) ?? undefined;
-    if (!resolvedType) {
-      void vscode.window.showWarningMessage(`Could not resolve the type of ${entityName}. Is a node publishing on it?`);
-      return;
-    }
-  }
-
+  // The zenoh strategy discovers the type itself; domainBridge resolves it
+  // in its start branch below.
   const fromPick = await vscode.window.showQuickPick([
     { label: 'Current environment (no override)', fromDomain: probe.domainId },
     ...liveTreeProvider.getDomainGroups().map(id => ({ label: `Domain ${id}`, fromDomain: id }))
@@ -740,15 +731,26 @@ async function runBridgeFlow(
   }
 
   if (strategy.kind === 'domainBridge') {
+    // domain_bridge needs the topic type for its YAML; zenoh's ros2dds
+    // plugin discovers the type itself.
+    let resolvedType = messageType;
+    if (!resolvedType) {
+      resolvedType = await cli.getTopicType(entityName) ?? undefined;
+      if (!resolvedType) {
+        void vscode.window.showWarningMessage(`Could not resolve the type of ${entityName}. Is a node publishing on it?`);
+        return;
+      }
+    }
     // Write the bridge config to a temp file and start domain_bridge in a
     // dedicated terminal so the user can stop it with Ctrl+C.
     const configYaml = buildDomainBridgeConfigYaml({
       topic: entityName,
-      type: resolvedType as string,
+      type: resolvedType,
       fromDomain: fromPick.fromDomain,
       toDomain
     });
     const configFile = path.join(os.tmpdir(), `ramros-bridge-${Date.now()}.yaml`);
+    let handedOff = false;
     try {
       fs.writeFileSync(configFile, configYaml, 'utf8');
       await terminalManager.executeInNewTerminal(
@@ -756,10 +758,14 @@ async function runBridgeFlow(
         workspace,
         `Bridge: ${entityName}`
       );
+      // sendText only queues keystrokes — the terminal's shell has not run
+      // the command yet, so the file must stay on disk until domain_bridge
+      // reads it. Clean up only when the hand-off itself failed.
+      handedOff = true;
     } finally {
-      // Once the terminal has the command the file has served its purpose;
-      // domain_bridge reads it once at startup.
-      fs.rmSync(configFile, { force: true });
+      if (!handedOff) {
+        fs.rmSync(configFile, { force: true });
+      }
     }
     void vscode.window.showInformationMessage(
       `Bridging ${entityName} to domain ${toDomain}. Stop the bridge with Ctrl+C in its terminal.`
@@ -781,6 +787,7 @@ async function runBridgeFlow(
       { file: path.join(os.tmpdir(), `ramros-bridge-a-${timestamp}.json5`), content: configA },
       { file: path.join(os.tmpdir(), `ramros-bridge-b-${timestamp}.json5`), content: configB }
     ];
+    let handedOff = false;
     try {
       for (const { file, content } of configFiles) {
         fs.writeFileSync(file, content, 'utf8');
@@ -794,13 +801,15 @@ async function runBridgeFlow(
         'wait'
       ].join(' ');
       await terminalManager.executeInNewTerminal(command, workspace, `Bridge: ${entityName}`);
+      // sendText only queues keystrokes — the terminal's shell has not run
+      // the command yet, so the files must stay on disk until each bridge
+      // reads its config. Clean up only when the hand-off itself failed.
+      handedOff = true;
     } finally {
-      // Both JSON5 files are removed on every exit path: once the terminal
-      // has the command (or if anything failed before it), the configs have
-      // served their purpose — zenoh-bridge-ros2dds reads them once at
-      // startup.
-      for (const { file } of configFiles) {
-        fs.rmSync(file, { force: true });
+      if (!handedOff) {
+        for (const { file } of configFiles) {
+          fs.rmSync(file, { force: true });
+        }
       }
     }
     void vscode.window.showInformationMessage(
@@ -1963,11 +1972,9 @@ export async function activate(context: vscode.ExtensionContext) {
       const topicName = resolveTopicName(treeItem) ?? await pickTopic();
       if (!topicName) return;
 
-      await runBridgeFlow(
-        'topic',
-        topicName,
-        resolveTopicMessageType(treeItem) ?? await Ros2CliService.getInstance().getTopicType(topicName) ?? undefined
-      );
+      // The type is resolved lazily inside the flow — only the domainBridge
+      // strategy needs it, so the zenoh path pays no extra CLI round trip.
+      await runBridgeFlow('topic', topicName, resolveTopicMessageType(treeItem));
     }),
 
     vscode.commands.registerCommand('ramros.live.bridgeService', async (treeItem?: TreeItemBase | TreeItemBase[]) => {

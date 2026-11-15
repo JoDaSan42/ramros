@@ -233,13 +233,32 @@ describe('extension command registration', () => {
       .mockResolvedValueOnce({ label: 'Current environment (no override)', fromDomain: 0 })
       .mockResolvedValueOnce({ label: '2', toDomain: 2 });
 
-    const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
-      ([id]) => id === 'ramros.live.bridgeTopic'
-    )?.[1];
-    expect(handler).toBeDefined();
+    // Capture the generated YAML so the from_domain fix is locked end-to-end
+    // (the 'current environment' pick must surface as from_domain: 0).
+    // jest.spyOn cannot redefine fs.writeFileSync, and the ES import binding
+    // is a getter-only copy — swap the property on the underlying CommonJS
+    // module object (which both bindings read through) and restore it.
+    const writtenFiles = new Map<string, string>();
+    const fsModule = require('fs') as {
+      writeFileSync: (file: fs.PathOrFileDescriptor, data: string | Uint8Array) => void;
+    };
+    const realWriteFileSync = fsModule.writeFileSync;
+    fsModule.writeFileSync = (file, data) => {
+      if (String(file).includes('ramros-bridge-')) {
+        writtenFiles.set(String(file), String(data));
+      }
+    };
+    try {
+      const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+        ([id]) => id === 'ramros.live.bridgeTopic'
+      )?.[1];
+      expect(handler).toBeDefined();
 
-    const item = new LiveTopicItem('/chatter');
-    await handler(item);
+      const item = new LiveTopicItem('/chatter');
+      await handler(item);
+    } finally {
+      fsModule.writeFileSync = realWriteFileSync;
+    }
 
     const terminalMock = vscode.window.createTerminal as jest.Mock;
     const terminalOptions = terminalMock.mock.calls[terminalMock.mock.calls.length - 1][0];
@@ -247,6 +266,13 @@ describe('extension command registration', () => {
     const sent = terminalOptions.name && (terminalMock.mock.results[terminalMock.mock.results.length - 1].value.sendText as jest.Mock).mock.calls[0][0] as string;
     expect(sent).toContain('ros2 run domain_bridge domain_bridge');
     expect(sent).toMatch(/bridge-.*\.yaml/);
+
+    const [configFile, configYaml] = [...writtenFiles.entries()][0] ?? ['', ''];
+    expect(configFile).toMatch(/bridge-.*\.yaml$/);
+    expect(configYaml).toContain(`'` + '/chatter' + `'`);
+    expect(configYaml).toContain('type: std_msgs/msg/String');
+    expect(configYaml).toContain('from_domain: 0');
+    expect(configYaml).toContain('to_domain: 2');
   });
 
   it('bridgeTopic shows the domain_bridge install guide when the package is missing', async () => {
