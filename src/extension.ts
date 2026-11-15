@@ -707,7 +707,7 @@ async function runBridgeFlow(
   // The zenoh strategy discovers the type itself; domainBridge resolves it
   // in its start branch below.
   const fromPick = await vscode.window.showQuickPick([
-    { label: 'Current environment (no override)', fromDomain: probe.domainId },
+    { label: `Current environment (domain ${probe.domainId})`, fromDomain: probe.domainId },
     ...liveTreeProvider.getDomainGroups().map(id => ({ label: `Domain ${id}`, fromDomain: id }))
   ], { placeHolder: 'Bridge from which domain?' });
   if (!fromPick) return;
@@ -792,10 +792,13 @@ async function runBridgeFlow(
       for (const { file, content } of configFiles) {
         fs.writeFileSync(file, content, 'utf8');
       }
-      // kill 0 signals the whole process group, so Ctrl+C stops both
-      // bridge instances; `wait` keeps the terminal open while they run.
+      // VS Code terminals run interactive bash with job control: each `&`
+      // job gets its own process group, so Ctrl+C only reaches the shell in
+      // `wait` — `kill 0` would signal the shell's own group and leave the
+      // bridges running. `kill $(jobs -p)` targets the background jobs
+      // directly and stops both bridge instances.
       const command = [
-        "trap 'kill 0' EXIT;",
+        "trap 'kill $(jobs -p)' INT TERM EXIT;",
         `zenoh-bridge-ros2dds -c ${shellSingleQuote(configFiles[0].file)} &`,
         `zenoh-bridge-ros2dds -c ${shellSingleQuote(configFiles[1].file)} &`,
         'wait'

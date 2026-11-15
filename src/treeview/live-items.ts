@@ -183,7 +183,7 @@ export class LiveServiceItem extends TreeItemBase {
 export class NodeActionsItem extends TreeItemBase {
   constructor(private readonly actionServers: ServiceServerInfo[]) {
     super(`Actions (${actionServers.length})`, vscode.TreeItemCollapsibleState.Collapsed);
-    this.iconPath = new vscode.ThemeIcon('action-script');
+    this.iconPath = new vscode.ThemeIcon('play-circle');
     this.contextValue = 'nodeActions';
   }
 
@@ -195,7 +195,7 @@ export class NodeActionsItem extends TreeItemBase {
 export class LiveActionItem extends TreeItemBase {
   constructor(private readonly server: ServiceServerInfo) {
     super(server.name, vscode.TreeItemCollapsibleState.None);
-    this.iconPath = new vscode.ThemeIcon('action-script');
+    this.iconPath = new vscode.ThemeIcon('play');
     this.description = server.type ?? '';
     this.contextValue = 'liveAction';
   }

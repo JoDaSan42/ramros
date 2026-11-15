@@ -246,6 +246,8 @@ describe('extension command registration', () => {
     fsModule.writeFileSync = (file, data) => {
       if (String(file).includes('ramros-bridge-')) {
         writtenFiles.set(String(file), String(data));
+      } else {
+        realWriteFileSync(file, data);
       }
     };
     try {
@@ -334,7 +336,7 @@ describe('extension command registration', () => {
     const terminalOptions = terminalMock.mock.calls[0][0];
     expect(terminalOptions.name).toBe('Bridge: /chatter');
     const sent = (terminalMock.mock.results[0].value.sendText as jest.Mock).mock.calls[0][0] as string;
-    expect(sent).toContain("trap 'kill 0' EXIT;");
+    expect(sent).toContain("trap 'kill $(jobs -p)' INT TERM EXIT;");
     expect(sent).toMatch(/zenoh-bridge-ros2dds -c '[^']*ramros-bridge-a-\d+\.json5' &/);
     expect(sent).toMatch(/zenoh-bridge-ros2dds -c '[^']*ramros-bridge-b-\d+\.json5' &/);
     expect(sent.trim().endsWith('wait')).toBe(true);

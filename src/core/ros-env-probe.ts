@@ -32,10 +32,10 @@ export function defaultRmwForDistro(distro: string): string {
  */
 function buildProbeCommand(options: { distro: string; workspaceInstallPath?: string }): string {
   const distroSetup = `/opt/ros/${options.distro}/setup.bash`;
-  let command = `[ -f ${distroSetup} ] && source ${distroSetup};`;
+  let command = `[ -f "${distroSetup}" ] && source "${distroSetup}";`;
   if (options.workspaceInstallPath) {
     const overlaySetup = `${options.workspaceInstallPath}/install/setup.bash`;
-    command += ` [ -f ${overlaySetup} ] && source ${overlaySetup};`;
+    command += ` [ -f "${overlaySetup}" ] && source "${overlaySetup}";`;
   }
   command += ' echo "RMW=${RMW_IMPLEMENTATION:-}"; echo "DOMAIN=${ROS_DOMAIN_ID:-0}"';
   return command;

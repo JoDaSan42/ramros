@@ -36,8 +36,20 @@ describe('ros env probe', () => {
 
     expect(r).toEqual({ rmw: 'rmw_cyclonedds_cpp', domainId: 3 });
     expect(commands).toHaveLength(1);
-    expect(commands[0]).toContain('source /opt/ros/jazzy/setup.bash');
-    expect(commands[0]).toContain('[ -f /home/ws/install/setup.bash ] && source');
+    expect(commands[0]).toContain('source "/opt/ros/jazzy/setup.bash"');
+    expect(commands[0]).toContain('[ -f "/home/ws/install/setup.bash" ] && source');
+  });
+
+  it('quotes setup paths so workspaces with spaces in the path survive', async () => {
+    const commands: string[] = [];
+    const probe = async (command: string) => {
+      commands.push(command);
+      return { output: 'RMW=rmw_fastrtps_cpp\nDOMAIN=0\n', ok: true };
+    };
+    await probeRosEnv(probe, { distro: 'jazzy', workspaceInstallPath: '/home/user/my ws' });
+
+    expect(commands[0]).toContain('source "/home/user/my ws/install/setup.bash"');
+    expect(commands[0]).not.toContain('source /home/user/my ws/');
   });
 
   it('returns defaults when the probe fails (ok:false) instead of throwing', async () => {

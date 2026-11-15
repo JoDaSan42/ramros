@@ -7,15 +7,16 @@
  *
  * Bridge A listens on the peer port and runs in the source domain; bridge B
  * connects to that endpoint and runs in the target domain. Each side
- * allow-lists exactly the bridged entity (zenoh-plugin-ros2dds name syntax:
- * leading `/` stripped and prefixed with `./`), so nothing else leaks across.
+ * allow-lists exactly the bridged entity (allow entries are regexes matched
+ * against the full ROS name including the leading slash), so nothing else
+ * leaks across.
  *
  * The output is JSON5 (unquoted keys are valid) and is written to a temp file
  * by the caller, then passed to `zenoh-bridge-ros2dds -c <path>`.
  *
  * Pure module: no vscode import.
  */
-import * as net from 'node:net';
+import * as net from 'net';
 
 export type ZenohEntityKind = 'topic' | 'service' | 'action';
 
@@ -27,11 +28,16 @@ const ALLOW_KEYS: Record<ZenohEntityKind, [string, string]> = {
 };
 
 /**
- * Converts a ROS name with leading slash (e.g. `/chatter`) to the
- * zenoh-plugin-ros2dds config name syntax (e.g. `./chatter`).
+ * Escapes a ROS name for use inside a zenoh-plugin-ros2dds allow-list entry.
+ * Allow/deny entries are REGULAR EXPRESSIONS matched against the FULL ROS
+ * interface name including the leading slash (upstream DEFAULT_CONFIG.json5
+ * allow-lists e.g. the `/laser_scan` topic with a wildcard regex), so an
+ * exact entity is allow-listed as an anchored regex. ROS names only contain
+ * `[A-Za-z0-9_/]`, but regex metacharacters are escaped defensively in case
+ * of manual input.
  */
-function toZenohName(entityName: string): string {
-  return `./${entityName.replace(/^\//, '')}`;
+function toAllowListPattern(entityName: string): string {
+  return `^${entityName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`;
 }
 
 /**
@@ -45,7 +51,7 @@ export function buildZenohBridgeConfigs(input: {
   toDomain: number;
   peerPort: number;
 }): { configA: string; configB: string } {
-  const name = toZenohName(input.entityName);
+  const name = toAllowListPattern(input.entityName);
   const [keyA, keyB] = ALLOW_KEYS[input.entityKind];
   const endpoint = `tcp/127.0.0.1:${input.peerPort}`;
   const build = (domain: number, mode: 'listen' | 'connect'): string => {

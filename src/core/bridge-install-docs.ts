@@ -110,6 +110,25 @@ export function domainBridgeInstallGuide(distro: string): string {
 }
 
 /**
+ * Human-readable middleware name for the RMW ids that appear in the
+ * services/actions guide. Unknown ids fall back to the raw id so the guide
+ * never states a wrong vendor name.
+ */
+function rmwDisplayName(rmw: string): string {
+  switch (rmw) {
+    case 'rmw_fastrtps_cpp':
+    case 'rmw_fastrtps_dynamic_cpp':
+      return 'Fast DDS';
+    case 'rmw_cyclonedds_cpp':
+      return 'CycloneDDS';
+    case 'rmw_connextdds':
+      return 'RTI Connext DDS';
+    default:
+      return rmw;
+  }
+}
+
+/**
  * Guide shown when the entity is a service or action and the RMW is not
  * CycloneDDS (e.g. Fast DDS). Explains the upstream limitation and the two
  * ways out: switch the RMW, or build domain_bridge PR #82 from source.
@@ -130,7 +149,7 @@ export function servicesActionsGuide(input: {
     '',
     '- `zenoh-bridge-ros2dds` can only relay services and actions when both sides run **CycloneDDS**',
     '  (upstream: [zenoh-plugin-ros2dds#492](https://github.com/eclipse-zenoh/zenoh-plugin-ros2dds/issues/492)).',
-    `  With **Fast DDS** (\`${input.rmw}\`) the bridge cannot create service/action routes.`,
+    `  With **${rmwDisplayName(input.rmw)}** (\`${input.rmw}\`) the bridge cannot create service/action routes.`,
     '- **domain_bridge cannot bridge services or actions**: its YAML parser silently ignores `services:` and',
     '  `actions:` sections (ros2/domain_bridge#10, #11, #54; [PR #82](https://github.com/ros2/domain_bridge/pull/82) adding support was never merged).',
     '',

@@ -22,6 +22,11 @@ describe('bridge install guides', () => {
     expect(md).toContain('https://github.com/ros2/domain_bridge/pull/82');
     expect(md).toContain('domain_bridge cannot bridge services or actions');
   });
+  it('services/actions guide uses the raw rmw id for unknown middleware instead of a wrong vendor name', () => {
+    const md = servicesActionsGuide({ distro: 'jazzy', rmw: 'rmw_example_vendor', entityKind: 'service', entityName: '/add_two_ints' });
+    expect(md).toContain('`rmw_example_vendor`');
+    expect(md).not.toContain('Fast DDS');
+  });
   it('zenoh-native guide explains that no DDS domain exists to bridge', () => {
     const md = zenohNativeGuide({ entityKind: 'action', entityName: '/fib' });
     expect(md).toContain('rmw_zenoh_cpp');
